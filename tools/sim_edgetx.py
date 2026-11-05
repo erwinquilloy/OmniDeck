@@ -80,11 +80,39 @@ def set_color(i, c): DRAWS['setcolor'] += 1; colors[int(i)] = int(c)
 def size_text(t, flags=0):
     f = font_of(flags); b = f.getbbox(str(t))
     return b[2] - b[0], f.size + 2
+# OpenTX: text as the radio draws it, Roboto at OpenTX's sizes (radio/src/fonts/480x272/
+# CMakeLists.txt) with each glyph advanced by OpenTX's own widths, read from the W_* tables in
+# etx.lua so the simulator and the widget measure alike. The fonts are OpenTX's copies of
+# Roboto (Apache 2.0) in tools/otxfonts/; without them the PC font is used.
+OTX_TEXT = None
+if OTX:
+    import re
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _fd = os.path.join(_here, 'otxfonts')
+    _src = open(os.path.join(_here, '..', 'edgetx', 'WIDGETS', 'OmniDeck', 'etx.lua'), encoding='utf-8').read()
+    _wt = {m.group(1): [int(v) for v in m.group(2).split(',')] for m in re.finditer(r'local W_(\w+) = \{ ([^}]*) \}', _src)}
+    if len(_wt) == 6 and os.path.isfile(os.path.join(_fd, 'Roboto-Regular.ttf')):
+        _reg, _bold = os.path.join(_fd, 'Roboto-Regular.ttf'), os.path.join(_fd, 'Roboto-Bold.ttf')
+        OTX_TEXT = {k: (ImageFont.truetype(f, px), _wt[n]) for k, (f, px, n) in {
+            0x600: (_reg, 9, 'TIN'), 0x200: (_reg, 13, 'SML'), 0: (_reg, 16, 'STD'),
+            0x300: (_reg, 24, 'MID'), 0x400: (_bold, 32, 'DBL'), 0x500: (_bold, 64, 'XXL')}.items()}
 def draw_text(x, y, t, flags=0):
     DRAWS['text'] += 1
     TEXTS.append(str(t))
-    w, h = size_text(t, flags)
     flags = int(flags or 0)
+    if OTX_TEXT:
+        fnt, wt = OTX_TEXT.get(flags & 0xF00, OTX_TEXT[0])
+        t = str(t)
+        adv = [wt[ord(c) - 32] if 32 <= ord(c) < 127 else wt[16] for c in t]
+        w = sum(adv)
+        if flags & 0x10000: x = x - w / 2
+        elif flags & 0x20000: x = x - w
+        cv.check('text ' + t, x, y, x + w, y + fnt.size)
+        for c, a in zip(t, adv):
+            cv.d.text((x, y), c, fill=col(), font=fnt)
+            x += a
+        return
+    w, h = size_text(t, flags)
     if flags & 0x10000: x = x - w / 2          # CENTER
     elif flags & 0x20000: x = x - w            # RIGHT
     cv.check('text ' + str(t), x, y, x + w, y + h)
@@ -177,11 +205,14 @@ bitmaps = {}
 def bitmap_open(p):
     fp = sd_path(p)
     if not os.path.isfile(fp): return None
-    img = Image.open(fp).convert('RGB'); bitmaps[id(img)] = img
+    img = Image.open(fp)
+    img = img.convert('RGBA') if img.mode in ('RGBA', 'LA', 'P') else img.convert('RGB')   # keep transparency
+    bitmaps[id(img)] = img
     return L.table_from({'_id': id(img)})
 def draw_bitmap(bmp, x, y, scale=100):
     img = bitmaps[bmp['_id']]
-    cv.img.paste(img, (int(x), int(y)))      # EdgeTX can't clip bitmaps: overhang is allowed here
+    # EdgeTX can't clip bitmaps: overhang is allowed here; a transparent PNG is drawn through its alpha
+    cv.img.paste(img, (int(x), int(y)), img if img.mode == 'RGBA' else None)
 
 L = lua52.LuaRuntime(unpack_returned_tuples=True)
 G = L.globals()
@@ -453,6 +484,15 @@ if OTX_PANELS:
         img.save(out, optimize=True)
         print('wrote', out, img.size)
     wd.spdUnit = 0
+    # the HUD's fixed layer (hud.lua H.drawFixed) on a transparent background, drawn over the
+    # horizon each update as Yaapu draws its hud.png; the canvas magenta is the transparency
+    cv = Canvas(W, H)
+    hx, hy, hw, hh = UIm.exportHud(wd, W, H)
+    img = cv.img.crop((int(hx), int(hy), int(hx + hw), int(hy + hh))).convert('RGBA')
+    img.putdata([(0, 0, 0, 0) if p[:3] == (255, 0, 255) else p for p in img.getdata()])
+    out = os.path.join(pdir, 'hud_%dx%d.png' % (int(hw), int(hh)))
+    img.save(out, optimize=True)
+    print('wrote', out, img.size, 'opaque px', sum(1 for p in img.getdata() if p[3]))
     sys.exit(0)
 S = UIm.T.s
 print('decoded: fc %s link %s mode %s armed %s alt %s gspd %s aspd %s volt %s sats %s lq %s rssi %s' % (
@@ -510,9 +550,14 @@ if OTX:
         la, lo = project(HOME[0], HOME[1], 150 + 25 * i, (i * 37) % 360)
         lines.append(TAB.join([str(i), '0', '3', '16', '0', '0', '0', '0', '%.7f' % la, '%.7f' % lo, '100', '1']))
     open(sd_path('/WIDGETS/OmniDeck/missions/big.waypoints'), 'w').write(NL.join(lines) + NL)
+    # OpenTX draws no missions (ui.lua): the file is offered and must not show; these two runs
+    # are the waypoint flight (active WP, 0x500D) with telemetry at 3x the normal rate
     UIm.MI.loadFile('big.waypoints')
-    rep['main + 120 WP mission'] = otx_page(1, mission=True)
-    rep['map + 120 WP mission'] = otx_page(2, mission=True)
+    _m = UIm.MI.current()
+    assert (_m[0] if isinstance(_m, tuple) else _m) is None, 'OpenTX: no mission'
+    assert UIm.MSPC.state() == 'off', 'OpenTX: no INAV mission download'
+    rep['main, WP flight, 3x feed'] = otx_page(1, mission=True)
+    rep['map, WP flight, 3x feed'] = otx_page(2, mission=True)
     st['armed'] = False
     step(0.2, 12)
     rep['flight summary'] = otx_page(4) if wd.page == 4 else None

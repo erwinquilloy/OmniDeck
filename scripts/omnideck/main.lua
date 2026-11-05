@@ -131,7 +131,7 @@ local SETTINGS = {
   { "linkMode", "n", T.LINK_AUTO }, { "orient", "n", 0 }, { "zoomMode", "n", 0 },
   { "zoomSource", "src" }, { "spdUnit", "n", 0 }, { "altUnit", "n", 0 }, { "trail", "n", 1 },
   { "startPage", "n", 1 }, { "level", "n", 4 }, { "tileSet", "s", "" }, { "missionFile", "s", "" },
-  { "tz", "n", 0 }, { "inavWp", "n", 1 }, { "sumAuto", "n", 1 }, { "voice", "s", "" },
+  { "tz", "n", 0 }, { "inavWp", "n", 0 }, { "sumAuto", "n", 1 }, { "voice", "s", "" },
   { "batCap", "n", 0 }, { "effUnit", "n", 0 }, { "beep", "n", 1 },
   -- added in 0.2.0-test6: at the end, so settings saved before still read back in place
   { "lowVolt", "n", 0 }, { "cells", "n", 0 }, { "lowAlt", "n", 0 }, { "critVolt", "n", 0 },

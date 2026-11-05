@@ -13,6 +13,15 @@
       is set to in the model
     - timing comes from getTime() (10 ms ticks)
   Lua 5.2: no integer division or bitwise operators.
+
+  OpenTX 2.3 (Horus X10/X12S, TX16S on OpenTX) runs the same files with less:
+  half the instructions per call (10,000), no filled triangles or circles, no
+  text measuring and no folder listing. The block at the end of the lcd section
+  replaces those drawing calls on OpenTX only (EdgeTX keeps the code above as
+  it is, every instruction counts there): shapes are filled with thin
+  rectangles, as Yaapu does on OpenTX, and text widths are estimated per font.
+  Tile sets are found by looking for tile files (tiles.lua). E.OD_OTX tells the
+  shared code it is on OpenTX.
 ]]
 
 local ROOT = "/WIDGETS/OmniDeck/"
@@ -27,6 +36,14 @@ E.OD_MAX_CRSF = 3         -- CRSF frames read per screen update (main.lua lowers
 E.OD_MAX_SPORT = 10       -- S.Port frames per update: one value each, so cheap but frequent
 E.OD_MAX_WPS = 20         -- waypoints drawn on the map, from just before the active one
 
+-- OpenTX 2.3 has no lcd.sizeText (EdgeTX always has it)
+local OTX = lcd.sizeText == nil
+E.OD_OTX = OTX
+if OTX then
+  E.OD_TRAIL_SEGS = 8       -- the map page draws twice this many
+  -- no OD_MAX_WPS: OpenTX draws no missions (ui.lua)
+end
+
 -- OD_DEBUGLOAD (set by SYS > Tools > OmniDeck Check): load from the .lua text ("T"), so an
 -- error names its file and line; the radio's own compiled .luac copies carry no names.
 -- A file that does not load stops here with its name, not later as a bare nil.
@@ -40,8 +57,12 @@ function E.loadfile(name)
 end
 
 -- ---------------------------------------------------------------- time
+-- read once per screen update (E.tick): the shared code asks for the time dozens of times per
+-- update, and a getTime() call plus the arithmetic each time added up on OpenTX's budget
 local clockBase = getTime()
-E.os = setmetatable({ clock = function() return (getTime() - clockBase) / 100 end }, { __index = os })
+local clockNow = 0
+local tickN = 0   -- screen updates (E.tick), so per-update work is done once
+E.os = setmetatable({ clock = function() return clockNow end }, { __index = os })
 
 -- ---------------------------------------------------------------- io: Ethos-style file:read()
 local rawio = io
@@ -302,7 +323,166 @@ function L.drawFilledCircle(x, y, r)
   if x - r >= cx1 and x + r < cx2 and y - r >= cy1 and y + r < cy2 then if col ~= sent then rawSetColor(CUSTOM, col) sent = col end rawFCircle(x, y, r, CUSTOM) end
 end
 
+-- ---------------------------------------------------------------- OpenTX replacements
+local rawio0 = io
+local function fileExists(path)
+  local f = rawio0.open(path, "r")
+  if f == nil then return false end
+  rawio0.close(f)
+  return true
+end
+
 function L.loadBitmap(path) return Bitmap.open(path) end
+
+if OTX then
+  local floor, ceil, sqrt = math.floor, math.ceil, math.sqrt
+  -- text width: OpenTX has no lcd.sizeText, so text is measured from OpenTX's own glyph widths.
+  -- The old estimate (an average glyph per font) was 15-35 % short, and texts placed one after
+  -- another ran into each other.
+  -- OpenTX 2.3 glyph widths, ASCII 32..126, from its own font tables (radio/src/fonts/480x272/
+  -- font_*.specs, Roboto Regular 9/13/16/24 px, Bold 32/64 px); text is measured from these
+  local W_TIN = { 4, 3, 4, 7, 6, 8, 7, 3, 4, 4, 5, 6, 3, 4, 3, 5, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 3, 3, 6, 6, 6, 5, 6, 7, 7, 7, 7, 6, 6, 7, 7, 3, 6, 7, 6, 9, 7, 7, 7, 7, 7, 6, 7, 7, 7, 9, 7, 7, 7, 4, 5, 3, 5, 6, 4, 6, 6, 6, 6, 6, 5, 6, 6, 3, 4, 6, 3, 9, 6, 6, 6, 6, 4, 6, 4, 6, 6, 8, 6, 6, 6, 6, 3, 6, 7 }
+  local W_SML = { 4, 4, 5, 9, 8, 11, 10, 3, 6, 6, 7, 8, 4, 5, 4, 6, 8, 8, 8, 8, 9, 8, 8, 8, 8, 8, 4, 4, 8, 8, 8, 7, 8, 10, 9, 9, 10, 8, 8, 10, 10, 5, 8, 10, 8, 12, 10, 10, 9, 10, 9, 9, 9, 9, 10, 13, 9, 9, 9, 5, 7, 4, 6, 7, 5, 8, 8, 8, 8, 8, 6, 8, 8, 4, 5, 8, 4, 12, 8, 8, 8, 8, 6, 8, 5, 8, 8, 11, 8, 7, 8, 8, 4, 8, 10 }
+  local W_STD = { 4, 5, 6, 11, 10, 13, 11, 4, 7, 7, 8, 10, 4, 6, 5, 8, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 5, 4, 9, 10, 9, 9, 10, 12, 11, 11, 12, 10, 10, 12, 12, 5, 10, 12, 10, 15, 12, 12, 11, 12, 11, 11, 11, 11, 11, 15, 11, 11, 11, 6, 8, 5, 8, 9, 6, 10, 10, 9, 10, 9, 7, 10, 10, 5, 6, 10, 5, 15, 10, 10, 10, 10, 7, 9, 6, 10, 9, 13, 9, 9, 9, 10, 5, 10, 12 }
+  local W_MID = { 4, 7, 9, 16, 14, 19, 16, 5, 9, 9, 11, 15, 6, 8, 7, 11, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 7, 6, 13, 14, 14, 12, 14, 17, 16, 17, 17, 15, 14, 17, 18, 8, 14, 17, 14, 22, 18, 18, 16, 18, 16, 15, 15, 17, 16, 22, 16, 16, 15, 8, 11, 7, 11, 12, 8, 14, 14, 14, 15, 14, 10, 14, 14, 7, 8, 14, 7, 22, 14, 15, 14, 15, 9, 13, 9, 14, 13, 19, 13, 13, 13, 14, 7, 14, 17 }
+  local W_DBL = { 4, 10, 11, 20, 19, 25, 22, 6, 12, 12, 16, 18, 9, 13, 10, 14, 19, 19, 19, 19, 19, 19, 19, 19, 19, 19, 10, 9, 17, 19, 18, 17, 19, 23, 21, 22, 22, 19, 19, 23, 24, 10, 19, 22, 18, 29, 24, 23, 22, 23, 21, 21, 21, 22, 22, 29, 21, 21, 20, 10, 16, 10, 15, 16, 12, 18, 19, 18, 19, 18, 13, 19, 19, 9, 11, 19, 9, 29, 19, 19, 19, 19, 13, 17, 12, 19, 17, 25, 18, 18, 17, 19, 9, 19, 22 }
+  local W_XXL = { 4, 18, 22, 39, 38, 48, 43, 11, 23, 24, 30, 36, 17, 26, 20, 26, 38, 38, 38, 38, 38, 38, 38, 38, 38, 38, 19, 18, 34, 38, 34, 33, 38, 44, 42, 43, 43, 37, 36, 45, 46, 20, 37, 43, 36, 57, 46, 45, 42, 45, 42, 40, 41, 43, 43, 57, 42, 41, 40, 19, 30, 19, 29, 30, 22, 35, 37, 34, 37, 36, 24, 38, 37, 18, 21, 36, 18, 56, 37, 37, 37, 37, 24, 34, 23, 37, 33, 48, 34, 34, 34, 38, 17, 38, 43 }
+  -- by E.FONT_* index: XXS = TINSIZE, XS and S = SMLSIZE, STD, L = MIDSIZE, XL = DBLSIZE, XXL
+  local WT = { W_TIN, W_SML, W_SML, W_STD, W_MID, W_DBL, W_XXL }
+  local CHH = { 10, 13, 13, 17, 22, 30, 56 }
+  local fontIdx = 4
+  function L.font(f) fontFlag = FONTS[f] or 0 fontIdx = f or 4 end
+  -- measured texts are kept per font in two generations: when the current one holds 200 texts it
+  -- becomes the old one and a new one starts. A text still in use is found in the old one and
+  -- moved over, so there is never an update that measures everything again (that cost as much
+  -- as a page switch), and coordinates that change every update can't fill memory.
+  local cur, old, curN = { {}, {}, {}, {}, {}, {}, {} }, { {}, {}, {}, {}, {}, {}, {} }, 0
+  local byte, gsub = string.byte, string.gsub
+  rawSize = function(text)
+    local fi = fontIdx
+    local c = cur[fi] or cur[4]
+    local w = c[text]
+    if w == nil then
+      w = (old[fi] or old[4])[text]
+      if w == nil then
+        local t = WT[fi] or W_STD
+        -- digits are one width in every OpenTX font (SMLSIZE '4' is 1 px wider): counted in one C
+        -- call, so a changing number (coordinates, distances) costs little; the rest by glyph
+        local rest = gsub(text, "%d", "")
+        w = (#text - #rest) * t[17]
+        for k = 1, #rest do w = w + (t[(byte(rest, k) or 48) - 31] or t[17]) end
+        -- coordinates and other long numbers change every update: measured, not kept, so they
+        -- don't push the labels out (the next page switch would measure all of them again)
+        if #text - #rest > 4 then return w, CHH[fi] or 17 end
+      end
+      c[text] = w
+      curN = curN + 1
+      if curN >= 200 then old, cur, curN = cur, { {}, {}, {}, {}, {}, {}, {} }, 0 end
+    end
+    return w, CHH[fi] or 17
+  end
+
+  -- a convex polygon (already inside the clip box) filled with horizontal strips: both
+  -- chains are walked down from the top vertex, so a strip costs a few steps. Strips are
+  -- 2 px on small shapes and grow so no shape takes more than about 40 of them.
+  local function fillConvex(p, n)
+    local nv = n / 2
+    local top, bot = 1, 1
+    for i = 2, nv do
+      local y = p[i * 2]
+      if y < p[top * 2] then top = i end
+      if y > p[bot * 2] then bot = i end
+    end
+    local ytop, ybot = p[top * 2], p[bot * 2]
+    if ybot - ytop < 1 then return end
+    local step = max(2, ceil((ybot - ytop) / 40))
+    if col ~= sent then rawSetColor(CUSTOM, col) sent = col end
+    local a0, a1 = top, top % nv + 1
+    local b0, b1 = top, (top + nv - 2) % nv + 1
+    local y = floor(ytop)
+    while y < ybot do
+      local h = step
+      if y + h > ybot then h = ybot - y end
+      local yc = y + h / 2
+      while p[a1 * 2] < yc and a1 ~= bot do a0 = a1 a1 = a1 % nv + 1 end
+      while p[b1 * 2] < yc and b1 ~= bot do b0 = b1 b1 = (b1 + nv - 2) % nv + 1 end
+      local ay0, ay1, by0, by1 = p[a0 * 2], p[a1 * 2], p[b0 * 2], p[b1 * 2]
+      local xa = p[a0 * 2 - 1]
+      if ay1 ~= ay0 then xa = xa + (p[a1 * 2 - 1] - xa) * (yc - ay0) / (ay1 - ay0) end
+      local xb = p[b0 * 2 - 1]
+      if by1 ~= by0 then xb = xb + (p[b1 * 2 - 1] - xb) * (yc - by0) / (by1 - by0) end
+      if xa > xb then xa, xb = xb, xa end
+      if xb - xa >= 0.5 then rawFRect(xa, y, xb - xa + 1, h, CUSTOM) end
+      y = y + step
+    end
+  end
+
+  -- one screen update with drawing switched off, in create (its own Lua budget): the text sizes,
+  -- block layout and unit helpers are worked out there, so the first real update of the start
+  -- page does not carry that on top of its own drawing
+  function L.warmup(fn)
+    local t, f, r, l = rawText, rawFRect, rawRect, rawLine
+    local nop = function() end
+    rawText, rawFRect, rawRect, rawLine = nop, nop, nop, nop
+    local bm = rawlcd.drawBitmap
+    rawlcd.drawBitmap = nop
+    pcall(fn)
+    rawText, rawFRect, rawRect, rawLine = t, f, r, l
+    rawlcd.drawBitmap = bm
+  end
+
+  local function clipFill(n)
+    n = clipSide(bufA, n, bufB, 1, cx1) if n < 6 then return end
+    n = clipSide(bufB, n, bufA, 2, cx2 - 1) if n < 6 then return end
+    n = clipSide(bufA, n, bufB, 3, cy1) if n < 6 then return end
+    n = clipSide(bufB, n, bufA, 4, cy2 - 1) if n < 6 then return end
+    fillConvex(bufA, n)
+  end
+
+  function L.drawFilledTriangle(x1, y1, x2, y2, x3, y3)
+    local xl, xh, yl, yh = min(x1, x2, x3), max(x1, x2, x3), min(y1, y2, y3), max(y1, y2, y3)
+    if xh < cx1 or xl >= cx2 or yh < cy1 or yl >= cy2 then return end
+    bufA[1], bufA[2], bufA[3], bufA[4], bufA[5], bufA[6] = x1, y1, x2, y2, x3, y3
+    if xl >= cx1 and xh < cx2 and yl >= cy1 and yh < cy2 then fillConvex(bufA, 6) return end
+    clipFill(6)
+  end
+
+  function L.drawFilledQuad(x1, y1, x2, y2, x3, y3, x4, y4)
+    bufA[1], bufA[2], bufA[3], bufA[4], bufA[5], bufA[6], bufA[7], bufA[8] = x1, y1, x2, y2, x3, y3, x4, y4
+    clipFill(8)
+  end
+
+  -- a circle (the map's range rings) is 8 lines
+  local CIRC = {}
+  for i = 0, 8 do CIRC[#CIRC + 1] = math.cos(i * math.pi / 4) CIRC[#CIRC + 1] = math.sin(i * math.pi / 4) end
+  function L.drawCircle(x, y, r)
+    if x - r >= cx1 and x + r < cx2 and y - r >= cy1 and y + r < cy2 then
+      if col ~= sent then rawSetColor(CUSTOM, col) sent = col end
+      local px, py = x + r, y
+      for i = 3, 17, 2 do
+        local nx, ny = x + r * CIRC[i], y + r * CIRC[i + 1]
+        rawLine(px, py, nx, ny, LINE, CUSTOM)
+        px, py = nx, ny
+      end
+    end
+  end
+  -- a filled dot (waypoints): two rectangles crossed, a rounded square, as a stack of strips
+  -- cost one rectangle per strip
+  function L.drawFilledCircle(x, y, r)
+    if x - r >= cx1 and x + r < cx2 and y - r >= cy1 and y + r < cy2 then
+      if col ~= sent then rawSetColor(CUSTOM, col) sent = col end
+      local k = floor(r * 0.6)
+      rawFRect(x - r, y - k, 2 * r + 1, 2 * k + 1, CUSTOM)
+      rawFRect(x - k, y - r, 2 * k + 1, 2 * r + 1, CUSTOM)
+    end
+  end
+
+  -- Bitmap.open gives an empty bitmap for a missing file, so the file is looked for first
+  function L.loadBitmap(path)
+    if not fileExists(path) then return nil end
+    return Bitmap.open(path)
+  end
+end
 -- bitmaps can't be clipped; the shared code draws the map first so later drawing covers any overhang
 function L.drawBitmap(x, y, bmp)
   if bmp == nil or x >= cx2 or y >= cy2 or x + 100 <= cx1 or y + 100 <= cy1 then return end
@@ -316,7 +496,7 @@ E.lcd = L
 -- whether frames are missing or the screen updates too slowly. Counted over 5 s windows.
 local ST = { t0 = getTime(), upd = 0, raw = 0, pass = 0, sp = 0, drop = 0, lastData = nil, gap = 0, maxGap = 0,
              rate = nil }
-local function stNow() return getTime() / 100 end
+local function stNow() return clockNow end   -- the update's time (E.tick)
 local function stData()
   local t = stNow()
   if ST.lastData then
@@ -354,6 +534,13 @@ end
 -- newest PASS_MAX; older ones are dropped (and counted) if the screen falls behind.
 local PASS_MAX = 24
 local crsfPass, crsfMsp = {}, {}
+-- OpenTX keeps only the newest few passthrough frames (it has no catch-up after drawing, so a
+-- long queue would show values a second old), in a ring of 4 that is overwritten in place, so
+-- emptying a backlog after a pause costs a few steps per frame, not a table each. Status text
+-- frames (0xF1) go to their own short queue and are never pushed out by status values.
+local RING = 4
+local ringC, ringD, ringHead, ringN = {}, {}, 1, 0
+local otxText = {}
 local function crsfFill(want)
   local got = false
   for _ = 1, 32 do
@@ -365,8 +552,19 @@ local function crsfFill(want)
     elseif cmd == 0x80 or cmd == 0x7F then
       ST.pass = ST.pass + 1
       got = true
-      if #crsfPass >= PASS_MAX then table.remove(crsfPass, 1) ST.drop = ST.drop + 1 end
-      crsfPass[#crsfPass + 1] = { cmd, data }
+      if OTX then
+        if data and data[1] == 0xF1 then
+          if #otxText < 8 then otxText[#otxText + 1] = data else ST.drop = ST.drop + 1 end
+        else
+          if ringN >= RING then ringHead = ringHead % RING + 1 ringN = ringN - 1 ST.drop = ST.drop + 1 end
+          local i = (ringHead + ringN - 1) % RING + 1
+          ringC[i], ringD[i] = cmd, data
+          ringN = ringN + 1
+        end
+      else
+        if #crsfPass >= PASS_MAX then table.remove(crsfPass, 1) ST.drop = ST.drop + 1 end
+        crsfPass[#crsfPass + 1] = { cmd, data }
+      end
     end
   end
   if got then stData() end
@@ -374,6 +572,14 @@ end
 local crsfSensor = {
   popFrame = function(self, lo, hi)
     crsfFill(lo)
+    if OTX and lo ~= 0x7B then
+      if #otxText > 0 then return 0x80, table.remove(otxText, 1) end   -- texts first, in order
+      if ringN == 0 then return nil end
+      local c, d = ringC[ringHead], ringD[ringHead]
+      ringC[ringHead], ringD[ringHead] = nil, nil
+      ringHead, ringN = ringHead % RING + 1, ringN - 1
+      return c, d
+    end
     local q = lo == 0x7B and crsfMsp or crsfPass
     local f = table.remove(q, 1)
     if not f then return nil end
@@ -384,15 +590,15 @@ local crsfSensor = {
 E.crsf = crossfireTelemetryPop and { getSensor = function() return crsfSensor end } or nil
 
 -- S.Port: MSP replies (primId 0x32) wait for mspclient; passthrough and the rest go to telem
-local spPass, spMsp = {}, {}
-local function frameObj(physId, primId, appId, value)
-  return {
-    physId = function() return physId end, primId = function() return primId end,
-    appId = function() return appId end, value = function() return value end,
-  }
-end
+local spMsp = {}
+-- passthrough values in a ring (four parallel arrays, no table per frame): taking the oldest is a
+-- step of the head index, where table.remove(t, 1) moved every entry up, 60 of them
+-- OpenTX decodes fewer values per update than arrive at times, so there only the newest 16 are
+-- kept (the oldest dropped): what is shown stays within about a quarter of a second
+local SP_MAX = OTX and 16 or 60
+local fillTick = -1
+local spA, spB, spC, spD, spHead, spN = {}, {}, {}, {}, 1, 0
 -- same for S.Port: drained completely, one value per frame, so more of them are kept
-local SP_MAX = 60
 local function sportFill(wantMsp)
   local got = false
   for _ = 1, 64 do
@@ -403,19 +609,48 @@ local function sportFill(wantMsp)
     if primId == 0x32 then
       if #spMsp < 16 then spMsp[#spMsp + 1] = { physId, primId, appId, value } end
     else
-      if #spPass >= SP_MAX then table.remove(spPass, 1) ST.drop = ST.drop + 1 end
-      spPass[#spPass + 1] = { physId, primId, appId, value }
+      if spN >= SP_MAX then spHead = spHead % SP_MAX + 1 spN = spN - 1 ST.drop = ST.drop + 1 end
+      local i = (spHead + spN - 1) % SP_MAX + 1
+      spA[i], spB[i], spC[i], spD[i] = physId, primId, appId, value
+      spN = spN + 1
     end
   end
   if got then stData() end
 end
+-- one frame object per reader, filled for each pop: the reader takes its values before the next
+-- pop, so the four closures per frame are no longer made
+local function frameObject()
+  local o = {}
+  function o.physId(self) return self[1] end
+  function o.primId(self) return self[2] end
+  function o.appId(self) return self[3] end
+  function o.value(self) return self[4] end
+  return o
+end
 local function sportSensor(msp)
+  local fo = frameObject()
   return {
+    -- passthrough values straight, for telem.lua (no frame object); the radio's queue is
+    -- emptied into the ring once per screen update, not on every value
+    popRaw = (not msp) and function(self)
+      if fillTick ~= tickN then fillTick = tickN sportFill(false) end
+      if spN == 0 then return nil end
+      local h = spHead
+      spHead, spN = h % SP_MAX + 1, spN - 1
+      return spA[h], spB[h], spC[h], spD[h]
+    end or nil,
     popFrame = function(self)
       sportFill(msp)
-      local f = table.remove(msp and spMsp or spPass, 1)
-      if not f then return nil end
-      return frameObj(f[1], f[2], f[3], f[4])
+      if msp then
+        local f = table.remove(spMsp, 1)
+        if not f then return nil end
+        fo[1], fo[2], fo[3], fo[4] = f[1], f[2], f[3], f[4]
+        return fo
+      end
+      if spN == 0 then return nil end
+      fo[1], fo[2], fo[3], fo[4] = spA[spHead], spB[spHead], spC[spHead], spD[spHead]
+      spHead, spN = spHead % SP_MAX + 1, spN - 1
+      return fo
     end,
     pushFrame = function(self, t) return sportTelemetryPush(t.physId, t.primId, t.appId, t.value) end,
   }
@@ -471,6 +706,8 @@ end
 -- Asked once per update (E.tick), not once per sensor.
 local live = true
 function E.tick()
+  tickN = tickN + 1
+  clockNow = (getTime() - clockBase) / 100
   local rssi = getRSSI and getRSSI() or 1
   live = rssi ~= nil and rssi > 0
 end
@@ -532,7 +769,9 @@ end
 E.system = {
   getSource = getSource,
   playFile = function(path) playFile(path) end,
-  listFiles = listFiles,
+  -- OpenTX has no dir(): no listing, tiles.lua looks for tile files instead
+  listFiles = dir and listFiles or nil,
+  fileExists = fileExists,
 }
 
 return E

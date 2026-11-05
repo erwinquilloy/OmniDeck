@@ -20,8 +20,22 @@ local T = need("telem.lua")
 local MAP = need("map.lua")
 local HUD = need("hud.lua")
 local TL = need("tiles.lua")
-local MI = need("mission.lua")
-local MSPC = need("mspclient.lua")
+-- OpenTX: no missions (no route on the map, no INAV mission download). OpenTX gives a widget
+-- half of EdgeTX's Lua budget, and the route was the heaviest part of its map page; the two
+-- modules are not loaded there at all, which also saves their memory. The next waypoint from
+-- ArduPilot's telemetry (marker and WP line) is drawn by map.lua and stays.
+local MI, MSPC
+if OD_OTX then
+  local nop = function() end
+  MI = { init = nop, update = nop, setInav = nop, loadFile = nop, clearLearned = nop,
+         current = function() return nil, nil end, listFiles = function() return {} end,
+         fileError = function() return nil end }
+  MSPC = { wakeup = nop, restart = nop, state = function() return "off" end, active = function() return nil end,
+           waypoints = function() return {} end, debug = function() return "" end }
+else
+  MI = need("mission.lua")
+  MSPC = need("mspclient.lua")
+end
 local FS = need("summary.lua")
 local AU = need("audio.lua")
 MI.init(T)
@@ -55,7 +69,8 @@ local EFF_UNITS = {
 }
 local EFF_MIN_MPS = 3      -- below this the figure is meaningless (hover, on the ground)
 
-local function units(w)
+-- the unit helpers for the current settings, built again only when a unit setting changes
+local function unitsBuild(w)
   local su, au = SPD_UNITS[w.spdUnit] or SPD_UNITS[0], ALT_UNITS[w.altUnit] or ALT_UNITS[0]
   local e = EFF_UNITS[w.effUnit] or EFF_UNITS[0]
   -- number in the chosen unit; Wh needs the voltage as well
@@ -100,11 +115,16 @@ local function units(w)
     end,
   }
 end
+local function units(w)
+  local key = (w.spdUnit or 0) * 100 + (w.altUnit or 0) * 10 + (w.effUnit or 0)
+  if w.unitsKey ~= key or w.unitsT == nil then w.unitsKey, w.unitsT = key, unitsBuild(w) end
+  return w.unitsT
+end
 
 -- ---------------------------------------------------------------- helpers
 local function srcOrNil(v)
   if v == nil then return nil end
-  if type(v) == "userdata" then
+  if type(v) == "userdata" or type(v) == "table" then   -- table: an EdgeTX/OpenTX source made by main.lua
     local ok, n = pcall(function() return v:name() end)
     if ok and n ~= nil and n ~= "---" then return v end
   end
@@ -116,6 +136,10 @@ local SEV_COLOR = {
   [0] = lcd.RGB(255, 60, 60), [1] = lcd.RGB(255, 60, 60), [2] = lcd.RGB(255, 60, 60), [3] = lcd.RGB(255, 80, 80),
   [4] = lcd.RGB(255, 190, 40), [5] = lcd.RGB(255, 255, 255), [6] = lcd.RGB(220, 220, 220), [7] = lcd.RGB(160, 160, 160),
 }
+-- OpenTX 2.3 (set by etx.lua): 10,000 Lua instructions per screen update, and filled shapes are
+-- drawn in Lua there, so the main page is kept lighter (no minimap, outline arrows)
+local OTX = OD_OTX
+
 local COL = {
   bar = lcd.RGB(12, 12, 12), txt = lcd.RGB(240, 240, 240), dim = lcd.RGB(150, 150, 150),
   ok = lcd.RGB(80, 220, 80), warn = lcd.RGB(255, 190, 40), bad = lcd.RGB(255, 70, 70),
@@ -138,7 +162,7 @@ local function create()
     -- settings
     linkMode = T.LINK_AUTO, orient = 0, zoomMode = 0, zoomSource = nil,
     spdUnit = 0, altUnit = 0, startPage = 1, trail = 1,
-    tileSet = "", tz = nil, missionFile = "", inavWp = 1, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
+    tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
     lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
@@ -159,6 +183,8 @@ local function txVolts()
 end
 
 local mid = {}   -- top bar middle layout, kept until its inputs change
+local barTxt = {}                          -- top bar right side: texts kept until their values change
+local barParts = { {}, {}, {}, {} }        -- and the (text, colour) slots, reused each update
 local function topBar(w, x, y, W, h, s, u, H)
   local fBig, fMid, fSmall = fontFor(H)
   lcd.color(COL.bar)
@@ -183,15 +209,26 @@ local function topBar(w, x, y, W, h, s, u, H)
     leftEnd = x + 14 + mw + lcd.getTextSize(at)
   end
 
-  -- right side: GPS, link
-  local parts = {}
-  local fixTxt = (s.fix or 0) >= 3 and "3D" or ((s.fix or 0) == 2 and "2D" or "NoFix")
-  parts[#parts + 1] = { string.format("%s %d", fixTxt, s.sats or 0), (s.fix or 0) >= 3 and COL.ok or COL.warn }
-  if s.lq then parts[#parts + 1] = { string.format("LQ %d", math.floor(s.lq)), s.lq >= 70 and COL.ok or (s.lq >= 40 and COL.warn or COL.bad) } end
-  if s.rssi then parts[#parts + 1] = { string.format("RSSI %d", math.floor(s.rssi)), COL.txt } end
-  if s.failsafe or s.ekfBad then parts[#parts + 1] = { s.ekfBad and "EKF" or "FS", COL.bad } end
+  -- right side: GPS, link. Each text is made again only when its value changes, into tables
+  -- kept from one update to the next
+  local c = barTxt
+  local fix, sats = s.fix or 0, s.sats or 0
+  if fix ~= c.fix or sats ~= c.sats then
+    c.fix, c.sats = fix, sats
+    c.gps = string.format("%s %d", fix >= 3 and "3D" or (fix == 2 and "2D" or "NoFix"), sats)
+  end
+  local lq = s.lq and math.floor(s.lq)
+  if lq ~= c.lq then c.lq = lq c.lqT = lq and string.format("LQ %d", lq) end
+  local rs = s.rssi and math.floor(s.rssi)
+  if rs ~= c.rs then c.rs = rs c.rsT = rs and string.format("RSSI %d", rs) end
+  local parts, n = barParts, 0
+  local function add(t, cl) n = n + 1 local p = parts[n] p[1], p[2] = t, cl end
+  add(c.gps, fix >= 3 and COL.ok or COL.warn)
+  if lq then add(c.lqT, lq >= 70 and COL.ok or (lq >= 40 and COL.warn or COL.bad)) end
+  if rs then add(c.rsT, COL.txt) end
+  if s.failsafe or s.ekfBad then add(s.ekfBad and "EKF" or "FS", COL.bad) end
   local rx = x + W - 6
-  for i = #parts, 1, -1 do
+  for i = n, 1, -1 do
     local p = parts[i]
     lcd.color(p[2])
     lcd.drawText(rx, ty, p[1], RIGHT)
@@ -266,6 +303,39 @@ local function tile(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inse
   lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
 end
 
+-- OpenTX, over the bitmap of the fixed layer: only what changes (bar fill, note, value). The
+-- full tile() above stays untouched, so EdgeTX and Ethos pay nothing for this.
+-- Font heights and label widths never change, so they are measured once (OpenTX's text sizes
+-- are estimates from the font anyway).
+local fontH, labelW = {}, {}
+local function lineH(f)
+  local v = fontH[f]
+  if v == nil then lcd.font(f) local _, h = lcd.getTextSize("0") v = h fontH[f] = v end
+  return v
+end
+local function tileLive(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inset)
+  if bar then
+    h = h - 7
+    lcd.color(COL.dim)
+    lcd.drawFilledRectangle(I(x + 4), I(y + h + 1), I((w - 8) * bar), 4)
+  end
+  local lh = lineH(fLbl)
+  if note then
+    lcd.font(fLbl)
+    local lw = labelW[label]
+    if lw == nil then lw = lcd.getTextSize(label) labelW[label] = lw end
+    if lw + lcd.getTextSize(note) + 10 <= w then
+      lcd.color(COL.dim)
+      lcd.drawText(I(x + w - 4), I(y + 2), note, RIGHT)
+    end
+  end
+  local vh = lineH(fVal)
+  lcd.font(fVal)
+  lcd.color(color or COL.txt)
+  inset = inset or 0
+  lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
+end
+
 -- share of the pack left, 0..1. nil without a capacity, or when nothing shows a current sensor is
 -- there: with no sensor mAh stays 0 and a gauge would read full for the whole flight.
 local function battLeft(s)
@@ -277,14 +347,18 @@ end
 -- darker than the status colours, so the white voltage on top stays easy to read
 local BATT_FILL = { ok = lcd.RGB(35, 140, 60), warn = lcd.RGB(190, 130, 10), bad = lcd.RGB(190, 40, 40) }
 
-local function battGauge(x, y, w, h, s, fVal, alarmV)
-  lcd.color(COL.tile)
-  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+-- live: OpenTX over the bitmap (no background or outline); outline: the export (only those)
+local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline)
   local pad, nubW = 6, math.max(4, I(w * 0.03))
   local bx, by, bw, bh = x + pad, y + pad, w - 2 * pad - nubW, h - 2 * pad
-  lcd.color(COL.txt)
-  lcd.drawRectangle(I(bx), I(by), I(bw), I(bh))
-  lcd.drawFilledRectangle(I(bx + bw), I(by + bh * 0.3), I(nubW), I(bh * 0.4))
+  if not live then   -- background and battery outline; OpenTX (live) has them in the bitmap
+    lcd.color(COL.tile)
+    lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+    lcd.color(COL.txt)
+    lcd.drawRectangle(I(bx), I(by), I(bw), I(bh))
+    lcd.drawFilledRectangle(I(bx + bw), I(by + bh * 0.3), I(nubW), I(bh * 0.4))
+    if outline then return end
+  end
   local left = battLeft(s)
   if left then
     lcd.color((s.battFs or left < 0.15) and BATT_FILL.bad or (left < 0.3 and BATT_FILL.warn or BATT_FILL.ok))
@@ -312,17 +386,52 @@ local function homeArrow(x, y, w, h, s, fLbl)
   local nx, ny = pt(-r * 0.45, 0)
   local rx, ry = pt(-r, r * 0.8)
   lcd.color(COL.home)
-  lcd.drawFilledTriangle(I(tx), I(ty), I(lx), I(ly), I(nx), I(ny))
-  lcd.drawFilledTriangle(I(tx), I(ty), I(nx), I(ny), I(rx), I(ry))
+  if OTX then   -- OpenTX: the arrow's outline
+    lcd.drawLine(I(tx), I(ty), I(lx), I(ly)) lcd.drawLine(I(lx), I(ly), I(nx), I(ny))
+    lcd.drawLine(I(nx), I(ny), I(rx), I(ry)) lcd.drawLine(I(rx), I(ry), I(tx), I(ty))
+  else
+    lcd.drawFilledTriangle(I(tx), I(ty), I(lx), I(ly), I(nx), I(ny))
+    lcd.drawFilledTriangle(I(tx), I(ty), I(nx), I(ny), I(rx), I(ry))
+  end
 end
 
 local flightClock = { sec = nil, txt = "--" }   -- FLIGHT TIME text, remade when the second changes
-local function tiles(x, y, w, h, s, u, fVal, fLbl)
+-- OpenTX: the blocks' fixed layer (backgrounds, labels, bar tracks, battery outline) as one bitmap
+-- per screen size and speed unit, made by tools/sim_edgetx.py --otx-panels from this same code;
+-- one drawBitmap instead of about 20 drawing calls. Missing file: the blocks are drawn in full.
+local panelBmps = {}
+local function panelBitmap(u)
+  local W, H = lcd.getWindowSize()
+  local key = W .. "x" .. H .. "_" .. string.gsub(u.spdLbl, "[^%w]", "")
+  local b = panelBmps[key]
+  if b == nil then
+    local ok, bmp = pcall(lcd.loadBitmap, (OD_ROOT or "") .. "otx/panel_" .. key .. ".png")
+    b = (ok and bmp) or false
+    panelBmps[key] = b
+  end
+  return b or nil
+end
+local maxLabels = {}                                     -- "MAX AS km/h" etc., per speed unit
+local blockItems = { {}, {}, {}, {}, { gauge = true }, {}, {}, {} }   -- the 8 blocks, refilled each update
+-- OpenTX: six blocks, without MAX AS and MAX GS (the flight summary has both): its Lua budget is
+-- half of EdgeTX's, and the rest get taller blocks (2 x 3)
+local otxBlocks = { blockItems[1], blockItems[2], blockItems[5], blockItems[6], blockItems[7], blockItems[8] }
+-- layer: nil = all, "fixed" / "live" as for tile()
+local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
+  if OTX and layer == nil then
+    local bmp = panelBitmap(u)
+    if bmp then lcd.drawBitmap(I(x), I(y), bmp) layer = "live" end
+  end
   -- flight in progress, or the last one until the next arming
   local f = FS.live()
-  local function maxSpd(label, v, now)
-    return { "MAX " .. label .. " " .. u.spdLbl, u.spdF(v), COL.txt,
-      (v and v > 0 and now) and math.min(1, now / v) or 0 }   -- bar: speed now against the max
+  -- the block list is filled in place each update (no new tables), labels made once per unit
+  local lbl = maxLabels[u.spdLbl]
+  if lbl == nil then lbl = { "MAX AS " .. u.spdLbl, "MAX GS " .. u.spdLbl } maxLabels[u.spdLbl] = lbl end
+  local function maxSpd(it, label, v, now)
+    it[1], it[2], it[3] = label, u.spdF(v), COL.txt
+    it[4] = (v and v > 0 and now) and math.min(1, now / v) or 0   -- bar: speed now against the max
+    it[5] = nil
+    return it
   end
   -- flight time since arming (white); after the disarm the last flight's time, dimmed, until
   -- the next arming. The text is made once a second, not on every screen update.
@@ -338,32 +447,45 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl)
     end
     fts = flightClock.txt
   end
-  local items = {
-    -- HOME carries the total distance flown as its note (max distance from home is in the summary)
-    { "HOME", u.distF(s.homeDist), COL.txt, nil,
-      (f and f.dist) and ("TOTAL " .. u.distF(f.dist)) or nil },
-    { "FLIGHT TIME", fts, (ft and not running) and COL.dim or COL.txt },
-    maxSpd("AS", f and f.maxAspd, s.aspd),
-    maxSpd("GS", f and f.maxGspd, s.gspd),
-    { gauge = true },
-    { "USED", s.mah and string.format("%dmAh", I(s.mah)) or "--", (s.cap and s.cap > 0 and s.mah and s.mah > 0.8 * s.cap) and COL.warn or COL.txt },
-    { "CURR", s.curr and string.format("%.1fA", s.curr) or "--", COL.txt, nil,
-      (f and f.maxCurr) and string.format("MAX %.1fA", f.maxCurr) or nil },
-    { "THR", s.thr and string.format("%d%%", s.thr) or "--", COL.txt, math.min(1, math.abs(s.thr or 0) / 100), u.eff(f) },
-  }
-  local cols, rows = 2, 4
+  local items = blockItems
+  local it = items[1]   -- HOME carries the total distance flown as its note (max distance from home is in the summary)
+  it[1], it[2], it[3], it[4] = "HOME", u.distF(s.homeDist), COL.txt, nil
+  it[5] = (f and f.dist) and ("TOTAL " .. u.distF(f.dist)) or nil
+  it = items[2]
+  it[1], it[2], it[3], it[4], it[5] = "FLIGHT TIME", fts, (ft and not running) and COL.dim or COL.txt, nil, nil
+  if not OTX then
+    maxSpd(items[3], lbl[1], f and f.maxAspd, s.aspd)
+    maxSpd(items[4], lbl[2], f and f.maxGspd, s.gspd)
+  end
+  it = items[6]
+  it[1], it[2] = "USED", s.mah and string.format("%dmAh", I(s.mah)) or "--"
+  it[3], it[4], it[5] = (s.cap and s.cap > 0 and s.mah and s.mah > 0.8 * s.cap) and COL.warn or COL.txt, nil, nil
+  it = items[7]
+  it[1], it[2], it[3], it[4] = "CURR", s.curr and string.format("%.1fA", s.curr) or "--", COL.txt, nil
+  it[5] = (f and f.maxCurr) and string.format("MAX %.1fA", f.maxCurr) or nil
+  it = items[8]
+  it[1], it[2], it[3] = "THR", s.thr and string.format("%d%%", s.thr) or "--", COL.txt
+  it[4], it[5] = math.min(1, math.abs(s.thr or 0) / 100), u.eff(f)
+  if OTX then items = otxBlocks end
+  local cols = 2
+  local rows = math.ceil(#items / cols)
   local gap = 3
   local tw, th = (w - gap) / cols, (h - (rows - 1) * gap) / rows
   for i, it in ipairs(items) do
     local c, r = (i - 1) % cols, math.floor((i - 1) / cols)
     local tx, ty = x + c * (tw + gap), y + r * (th + gap)
-    if it.gauge then battGauge(tx, ty, tw, th, s, fVal, u.alarmV)
+    if it.gauge then
+      if not layer then battGauge(tx, ty, tw, th, s, fVal, u.alarmV)
+      elseif layer == "live" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true)
+      else battGauge(tx, ty, tw, th, s, fVal, nil, false, true) end   -- export: outline only
     else
       -- HOME: keep the value clear of the arrow (drawn in the left 6 px + up to 30 % of the tile)
       local inset = (i == 1 and s.homeBrg and s.yaw and s.homeDist and s.homeDist > 0) and (tw * 0.3 + 6) or 0
-      tile(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
+      if not layer then tile(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
+      elseif layer == "live" then tileLive(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
+      else tile(tx, ty, tw, th, it[1], "", nil, fVal, fLbl, it[4] and 0, nil, 0) end   -- export
     end
-    if i == 1 then homeArrow(tx, ty, tw, th, s, fLbl) end
+    if i == 1 and layer ~= "fixed" then homeArrow(tx, ty, tw, th, s, fLbl) end
   end
 end
 
@@ -388,6 +510,7 @@ end
 -- ---------------------------------------------------------------- pages
 -- tile set picked in the settings, if it is still on the card
 local tileSets = nil
+local NO_LIST = not TL.canList()     -- OpenTX: tile sets are found by probing (wakeup)
 local function activeTileSet(w)
   if w.tileSet == nil or w.tileSet == "" then return nil end
   if tileSets == nil then tileSets = TL.scan() end
@@ -488,16 +611,23 @@ local function errorBanner(W, H)
   for i, l in ipairs(lines) do lcd.drawText(4, y + 2 + (i - 1) * th, l) end
 end
 
-local function pageMain(w, W, H, s, u)
-  local fBig, fMid, fSmall = fontFor(H)
+-- main page layout, shared with the OpenTX panel bitmap export so both line up exactly
+local function mainLayout(W, H)
   local barH = I(H * 0.09)
   local msgH = I(H * 0.075)
   local bodyY, bodyH = barH, H - barH - msgH
   local hudW = I(W * 0.56)
   local rx, rw = hudW + 3, W - hudW - 3
-  local mapH = math.min(rw, I(bodyH * 0.46))
+  -- OpenTX: no minimap (the Map page has the map); the data blocks take the whole panel
+  local mapH = OTX and 0 or math.min(rw, I(bodyH * 0.46))
+  return barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH
+end
+
+local function pageMain(w, W, H, s, u)
+  local fBig, fMid, fSmall = fontFor(H)
+  local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
   -- map first: on EdgeTX a tile can hang over the map's edge, and what follows covers it
-  safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true))
+  if not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(hudW, bodyY, 3, bodyH)
   lcd.drawFilledRectangle(rx, bodyY + mapH, rw, bodyH - mapH)
@@ -506,6 +636,26 @@ local function pageMain(w, W, H, s, u)
   if s.armed == false and T.alive() then safe("arm", HUD.armStatus, 0, bodyY, hudW, bodyH, s) end
   safe("tiles", tiles, rx, bodyY + mapH + 3, rw, bodyH - mapH - 3, s, u, fBig, fSmall)
   safe("msg", msgLine, 0, H - msgH, W, msgH, s, fMid)
+end
+
+-- tools/sim_edgetx.py --otx-panels: the blocks' fixed layer over the panel colour, at the main
+-- page's position; returns the area to cut out as the bitmap
+local function exportPanel(w, W, H)
+  local fBig, fMid, fSmall = fontFor(H)
+  local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
+  local x, y, pw, ph = rx, bodyY + mapH + 3, rw, bodyH - mapH - 3
+  lcd.color(COL.panel)
+  lcd.drawFilledRectangle(x, y, pw, ph)
+  tiles(x, y, pw, ph, T.s, units(w), fBig, fSmall, "fixed")
+  return x, y, pw, ph
+end
+
+-- the HUD's fixed layer alone, for the OpenTX overlay bitmap (tools/sim_edgetx.py --otx-panels);
+-- returns the HUD box
+local function exportHud(w, W, H)
+  local barH, msgH, bodyY, bodyH, hudW = mainLayout(W, H)
+  HUD.drawFixed(0, bodyY, hudW, bodyH)
+  return 0, bodyY, hudW, bodyH
 end
 
 local function pageMap(w, W, H, s, u)
@@ -846,8 +996,20 @@ local function wakeup(w)
   local s = T.s
   -- ArduPilot sends BATT_CAPACITY; INAV and Betaflight don't, so the pilot enters it
   if s.fc ~= "ArduPilot" then s.cap = w.batCap > 0 and w.batCap or nil end
-  AU.update(s, T.alive(), os.clock())
-  local flight = FS.update(s, T.alive(), os.clock(), T.distBrg)
+  -- EdgeTX / OpenTX: voice, flight summary and alarms take turns, one per update, so no
+  -- update carries all three (each still runs about 3 times a second). All three work from the
+  -- time, not from how often they are called (the summary adds up distance from positions, a
+  -- trig sum), so this only delays a call-out by a fraction of a second.
+  local nowc = os.clock()
+  local runAU, runFS, runAL = true, true, true
+  if OD_LITE then
+    local k = (w.slowK or 0) % 3 + 1
+    w.slowK = k
+    runAU, runFS, runAL = k == 1, k == 2, k == 3
+  end
+  local flight = nil
+  if runAU then AU.update(s, T.alive(), nowc) end
+  if runFS then flight = FS.update(s, T.alive(), nowc, T.distBrg) end
   if flight == "armed" and w.page == PAGE_SUMMARY then
     -- arming always brings the main page back (an EdgeTX instance with a fixed Page: that page)
     w.page = w.homePage or 1
@@ -906,7 +1068,7 @@ local function wakeup(w)
   MI.update(s)
   -- INAV mission download: only on a native (non-passthrough) link, after the
   -- link has been up for a few seconds; the client stops by itself if the FC is not INAV
-  if w.inavWp == 1 and s.fc == "INAV/BF" and T.alive() then
+  if not OD_OTX and w.inavWp == 1 and s.fc == "INAV/BF" and T.alive() then   -- OpenTX: no missions
     w.linkUpAt = w.linkUpAt or os.clock()
     if os.clock() - w.linkUpAt > 3 then
       MSPC.wakeup(s.link, s.armed)
@@ -918,8 +1080,15 @@ local function wakeup(w)
     w.linkUpAt = nil
   end
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
-  rememberPos(s, os.clock())
-  checkAlarms(w, s, os.clock())
+  rememberPos(s, nowc)
+  if runAL then checkAlarms(w, s, nowc) end
+  -- no folder listing (OpenTX): look for a tile set by its files at the map's position
+  if NO_LIST and (w.tileSet == nil or w.tileSet == "") then
+    local lat, lon = s.lat, s.lon
+    if not lat then local c = mapCenter() if c then lat, lon = c[1], c[2] end end
+    local ts = TL.probe(lat, lon, os.clock())
+    if ts then tileSets = { ts } w.tileSet = ts.label end
+  end
   if lcd.isVisible == nil or lcd.isVisible() then
     local t = os.clock()
     if t - w.lastPaint >= 0.1 then
@@ -1010,6 +1179,7 @@ end
 -- ---------------------------------------------------------------- exports
 return {
   VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage,
+  exportPanel = exportPanel, exportHud = exportHud,
   T = T, MAP = MAP, TL = TL, MI = MI, MSPC = MSPC, AU = AU, FS = FS,
   -- the settings list the tile sets on the card; the pages use the same list
   scanTiles = function() tileSets = TL.scan() return tileSets end,

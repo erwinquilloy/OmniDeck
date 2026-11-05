@@ -158,7 +158,7 @@ On Ethos the settings are in the widget's **Configure widget** form. On EdgeTX t
 | Zoom source (Ethos) · Map zoom control (EdgeTX) | A pot, slider or switch | Optional manual zoom. |
 | Map tiles | Off · the tile sets found on the card | EdgeTX also has Auto, the first set found. |
 | Mission file (Ethos) | None · `.waypoints` files | ArduPilot; without a file, waypoints are learned from telemetry. |
-| INAV mission download | On · Off | Ethos also has a Reload button. |
+| INAV mission download | Off · On | Off by default. Ethos also has a Reload button. |
 | Speed units | km/h · m/s · knots · mph | |
 | Altitude units | metres · feet | |
 | Efficiency units | Wh/km · mAh/km · Wh/mi · mAh/mi | Shown in the THR block and the summary. |
@@ -194,11 +194,11 @@ Without tiles you get a vector map with range rings. For satellite or street map
 
 ## Missions
 
-- **INAV:** OmniDeck downloads the mission from the flight controller over the telemetry link (CRSF/ELRS or S.Port), a few seconds after the link comes up. Checked over TBS Crossfire on a TX16S MK2.
+- **INAV:** with **INAV mission download** turned on (it is off by default), OmniDeck downloads the mission from the flight controller over the telemetry link (CRSF/ELRS or S.Port), a few seconds after the link comes up. Checked over TBS Crossfire on a TX16S MK2.
   - Waypoints show numbered, holds as H and landings as L; the active waypoint is green.
   - A mission uploaded after the radio started shows within about 10 s while the aircraft is disarmed, without a restart.
   - Only the first mission on the flight controller is shown. Upload it and **save it to EEPROM** in INAV Configurator, or the flight controller won't have it after a power cycle.
-  - **INAV mission download** in the settings turns it off. The Sensor check page shows what INAV reported and how many waypoints arrived.
+  - The Sensor check page shows what INAV reported and how many waypoints arrived.
 - **ArduPilot:** ArduPilot's radio telemetry has no mission download.
   - **Ethos:** copy a Mission Planner / QGC `.waypoints` file to `scripts/omnideck/missions/` and pick it under **Mission file**; the whole route draws, with the active waypoint in green.
   - **Without a file, and on EdgeTX** (which has no Mission file setting yet): each waypoint is placed on the map when it becomes active, from ArduPilot's distance and bearing to it, so the route builds up as you fly.

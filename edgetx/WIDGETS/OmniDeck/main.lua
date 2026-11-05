@@ -65,6 +65,12 @@ local function create(zone, opt)
   w.homePage = fixedPage(opt)   -- arming / the summary timeout return here (nil = main)
   w.page = w.homePage or w.startPage or 1
   w.lastRefresh = getTime()
+  -- OpenTX: the start page once with drawing off (etx.lua L.warmup), so its first real update
+  -- does not also measure every text
+  if E.lcd.warmup then
+    E.lcd.setWindow(LCD_W, LCD_H)
+    E.lcd.warmup(function() UI.paint(w) end)
+  end
   return w
 end
 
@@ -125,7 +131,8 @@ local SUM_PAGE, SUM_ZONE_TICKS = 4, 1500   -- page 4 = flight summary; 1500 x 10
 local function refresh(w, evt, touch)
   -- back on screen after a pause (e.g. from OmniDeck Setup): read the settings again
   local now = getTime()
-  if now - (w.lastRefresh or now) > 100 then apply(w) end
+  local reread = now - (w.lastRefresh or now) > 100
+  if reread then apply(w) end
   w.lastRefresh = now
   -- full screen gets events; in a layout zone it shows the minimap only
   local zw, zh = w.zone.w, w.zone.h
@@ -137,9 +144,19 @@ local function refresh(w, evt, touch)
   -- frame costs little. A TX16S MK2 updates about 8 times a second and ArduPilot over ELRS sends
   -- about 22 frames a second (page-5 link stats, 2026-11-03): 3 per update to keep up, more to
   -- catch up. The main page is the heaviest to draw, so it takes fewer.
-  E.OD_MAX_CRSF = (w.page == 1) and 2 or 10
-  E.OD_MAX_SPORT = (w.page == 1) and 6 or 10   -- S.Port: one value per frame, about 60 a second
-  UI.wakeup(w)
+  -- OpenTX has half EdgeTX's budget and no catch-up after drawing (no getUsage): there one CRSF
+  -- frame per update, from a queue that keeps only the newest few (etx.lua), so the values shown
+  -- stay current instead of falling behind.
+  E.OD_MAX_CRSF = E.OD_OTX and 1 or ((w.page == 1) and 2 or 10)
+  -- S.Port: one value per frame, about 60 a second. OpenTX: 5 per update from a queue that keeps
+  -- the newest 16 (etx.lua); each kind repeats, so a dropped old value is soon sent again
+  E.OD_MAX_SPORT = E.OD_OTX and 5 or ((w.page == 1) and 6 or 10)
+  -- OpenTX: an update that has just read the settings again, or the first one on a new page,
+  -- skips this telemetry read: those updates carry extra work of their own (the settings file,
+  -- the new page's first layout), and the values are a fraction of a second older for once
+  local newPage = w.page ~= w.lastPage
+  w.lastPage = w.page
+  if not ((reread or newPage) and E.OD_OTX) then UI.wakeup(w) end
   -- outside full screen EdgeTX sends no touch or keys, so the flight summary (opened on disarm)
   -- could never be closed there: it goes back to the main page after SUM_ZONE_TICKS
   if evt == nil and w.page == SUM_PAGE then

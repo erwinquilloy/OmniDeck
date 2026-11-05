@@ -85,6 +85,11 @@ M.fmtDist = fmtDist
 -- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
 local I = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
 
+-- OpenTX 2.3 (set by etx.lua): no filled triangles, each is filled in Lua there, and a widget
+-- gets 10,000 Lua instructions per screen update. Shapes are drawn as outlines there.
+local OTX = OD_OTX
+local misX, misY = {}, {}   -- the mission's screen points, reused every update
+
 local function arrow(cx, cy, ang, size, fill, edge)
   local r = math.rad(ang)
   local sn, cs = math.sin(r), math.cos(r)
@@ -93,6 +98,13 @@ local function arrow(cx, cy, ang, size, fill, edge)
   local bx, by = pt(size * 0.62, size * 0.78)
   local mx, my = pt(0, size * 0.38)
   local dx, dy = pt(-size * 0.62, size * 0.78)
+  if OTX then   -- the outline in the fill colour, with a spine so it still reads as solid
+    lcd.color(fill)
+    lcd.drawLine(I(ax), I(ay), I(bx), I(by)); lcd.drawLine(I(bx), I(by), I(mx), I(my))
+    lcd.drawLine(I(mx), I(my), I(dx), I(dy)); lcd.drawLine(I(dx), I(dy), I(ax), I(ay))
+    lcd.drawLine(I(ax), I(ay), I(mx), I(my))
+    return
+  end
   lcd.color(fill)
   lcd.drawFilledTriangle(I(ax), I(ay), I(bx), I(by), I(mx), I(my))
   lcd.drawFilledTriangle(I(ax), I(ay), I(mx), I(my), I(dx), I(dy))
@@ -106,7 +118,12 @@ M.arrow = arrow
 
 local function homeIcon(x, y, sz)
   lcd.color(C.home)
-  lcd.drawFilledTriangle(I(x - sz), I(y - sz * 0.1), I(x), I(y - sz), I(x + sz), I(y - sz * 0.1))
+  if OTX then   -- OpenTX: the roof as two lines
+    lcd.drawLine(I(x - sz), I(y - sz * 0.1), I(x), I(y - sz))
+    lcd.drawLine(I(x), I(y - sz), I(x + sz), I(y - sz * 0.1))
+  else
+    lcd.drawFilledTriangle(I(x - sz), I(y - sz * 0.1), I(x), I(y - sz), I(x + sz), I(y - sz * 0.1))
+  end
   lcd.drawFilledRectangle(I(x - sz * 0.65), I(y - sz * 0.1), I(sz * 1.3), I(sz * 0.9))
 end
 
@@ -206,15 +223,36 @@ function M.draw(x, y, w, h, s, o)
     local idx = (trail.head - trail.count) % TRAIL_MAX + 1
     local px, py = scr(trail.e[idx] - se, trail.n[idx] - sn)
     local k = 1
-    local starved = lcd.starved      -- EdgeTX adapter: true once this update's Lua budget is used up
-    while k < trail.count do
-      if starved and starved() then break end
-      local nk = math.min(trail.count, k + stride)
-      idx = (idx + nk - k - 1) % TRAIL_MAX + 1
-      k = nk
-      local qx, qy = scr(trail.e[idx] - se, trail.n[idx] - sn)
-      lcd.drawLine(I(px), I(py), I(qx), I(qy))
-      px, py = qx, qy
+    if OD_LITE then
+      -- EdgeTX / OpenTX: scr() worked out inline and no rounding (the radio truncates
+      -- coordinates itself), so a segment costs a third of the loop below. OpenTX has no budget
+      -- check to ask (its adapter never runs out early).
+      local starved = (not OTX) and lcd.starved
+      local a, b = cr * ppm, sr * ppm
+      local te, tn, cnt, line = trail.e, trail.n, trail.count, lcd.drawLine
+      local ox, oy = cx - se * a + sn * b, cy + se * b + sn * a   -- the screen point of (0, 0)
+      while k < cnt do
+        if starved and starved() then break end
+        local nk = k + stride
+        if nk > cnt then nk = cnt end
+        idx = (idx + nk - k - 1) % TRAIL_MAX + 1
+        k = nk
+        local de, dn = te[idx], tn[idx]
+        local qx, qy = ox + de * a - dn * b, oy - de * b - dn * a
+        line(px, py, qx, qy)
+        px, py = qx, qy
+      end
+    else
+      local starved = lcd.starved
+      while k < trail.count do
+        if starved and starved() then break end
+        local nk = math.min(trail.count, k + stride)
+        idx = (idx + nk - k - 1) % TRAIL_MAX + 1
+        k = nk
+        local qx, qy = scr(trail.e[idx] - se, trail.n[idx] - sn)
+        lcd.drawLine(I(px), I(py), I(qx), I(qy))
+        px, py = qx, qy
+      end
     end
     if acShown then lcd.drawLine(I(px), I(py), I(acx), I(acy)) end
   end
@@ -236,30 +274,48 @@ function M.draw(x, y, w, h, s, o)
       first = math.max(1, last - cap + 1)
     end
     local mlon = 111320 * math.cos(math.rad(lat))
-    local pts = {}
-    for i = first, last do
-      local wp = mis[i]
-      local px, py = scr((wp.lon - lon) * mlon, (wp.lat - lat) * 111320)
-      pts[i] = { px, py }
+    -- screen points in two arrays kept between updates (no table per waypoint per update)
+    local PX, PY = misX, misY
+    if OD_LITE then
+      -- EdgeTX / OpenTX: scr() inline, and no rounding (the radio truncates coordinates itself)
+      local a, b = cr * ppm, sr * ppm
+      for i = first, last do
+        local wp = mis[i]
+        local de, dn = (wp.lon - lon) * mlon, (wp.lat - lat) * 111320
+        PX[i], PY[i] = cx + de * a - dn * b, cy - de * b - dn * a
+      end
+    else
+      for i = first, last do
+        local wp = mis[i]
+        PX[i], PY[i] = scr((wp.lon - lon) * mlon, (wp.lat - lat) * 111320)
+      end
     end
     lcd.color(C.wp)
-    for i = first + 1, last do
-      if not mis[i].noLine then
-        lcd.drawLine(I(pts[i - 1][1]), I(pts[i - 1][2]), I(pts[i][1]), I(pts[i][2]))
+    if OD_LITE then
+      for i = first + 1, last do
+        if not mis[i].noLine then lcd.drawLine(PX[i - 1], PY[i - 1], PX[i], PY[i]) end
+      end
+    else
+      for i = first + 1, last do
+        if not mis[i].noLine then lcd.drawLine(I(PX[i - 1]), I(PY[i - 1]), I(PX[i]), I(PY[i])) end
       end
     end
     local r = o.mini and 3 or 8
-    if not o.mini then lcd.font(FONT_S) end
+    local th = 0
+    if not o.mini then
+      lcd.font(FONT_S)
+      local _, h0 = lcd.getTextSize("0")
+      th = h0
+    end
     for i = first, last do
       local wp = mis[i]
-      local px, py = pts[i][1], pts[i][2]
+      local px, py = PX[i], PY[i]
       if px > x - r and px < x + w + r and py > y - r and py < y + h + r then
         local active = o.activeWp ~= nil and wp.num == o.activeWp
         lcd.color(active and C.wpActive or C.wp)
         lcd.drawFilledCircle(I(px), I(py), active and r + 2 or r)
         if not o.mini then
           lcd.color(C.wpTxt)
-          local _, th = lcd.getTextSize("0")
           lcd.drawText(I(px), I(py - th / 2), wp.label or tostring(wp.num), CENTERED)
         end
       end

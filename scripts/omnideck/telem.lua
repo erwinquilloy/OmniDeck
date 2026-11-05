@@ -173,6 +173,7 @@ end
 -- 10 km; bearing in 3 deg steps). The fix taken closest to home is the most
 -- accurate, so it is kept until a better one arrives or home has clearly moved.
 local homeBestDist = nil
+local homeAt = -100
 local function apHomeUpdate()
   if not (s.lat and s.homeDist and s.homeBrg) then return end
   local hlat, hlon = T.project(s.lat, s.lon, s.homeDist, s.homeBrg)
@@ -252,7 +253,12 @@ local function pt(appId, lo, hi)
     s.homeBrg = ext(lo, hi, 25, 7) * 3
     if s.homeDist == 0 and s.homeBrg == 0 then s.homeBrg = nil end   -- no home yet
     -- pair with a position no older than 0.3 s, so motion between packets stays small
-    if s.lat and s.posAt and now() - s.posAt <= 0.3 then apHomeUpdate() end
+    -- EdgeTX / OpenTX: at most twice a second (it refines a home estimate; S.Port sends 0x5004
+    -- often, and the trig behind it was a tenth of OpenTX's S.Port budget)
+    if s.lat and s.posAt and now() - s.posAt <= 0.3 and (not OD_LITE or now() - homeAt >= 0.5) then
+      homeAt = now()
+      apHomeUpdate()
+    end
   elseif appId == 0x5005 then
     local vs = ext(lo, hi, 1, 7) * (10 ^ ext(lo, hi, 0, 1)) / 10
     s.vspd = ext(lo, hi, 8, 1) == 1 and -vs or vs
@@ -344,13 +350,13 @@ local function crsfPop()
     s.link = "CRSF"
     local t = now()
     s.lastPt, s.lastRx, s.fc = t, t, "ArduPilot"
-    local chars = {}
-    for i = 3, #data do
-      if data[i] == 0 then break end
-      chars[#chars + 1] = string.char(data[i])
-    end
+    -- the whole frame in one C call, then cut at the 0: a byte at a time (string.char per byte
+    -- and a join) made the update that brings a message the heaviest of all on OpenTX
+    local txt = string.char((table.unpack or unpack)(data, 3, #data))
+    local z = string.find(txt, "\0", 1, true)
+    if z then txt = string.sub(txt, 1, z - 1) end
     textViaCrsf = true
-    pushMsg(table.concat(chars), data[2])
+    pushMsg(txt, data[2])
   elseif (cmd == 0x80 or cmd == 0x7F) and #data >= 7 then
     s.link = "CRSF"
     local put = OD_LITE and collectPt or pt
@@ -392,7 +398,19 @@ local function sportPop()
   end
   local any = false
   for _, r in ipairs(sportReaders) do
-    local ok, f = pcall(function() return r:popFrame() end)
+    -- EdgeTX / OpenTX adapter: the four values straight, no frame object or method calls
+    if r.popRaw then
+      local physId, primId, id, value = r:popRaw()
+      if physId == nil then return any end
+      any = true
+      if primId == 0x10 and (id == 0x0800 or (id >= 0x5000 and id <= 0x50FF)) then
+        s.link = "S.Port"
+        local v = value % 4294967296
+        pt(id, v % 65536, math.floor(v / 65536))
+      end
+      return any
+    end
+    local ok, f = pcall(r.popFrame, r)       -- no closure per pop
     if ok and f then
       any = true
       if f:primId() == 0x10 then
@@ -693,8 +711,9 @@ end
 -- (CATEGORY_SYSTEM_EVENT / TELEMETRY_ACTIVE, :state()). nil where the radio has no such flag
 -- (EdgeTX, older Ethos): then only the link checks below and the frame timeout apply.
 local tlmSrc, tlmTriedAt = nil, -100
+local hasTlmFlag = CATEGORY_SYSTEM_EVENT ~= nil and TELEMETRY_ACTIVE ~= nil   -- Ethos only: decided once
 local function telemActive()
-  if CATEGORY_SYSTEM_EVENT == nil or TELEMETRY_ACTIVE == nil then return nil end
+  if not hasTlmFlag then return nil end
   if tlmSrc == nil then
     if now() - tlmTriedAt < 5 then return nil end
     tlmTriedAt = now()
@@ -903,6 +922,7 @@ end
 
 -- ---------------------------------------------------------------- per-wakeup entry
 local nativeReadAt = -100
+local linkReadAt = -100   -- link quality sensors on the passthrough path (EdgeTX / OpenTX: 5 Hz)
 -- EdgeTX reads the native sensors 5 times a second (OD_LITE); the attitude alone in between,
 -- so the horizon follows the plane (it lagged at 5 Hz on a TX16S MK2 with TBS, 2026-11-03).
 -- Only while the last full read was live: a lost link must not move the horizon.
@@ -996,9 +1016,13 @@ function T.wakeup(linkMode)
     end
   else
     local kind = s.link == "S.Port" and "sport" or "crsf"
-    local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
-    if lq then s.lq = lq end
-    if rssi then s.rssi = rssi end
+    -- EdgeTX / OpenTX: the link sensors 5 times a second, as the native read above
+    if not OD_LITE or now() - linkReadAt >= 0.2 then
+      linkReadAt = now()
+      local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+      if lq then s.lq = lq end
+      if rssi then s.rssi = rssi end
+    end
     -- ArduPilot sends no "ready to arm" flag. Not ready: a PreArm message in the last 35 s, or
     -- what telemetry shows directly (GPS without a 3D fix, EKF not happy, a failsafe). Ready only
     -- after 35 s disarmed with none of that, because PreArm failures repeat only every 30 s and a

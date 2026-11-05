@@ -34,6 +34,10 @@ def build(sd_root, audio=None):
     for tool in ('OmniDeck Check.lua', 'OmniDeck Setup.lua'):
         shutil.copyfile(os.path.join(REPO, 'edgetx', 'SCRIPTS', 'TOOLS', tool), os.path.join(tools, tool))
     os.makedirs(os.path.join(dst, 'missions'), exist_ok=True)
+    # OpenTX: bitmaps of the data blocks' fixed layer (tools/sim_edgetx.py --otx-panels)
+    otx = os.path.join(EDGETX, 'otx')
+    if os.path.isdir(otx):
+        shutil.copytree(otx, os.path.join(dst, 'otx'), dirs_exist_ok=True)
     if audio:
         for pack in sorted(os.listdir(audio)):
             src = os.path.join(audio, pack)

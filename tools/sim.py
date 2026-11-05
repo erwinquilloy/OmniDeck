@@ -1297,7 +1297,8 @@ if NATIVE and not SPORT:
              'CRSH': 'coursehold', 'WP': 'waypoint', 'AH': 'althold', 'ANGL': 'angle', 'HOR': 'horizon',
              'ANGH': 'anglehold', 'TURT': 'turtle', 'GEO': 'geozone', 'LAND': 'land', 'ACRO': 'acro',
              'WRTH': 'rtl', 'PASS': 'passthrough', 'POSH': 'poshold', 'PHFL': 'posholdfail',
-             'ALTH': 'althold', 'CHIR': 'chirp', 'AIR': 'airmode'}
+             'ALTH': 'althold', 'CHIR': 'chirp',
+             'AIR': 'acro'}   # acro with airmode on: shown and spoken as ACRO since test35
     clips = {l.split('|')[0] for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'phrases.psv'), encoding='utf8') if '|' in l and l[0] != '#'}
     for m, clip in MODES.items():
         st['fm'] = m

@@ -92,6 +92,64 @@ function TL.scan()
   return sets
 end
 
+-- ---------------------------------------------------------------- probe (no folder listing)
+-- OpenTX can't list folders, so the tile set is found by looking for the tile under a
+-- position: every provider/type (then Yaapu's Google folders) at the usual zooms first,
+-- a few files per call. Once one is found, the zooms around it give the set's range.
+-- A full pass that finds nothing waits PROBE_IDLE_S before trying again.
+function TL.canList() return system ~= nil and system.listFiles ~= nil end
+
+local ZORDER = { 17, 16, 18, 15, 14, 19, 13, 12, 20, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 }
+local PROBE_PER_CALL, PROBE_IDLE_S = 3, 60
+local probe = { c = 1, zi = 1, idleUntil = -1, found = nil }
+local cands = nil
+
+local function candList()
+  local out = {}
+  for _, p in ipairs(PROVIDERS) do
+    for _, t in ipairs(TYPES) do out[#out + 1] = { p = p, t = t } end
+  end
+  for _, t in ipairs({ "Satellite", "Hybrid", "Map", "Terrain" }) do out[#out + 1] = { p = "GOOGLE", t = t, y = YAAPU_GOOGLE[t] } end
+  return out
+end
+
+local function tileThere(c, z, lat, lon)
+  local px, py = TL.toPixel(lat, lon, z)
+  local x, y = floor(px / TILE), floor(py / TILE)
+  local base
+  if c.y then base = string.format("%s%s/%d/%d/s_%d", YAAPU, c.y, z, y, x)
+  elseif c.p == "ESRI" then base = string.format("%s%s/%s/%d/%d/%d", ROOT, c.p, c.t, z, y, x)
+  else base = string.format("%s%s/%s/%d/%d/%d", ROOT, c.p, c.t, z, x, y) end
+  local exists = system.fileExists
+  return exists(base .. ".jpg") or exists(base .. ".png") or (not c.y and exists(base .. ".bmp"))
+end
+
+-- one step of the search; returns the set once found (and every call after)
+function TL.probe(lat, lon, now)
+  if probe.found then return probe.found end
+  if not (system and system.fileExists) or lat == nil then return nil end
+  if now < probe.idleUntil then return nil end
+  cands = cands or candList()
+  for _ = 1, PROBE_PER_CALL do
+    local c, z = cands[probe.c], ZORDER[probe.zi]
+    if tileThere(c, z, lat, lon) then
+      local lo, hi = z, z
+      while lo > 1 and tileThere(c, lo - 1, lat, lon) do lo = lo - 1 end
+      while hi < 20 and tileThere(c, hi + 1, lat, lon) do hi = hi + 1 end
+      local label = c.p .. " " .. c.t
+      probe.found = { label = label, provider = c.p, type = c.t, minZ = lo, maxZ = hi,
+                      dirP = c.p, dirT = c.t, dirY = c.y }
+      return probe.found
+    end
+    probe.zi = probe.zi + 1
+    if probe.zi > #ZORDER then
+      probe.zi, probe.c = 1, probe.c + 1
+      if probe.c > #cands then probe.c, probe.idleUntil = 1, now + PROBE_IDLE_S return nil end
+    end
+  end
+  return nil
+end
+
 -- ---------------------------------------------------------------- projection
 -- absolute Web Mercator pixel of a position at zoom z (world = 2^z * 100 px)
 function TL.toPixel(lat, lon, z)

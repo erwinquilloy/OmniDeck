@@ -40,7 +40,7 @@ C.ITEMS = {
 
 C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, orient = 0,
                zoomMode = 0, zoomSrc = "", tileSet = "*", trail = 1, startPage = 1, pageSwitch = "", pageSwMode = 0, sumAuto = 1, batCap = 0, lowVolt = 0, critVolt = 0,
-               cells = 0, lowAlt = 0, inavWp = 1 }
+               cells = 0, lowAlt = 0, inavWp = 0 }
 
 -- EdgeTX: io.read(f, n) / io.write(f, s); standard Lua (simulator): f:read / f:write
 local function fread(f)
