@@ -561,6 +561,8 @@ if OTX:
     st['armed'] = False
     step(0.2, 12)
     rep['flight summary'] = otx_page(4) if wd.page == 4 else None
+    if rep['flight summary'] is not None:
+        cv.img.save(os.path.join(OUT, 'otx_flight_summary_%s.png' % tag))
     print('OpenTX budget (limit %d instructions per call):' % (OTX_LIM * 200))
     for k, n in rep.items():
         if n is None: print('  %-24s not reached' % k); continue
