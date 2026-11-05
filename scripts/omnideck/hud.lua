@@ -20,6 +20,12 @@ H.C = C
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
 -- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
 local I = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- Lighter drawing on every radio (EdgeTX / OpenTX since test17, Ethos since test36): numbers on
+-- every other tape tick, 15 deg heading ticks, 10 deg pitch rungs numbered on one side, no 45 deg
+-- roll ticks, one-pixel text shadows. The full set put a tester's X18 over Ethos's per-call Lua
+-- limit ("Max instructions count reached", INAV + TBS, 2026-11-05) where an X20S ran it clean.
+-- OD_LEAN = false brings the full drawing back (simulator comparisons).
+local LEAN = OD_LITE or OD_LEAN ~= false
 
 -- OpenTX 2.3 (set by etx.lua): no filled triangles, so each one is filled in Lua strip by strip,
 -- and a widget gets 10,000 Lua instructions per screen update. Shapes are kept simple there.
@@ -126,7 +132,7 @@ end
 local function outlined(x, y, text, flags, color)
   x, y = I(x), I(y)
   lcd.color(C.tape)
-  if OD_LITE then
+  if LEAN then
     lcd.drawText(x + 1, y + 1, text, flags)
   else
     lcd.drawText(x - 1, y - 1, text, flags)
@@ -165,14 +171,14 @@ local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, labe
     local ty = cy - (v - value) * ppu
     local tick = w * 0.22
     local x1 = leftSide and x + w - tick or x
-    if not OD_LITE then
+    if not LEAN then
       lcd.color(C.tape)
       lcd.drawLine(I(x1), I(ty) + 1, I(x1 + tick), I(ty) + 1)
     end
     lcd.color(C.tapeTxt)
     lcd.drawLine(I(x1), I(ty), I(x1 + tick), I(ty))
-    -- OD_LITE (EdgeTX): a number on every other tick, to save Lua time (OpenTX skips the loop)
-    if OD_LITE and (v / step) % 2 ~= 0 then
+    -- LEAN (EdgeTX): a number on every other tick, to save Lua time (OpenTX skips the loop)
+    if LEAN and (v / step) % 2 ~= 0 then
       -- tick only
     elseif leftSide then
       outlined(x + w - tick - 4, ty - th / 2, string.format("%d", v), RIGHT, C.tapeTxt)
@@ -227,23 +233,23 @@ local function headingTape(x, y, w, h, hdg, homeBrg, font, boxFont, fixedDone)
   lcd.font(font)
   local _, th = lcd.getTextSize("N")
   lcd.color(C.tapeTxt)
-  -- OD_LITE (EdgeTX): 15 deg ticks only, to save Lua time
-  local stepD = OD_LITE and 15 or 5
+  -- LEAN (EdgeTX): 15 deg ticks only, to save Lua time
+  local stepD = LEAN and 15 or 5
   local start = math.floor((hdg - span / 2) / stepD) * stepD
   local stop = OTX and start - 1 or start + span + stepD   -- OpenTX: the loop doesn't run
   for d = start, stop, stepD do
     local tx = cx + (d - hdg) * ppd
     local dd = d % 360
     local y0 = (dd % 15 == 0) and y + h - h * 0.3 or y + h - h * 0.15
-    if not OD_LITE then
+    if not LEAN then
       lcd.color(C.tape)
       lcd.drawLine(I(tx) + 1, I(y0), I(tx) + 1, I(y + h - 1))
     end
     lcd.color(C.tapeTxt)
     lcd.drawLine(I(tx), I(y0), I(tx), I(y + h - 1))
     if dd % 15 == 0 then
-      -- OD_LITE (EdgeTX): the compass points only; the box below has the exact heading
-      local lbl = CARD[dd] or ((dd % 30 == 0 and not OD_LITE) and tostring(math.floor(dd / 10)) or nil)
+      -- LEAN (EdgeTX): the compass points only; the box below has the exact heading
+      local lbl = CARD[dd] or ((dd % 30 == 0 and not LEAN) and tostring(math.floor(dd / 10)) or nil)
       if lbl then outlined(tx, y + 1, lbl, CENTERED, C.tapeTxt) end
     end
   end
@@ -268,7 +274,7 @@ end
 
 -- roll scale ticks: sin, cos, length; worked out once
 local ROLL_TICKS = {}
-for _, a in ipairs((OTX and { -60, -30, 0, 30, 60 }) or (OD_LITE and { -60, -30, -20, -10, 0, 10, 20, 30, 60 })
+for _, a in ipairs((OTX and { -60, -30, 0, 30, 60 }) or (LEAN and { -60, -30, -20, -10, 0, 10, 20, 30, 60 })
                    or { -60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60 }) do
   local t = math.rad(a)
   ROLL_TICKS[#ROLL_TICKS + 1] = { math.sin(t), math.cos(t), (a % 30 == 0) and 9 or 5 }
@@ -336,7 +342,7 @@ local function horizon(x, y, w, h, roll, pitch, font, fixedDone)
   -- pitch ladder every 10 deg (5 deg short marks)
   lcd.font(font)
   local _, th = lcd.getTextSize("0")
-  for a = -40, 40, OD_LITE and 10 or 5 do
+  for a = -40, 40, LEAN and 10 or 5 do
     if a ~= 0 and math.abs(a - pitch) <= 22 then
       local half = (a % 10 == 0) and w * 0.14 or w * 0.06
       local lx, ly = px - nx * a * ppx, py - ny * a * ppd
@@ -344,7 +350,7 @@ local function horizon(x, y, w, h, roll, pitch, font, fixedDone)
       -- OpenTX: rungs without numbers, as Yaapu's horizon there
       if a % 10 == 0 and not OTX then
         lcd.drawText(I(lx + dx * (half + 16)), I(ly + dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)
-        if not OD_LITE then   -- EdgeTX: one side only, to save Lua time
+        if not LEAN then   -- EdgeTX: one side only, to save Lua time
           lcd.drawText(I(lx - dx * (half + 16)), I(ly - dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)
         end
       end

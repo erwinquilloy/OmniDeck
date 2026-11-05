@@ -84,6 +84,15 @@ M.fmtDist = fmtDist
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
 -- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
 local I = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- Lighter drawing on every radio (EdgeTX / OpenTX since test17, Ethos since test36): numbers on
+-- every other tape tick, 15 deg heading ticks, 10 deg pitch rungs numbered on one side, no 45 deg
+-- roll ticks, one-pixel text shadows. The full set put a tester's X18 over Ethos's per-call Lua
+-- limit ("Max instructions count reached", INAV + TBS, 2026-11-05) where an X20S ran it clean.
+-- OD_LEAN = false brings the full drawing back (simulator comparisons).
+local LEAN = OD_LITE or OD_LEAN ~= false
+-- trail segments on the map page (twice this) and waypoints drawn; EdgeTX / OpenTX set their own
+local TRAIL_SEGS = OD_TRAIL_SEGS or (LEAN and 50 or nil)
+local MAX_WPS = OD_MAX_WPS or (LEAN and 30 or nil)
 
 -- OpenTX 2.3 (set by etx.lua): no filled triangles, each is filled in Lua there, and a widget
 -- gets 10,000 Lua instructions per screen update. Shapes are drawn as outlines there.
@@ -211,14 +220,14 @@ function M.draw(x, y, w, h, s, o)
 
   -- EdgeTX (OD_LITE): the main page's minimap leaves out the trail and the mission, which
   -- cost the most Lua time; the map page shows both
-  local bare = OD_LITE and o.mini
+  local bare = LEAN and o.mini
 
   -- trail
   if o.trail and hasPos and org and trail.count > 1 and not bare then
     lcd.color(C.trail)
     -- EdgeTX caps the Lua work per screen update, so there every Nth point is drawn:
     -- the whole trail keeps its shape at a fixed cost
-    local segs = OD_TRAIL_SEGS and (o.mini and OD_TRAIL_SEGS or 2 * OD_TRAIL_SEGS) or TRAIL_MAX
+    local segs = TRAIL_SEGS and (o.mini and TRAIL_SEGS or 2 * TRAIL_SEGS) or TRAIL_MAX
     local stride = math.max(1, math.ceil((trail.count - 1) / segs))
     local idx = (trail.head - trail.count) % TRAIL_MAX + 1
     local px, py = scr(trail.e[idx] - se, trail.n[idx] - sn)
@@ -263,7 +272,7 @@ function M.draw(x, y, w, h, s, o)
     -- EdgeTX caps the Lua work per screen update: there a long mission is drawn from just
     -- before the active waypoint, OD_MAX_WPS of them
     local first, last = 1, #mis
-    local cap = OD_MAX_WPS
+    local cap = MAX_WPS
     if cap and #mis > cap then
       local ai = 1
       if o.activeWp then
