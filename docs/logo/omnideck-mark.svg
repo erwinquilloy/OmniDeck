@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="OmniDeck">
+  <title>OmniDeck</title>
+  <rect x="5" y="5" width="110" height="110" rx="27" fill="#0D141B" stroke="#2E3B48" stroke-width="2"/>
+  <path d="M60 22 A38 38 0 0 0 22 60" fill="none" stroke="#50C8FF" stroke-width="9" stroke-linecap="round"/>
+  <path d="M60 98 A38 38 0 0 0 98 60" fill="none" stroke="#FFC21A" stroke-width="9" stroke-linecap="round"/>
+  <path d="M60 34 L78 84 L60 73 L42 84 Z" fill="#F2F5F8" stroke-linejoin="round" transform="rotate(45 60 60)"/>
+</svg>

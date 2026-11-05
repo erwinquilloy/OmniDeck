@@ -1,0 +1,117 @@
+# name|text, one per voice file. Names follow Yaapu's sound files (github.com/yaapu/frskytelemetryscript,
+# GPL-3.0) so its language folders are interchangeable with these packs. Numbered names are Yaapu's
+# status-text hashes; scripts/omnideck/audio.lua maps the message text to them.
+
+# flight modes
+manual|Manual flight mode
+circle|Circle flight mode
+stabilize|Stabilize flight mode
+training|Training flight mode
+acro|Acro flight mode
+flybywirea|Fly by wire A flight mode
+flybywireb|Fly by wire B flight mode
+cruise|Cruise flight mode
+autotune|Autotune enabled
+auto|Auto flight mode
+rtl|Return to home
+loiter|Loiter flight mode
+takeoff|Takeoff flight mode
+avoidadsb|Avoid A D S B flight mode
+guided|Guided flight mode
+initializing|Initializing
+qstabilize|Q stabilize flight mode
+qhover|Q hover flight mode
+qloiter|Q loiter flight mode
+qland|Q land flight mode
+qrtl|Q return to home flight mode
+qautotune|Q autotune flight mode
+qacro|Q acro flight mode
+thermal|Thermal flight mode
+loiterqland|Loiter to Q land flight mode
+coursehold|Course hold flight mode
+autotrim|Auto trim flight mode
+althold|Altitude hold flight mode
+land|Land flight mode
+drift|Drift flight mode
+sport|Sport flight mode
+flip|Flip flight mode
+poshold|Position hold flight mode
+brake|Brake flight mode
+throw|Throw flight mode
+guidednogps|Guided no GPS flight mode
+smartrtl|Smart return to home flight mode
+flowhold|Flow position hold flight mode
+follow|Follow flight mode
+zigzag|Zigzag flight mode
+systemid|System I D flight mode
+autorotate|Autorotate flight mode
+autortl|Auto return to home flight mode
+turtle|Turtle mode
+angle|Angle flight mode
+horizon|Horizon flight mode
+anglehold|Angle hold flight mode
+waypoint|Waypoint flight mode
+geozone|Geozone flight mode
+passthrough|Pass through mode
+posholdfail|Position hold failed
+chirp|Chirp mode
+airmode|Air mode
+
+# aircraft state
+armed|Motors armed
+disarmed|Motors disarmed
+failsafe|Failsafe
+ekf|E K F failsafe
+gpsfix|GPS 3D fix lock
+gpsnofix|No GPS
+lowbat|Low battery
+telemlost|Telemetry lost
+telemok|Telemetry recovered
+omniready|Omni Deck telemetry ready
+readytoarm|Ready to arm
+lowvoltage|Low voltage
+critvolt|Critical voltage
+pullup|Terrain, pull up
+notready|Not ready to arm
+
+# battery
+bat50|Battery at 50 percent
+bat40|Battery at 40 percent
+bat30|Battery at 30 percent
+bat25|Battery at 25 percent
+bat20|Battery at 20 percent
+bat15|Battery at 15 percent
+bat10|Battery at 10 percent
+bat5|Battery at 5 percent
+
+# status messages
+14472699|Pre arming, need 3D fix
+13077757|Smart return to home unavailable
+9811007|E K F variance
+8828501|GPS glitch cleared
+1061733|GPS glitch
+7210780|Parachute released
+14608272|Flight plan received
+6634944|Mission complete
+1050361|Geofence triggered
+6908206|Flight mode change failed
+9430632|Autotune success
+2131412|Autotune failed
+1541806|Transition done
+7211373|Transition started
+16455510|Transition to VTOL done
+13236108|Land descend started
+14444224|Land final started
+13366422|Soaring, not climbing
+13239693|Soaring, drifted too far
+1934808|Soaring enabled
+2074081|Soaring disabled
+2397669|Soaring, reached upper altitude
+2246114|Soaring, reached lower altitude
+2860491|Soaring, thermal weak
+2262475|Reached command
+3466823|Reached waypoint
+4597275|Passed waypoint
+3843641|Takeoff complete
+1865209|Smart return to home deactivated
+4170928|GPS home acquired
