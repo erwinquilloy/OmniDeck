@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-test37"
+local VERSION = "0.2.0-test39"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -823,6 +823,13 @@ local function pageCheck(w, W, H, s, u)
   lcd.color(COL.txt)
   lcd.drawText(4, y, T.rawCheck())
   y = y + th
+  -- S.Port: passthrough frames per reader and app ID (X18 + R9 F.Port, test38)
+  if T.sportDiag and s.link ~= "CRSF" then
+    local d1, d2 = T.sportDiag()
+    lcd.color(COL.home)
+    lcd.drawText(4, y, d1) y = y + th
+    if d2 then lcd.drawText(4, y, d2) y = y + th end
+  end
   -- INAV mission download: what the flight controller reported and what arrived
   if MSPC.state() ~= "off" then
     lcd.color(COL.home)

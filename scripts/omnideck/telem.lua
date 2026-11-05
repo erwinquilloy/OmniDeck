@@ -63,7 +63,10 @@ for i = 0, 32 do P2[i] = math.floor(2 ^ i) end
 -- Halves fit any Lua number exactly. ext() takes len bits from bit start.
 -- EdgeTX (Lua 5.2) has bit32, which runs in C: about a third of the Lua instructions per value,
 -- and still exact on 16-bit halves. Ethos (Lua 5.4) has none and keeps the arithmetic.
-local bx = bit32 and bit32.extract
+-- Only where the EdgeTX / OpenTX adapter runs (OD_LITE): on Ethos the arithmetic below is used, as
+-- in test10, the last version an X18 tester's R9 + ArduPilot worked with. Since test28 a bit32 found
+-- on the radio was used on Ethos too, and the X18 (32-bit Lua) has been broken since about then.
+local bx = OD_LITE and bit32 and bit32.extract or nil
 local function ext(lo, hi, start, len)
   if bx then
     if start >= 16 then return bx(hi, start - 16, len) end
@@ -389,21 +392,18 @@ local function split32(v)
   return v % 65536, math.floor(v / 65536)
 end
 T.split32 = split32
-local sportAll, sportReaders, sportTried = {}, {}, false
--- the reader passthrough arrives on, and when it last did (os.clock); nil = not decided yet
-local sportLocked, sportLockAt = nil, -100
-local sportOthers = {}   -- while one is kept: the readers whose frames are thrown away
-local SPORT_RELOCK_S = 5
+local sportAll, sportTried = {}, false
 local function sportInit()
   sportTried = true
   if sport == nil or sport.getSensor == nil then return end
-  -- Two readers: the default one and the external module's (module = 1). Which of them gets an
-  -- R9's frames depends on the radio: on the X20S bench the default reader did, and the second
-  -- got the same frames again, so text chunks were spliced out of order (F.Port, 2026-11-04,
-  -- test29 kept one reader). On the X18 tester's R9 (external module) only the second did: with
-  -- one reader his ArduPilot passthrough never arrived from test29 on, and it had worked in
-  -- test10/11 with both. So both are opened and the first one that brings a passthrough frame is
-  -- kept alone (sportLock); after SPORT_RELOCK_S without one, both are read again.
+  -- Two readers, both read all the time: the default one and the external module's (module = 1).
+  -- Radios differ in how they hand frames to them. The X20S bench (Archer, F.Port) gave BOTH every
+  -- frame, so with two readers text chunks were spliced out of order (2026-11-04; test29 kept one
+  -- reader). The X18 tester's R9 + ArduPilot worked with two readers up to test28 and has been
+  -- broken since test29 with one (horizon still, no battery, NoFix) while status and text arrived:
+  -- frames that come on the other reader were lost. So both are read, and a frame that is an exact
+  -- copy (same app ID, same value) of one the OTHER reader brought just before is dropped. Dropping
+  -- an exact copy loses nothing, wherever the frames come from (sportDup).
   for _, arg in ipairs({ { appIdStart = 0x0800, appIdEnd = 0x51FF },
                          { module = 1, appIdStart = 0x0800, appIdEnd = 0x51FF } }) do
     local ok, sn = pcall(sport.getSensor, arg)
@@ -417,33 +417,52 @@ local function sportInit()
     local ok, sn = pcall(sport.getSensor)
     if ok and sn then sportAll[1] = sn end
   end
-  sportReaders = sportAll
 end
-local function sportLock(r)
-  sportLockAt = now()
-  if sportLocked ~= r then
-    sportLocked, sportReaders, sportOthers = r, { r }, {}
-    for _, o in ipairs(sportAll) do if o ~= r then sportOthers[#sportOthers + 1] = o end end
+
+-- copies across readers: key "appId/value" -> { reader, count still unmatched, time }
+local seen, seenN = {}, 0
+local DUP_S = 2
+local function sportDup(i, id, v)
+  local k = id .. "/" .. v
+  local e = seen[k]
+  local t = now()
+  if e and e[1] ~= i and t - e[3] < DUP_S then
+    e[2] = e[2] - 1
+    if e[2] <= 0 then seen[k] = nil seenN = seenN - 1 end
+    return true
   end
+  if e and e[1] == i then e[2], e[3] = e[2] + 1, t return false end
+  if seenN > 96 then seen, seenN = {}, 0 end
+  if not e then seenN = seenN + 1 end
+  seen[k] = { i, 1, t }
+  return false
 end
--- page 5: which S.Port reader passthrough arrives on ("def", "ext"; "?" = not decided, "-" = none)
-local function sportReaderName()
-  if #sportAll == 0 then return "-" end
-  if not sportLocked then return "?" end
-  return (sportLocked == sportAll[1]) and "def" or "ext"
+
+-- page 5 diagnostics: passthrough frames per reader and per app ID, copies dropped, value type
+local DIAG_IDS = { 0x0800, 0x5000, 0x5001, 0x5002, 0x5003, 0x5004, 0x5005, 0x5006 }
+local diag = { n = { 0, 0 }, dup = 0, vt = "-", ids = { {}, {} } }
+-- two lines: frames per reader (default / external), copies dropped, value type; then per app ID
+-- "def/ext" counts (GPS = 0x0800, 00..06 = 0x5000..0x5006)
+function T.sportDiag()
+  if #sportAll == 0 then return "S.Port readers: none", nil end
+  local parts = {}
+  for _, id in ipairs(DIAG_IDS) do
+    parts[#parts + 1] = string.format("%s %d/%d", id == 0x0800 and "GPS" or string.format("%02X", id % 256),
+      diag.ids[1][id] or 0, diag.ids[2][id] or 0)
+  end
+  return string.format("S.Port rd %d  def %d  ext %d  dup %d  val %s%s  bit32 %s%s  roll %s", #sportAll, diag.n[1],
+    diag.n[2], diag.dup, diag.vt, splitInt and " &>>" or "", bit32 and "yes" or "no", bx and " (used)" or "",
+    s.roll and string.format("%.1f", s.roll) or "-"), table.concat(parts, "  ")
 end
+
 local function sportPop()
   if #sportAll == 0 then
     if sportTried then return false end
     sportInit()
     if #sportAll == 0 then return false end
   end
-  -- the kept reader went quiet (link lost, or the model now uses the other module): read both
-  if sportLocked and #sportAll > 1 and now() - sportLockAt > SPORT_RELOCK_S then
-    sportLocked, sportReaders, sportOthers = nil, sportAll, {}
-  end
   local any = false
-  for _, r in ipairs(sportReaders) do
+  for i, r in ipairs(sportAll) do
     -- EdgeTX / OpenTX adapter: the four values straight, no frame object or method calls
     if r.popRaw then
       local physId, primId, id, value = r:popRaw()
@@ -455,29 +474,30 @@ local function sportPop()
       end
       return any
     end
-    local ok, f = pcall(r.popFrame, r)       -- no closure per pop
+    -- the call exactly as test10 made it (the last version an X18 + R9 worked with)
+    local ok, f = pcall(function() return r:popFrame() end)
     if ok and f then
       any = true
       if f:primId() == 0x10 then
         local id = f:appId()
         -- only the passthrough window: plain FrSky sensors are read as sources
         if id == 0x0800 or (id >= 0x5000 and id <= 0x50FF) then
-          local first = sportLocked ~= r
-          sportLock(r)
-          s.link = "S.Port"
-          -- S.Port hands the value over as one number: an integer on Ethos (split exactly, also
-          -- with 32-bit Lua); on a float-number EdgeTX the radio has rounded it already
-          pt(id, split32(f:value()))
-          -- just locked: the other reader's frames from this pass would be the same frames again
-          if first then return any end
+          local v = f:value()
+          diag.n[i] = diag.n[i] + 1
+          diag.ids[i][id] = (diag.ids[i][id] or 0) + 1
+          diag.vt = math.type and math.type(v) or type(v)
+          if #sportAll > 1 and sportDup(i, id, v) then
+            diag.dup = diag.dup + 1
+          else
+            s.link = "S.Port"
+            -- S.Port hands the value over as one number: an integer on Ethos (split exactly, also
+            -- with 32-bit Lua); on a float-number EdgeTX the radio has rounded it already
+            pt(id, split32(v))
+          end
         end
       end
     end
   end
-  -- the readers not kept are emptied as fast as the kept one is read: on a radio where both get
-  -- every frame, a backlog left there would be replayed (old, armed) once both are read again
-  -- after a link loss (simulator, duplicate frames on both readers)
-  for _, o in ipairs(sportOthers) do pcall(o.popFrame, o) end
   return any
 end
 
@@ -950,9 +970,8 @@ function T.sensorCheck(kind)
   local mod = {}
   for i = 0, 1 do mod[#mod + 1] = moduleOn(i) and "on" or "off" end
   local ta = telemActive()
-  rows.header = string.format("link %s  int %s ext %s  pt %s  fc %s  tlm %s  rd %s", tostring(kind), mod[1], mod[2],
-    (now() - s.lastPt <= 3) and "yes" or "no", tostring(s.fc), ta == nil and "n/a" or (ta and "on" or "LOST"),
-    sportReaderName())
+  rows.header = string.format("link %s  int %s ext %s  pt %s  fc %s  tlm %s", tostring(kind), mod[1], mod[2],
+    (now() - s.lastPt <= 3) and "yes" or "no", tostring(s.fc), ta == nil and "n/a" or (ta and "on" or "LOST"))
   if not kind then return rows end
   for _, key in ipairs(CHECK_KEYS) do
     local src = findSource(key, kind)
@@ -1013,8 +1032,8 @@ function T.resetModel()
   srcCache, srcMissAt, srcQuery, srcAt = {}, {}, {}, {}
   sensorList, sensorListAt = nil, -100
   createTried, createdAt = {}, -100
-  -- the other model may use the other module: decide the S.Port reader again
-  sportLocked, sportReaders, sportLockAt, sportOthers = nil, sportAll, -100, {}
+  seen, seenN = {}, 0
+  diag = { n = { 0, 0 }, dup = 0, vt = "-", ids = { {}, {} } }
 end
 function T.checkModel()
   local n = modelName()
