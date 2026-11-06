@@ -528,8 +528,7 @@ end
 -- last good GPS position, kept on the SD card: with no fix (bench, start-up) the map centres
 -- there, so the tile set still shows
 local POS_FILE = (OD_ROOT or "/scripts/omnideck/") .. "lastpos.txt"
-local POS_SAVE_S = 60
-local lastPos, lastPosRead, lastPosSaved = nil, false, -1000
+local lastPos, lastPosRead = nil, false
 
 -- whole file, a line at a time: Ethos rejects read("a") ("invalid format", X18 tester
 -- 2026-11-03); "*l" is what b14ckyy's mapping widget uses on Ethos
@@ -554,18 +553,15 @@ local function readLastPos()
   if la and lo and (la ~= 0 or lo ~= 0) then lastPos = { la, lo } end
 end
 
--- Ethos: written once per landing (the first fix after a disarm), not every minute while there
--- is a fix: no SD writes while sitting on the bench or flying (see safe() below)
+-- Written once per landing (the first fix after a disarm), not every minute while there is a
+-- fix: no SD writes while sitting on the bench or flying (see safe() below)
 local posArmed = false
 local function rememberPos(s, now)
   if not (s.lat and (s.fix or 0) >= 3) then return end
   lastPos = { s.lat, s.lon }
-  if not OD_LITE then
-    local landed = posArmed and s.armed == false
-    if s.armed ~= nil then posArmed = s.armed == true end
-    if not landed then return end
-  elseif now - lastPosSaved < POS_SAVE_S then return end
-  lastPosSaved = now
+  local landed = posArmed and s.armed == false
+  if s.armed ~= nil then posArmed = s.armed == true end
+  if not landed then return end
   pcall(function()
     local f = io.open(POS_FILE, "w")
     if f then f:write(string.format("%.7f,%.7f\n", s.lat, s.lon)) f:close() end
@@ -593,35 +589,23 @@ end
 
 -- A Lua error in paint() leaves the screen half drawn (Ethos shows nothing else). Each part runs
 -- on its own, so one failing part leaves the rest of the screen, and the first error is shown
--- in red on the screen for a tester to photograph (EdgeTX/OpenTX also keep it in error.log).
--- Ethos: its per-update Lua limit ("Max instructions count reached") is raised as a Lua error to
--- stop the script. It is never caught here: re-raised at once, so Ethos ends the update the way
--- it expects (Yaapu and the INAV dashboard never catch it either; test39 drew on after it).
--- Nor is anything written to the SD card from paint on Ethos: a file call that stalls can't be
--- stopped by that limit, and an X18 froze (screen dead, RF working) after test39 had logged 88
--- errors, each one a write made in the middle of a screen update.
-local ERR_FILE = (OD_ROOT or "/scripts/omnideck/") .. "error.log"
-local paintErr, loggedErr = nil, {}
-local limitHits = 0         -- Ethos limit hits this session (page 5)
+-- in red on the screen for a tester to photograph.
+-- EdgeTX's per-call Lua limit is raised as the error "CPU limit", and EdgeTX then raises it again
+-- on every further line until the script is back at the top (lua_widget.cpp / interface.cpp):
+-- it can't be caught and drawn past. It is re-raised at once, so nothing more runs after it
+-- (EdgeTX then shows "ERROR in refresh(): CPU limit" in place of the widget).
+-- Nothing is written to the SD card from a screen update: a file call that stalls can't be
+-- stopped by any Lua limit (an Ethos X18 froze after test39 had logged 88 errors, each one a
+-- write made in the middle of a screen update). The error stays on the screen instead.
+local paintErr = nil
+local limitHits = 0         -- the page 5 "Lua ms" line reading it is Ethos-only (never shown here)
 local function safe(part, fn, ...)
   local ok, err = pcall(fn, ...)
   if ok then return end
-  if not OD_LITE and string.find(tostring(err), "Max instructions", 1, true) then
-    limitHits = limitHits + 1
-    paintErr = paintErr or (part .. ": Lua limit")
-    error(err, 0)
-  end
+  if string.find(tostring(err), "CPU limit", 1, true) then error(err, 0) end
   local W, H = lcd.getWindowSize()
   lcd.setClipping(0, 0, W, H)          -- the map leaves its clipping on when it fails
-  local msg = part .. ": " .. tostring(err)
-  paintErr = paintErr or msg
-  if OD_LITE and not loggedErr[msg] then
-    loggedErr[msg] = true
-    pcall(function()
-      local f = io.open(ERR_FILE, "a")
-      if f then f:write(VERSION .. " " .. msg .. "\n") f:close() end
-    end)
-  end
+  paintErr = paintErr or (part .. ": " .. tostring(err))
 end
 local function errorBanner(W, H)
   if not paintErr then return end
