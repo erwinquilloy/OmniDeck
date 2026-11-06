@@ -490,6 +490,17 @@ function L.drawBitmap(x, y, bmp)
 end
 
 E.lcd = L
+-- OpenTX only: the raw drawing calls, for the few hot paths of the main page (HUD ground strips,
+-- the data blocks' live layer). Each adapter call above costs a Lua function with clip and colour
+-- checks; with 10,000 instructions per update on OpenTX that was about a third of the main page.
+-- rcolor() goes through the same "sent" slot as the adapter, so both stay in step. Callers draw
+-- only inside the widget, where no clipping is needed.
+if OTX then
+  E.OD_RAW = {
+    fill = rawFRect, text = rawText, line = rawLine, LINE = LINE, CUSTOM = CUSTOM, FONTS = FONTS, ALIGN = ALIGN,
+    color = function(c) if c ~= sent then rawSetColor(CUSTOM, c) sent = c end end,
+  }
+end
 
 -- ---------------------------------------------------------------- link statistics
 -- For the sensor check page (page 5): what actually reaches the widget, so a tester's photo shows

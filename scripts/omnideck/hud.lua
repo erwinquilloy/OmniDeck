@@ -44,27 +44,38 @@ local OTX = OD_OTX
 -- 6 px rows (columns when banked past 45 deg); the ground beyond it is one rectangle. Level
 -- flight takes two rectangles, 20 deg of bank about 16.
 local STRIP = 6
+-- OpenTX: the strips skip the adapter (etx.lua OD_RAW): one OpenTX call each, colour set once
+local RAW = OD_RAW
+local rfill, CUST = RAW and RAW.fill, RAW and RAW.CUSTOM
+local lcdFill = lcd.drawFilledRectangle
 local function groundRects(x, y, w, h, px, py, nx, ny)
   local x2, y2 = x + w, y + h
+  -- OpenTX: OpenTX's own fill with the colour flag (the 5th argument; the adapter ignores it).
+  -- It doesn't clip, so every size is cut to the box here: the same pixels the adapter drew.
+  local fill = rfill or lcdFill
+  if RAW then RAW.color(C.ground) end
+  local min, max, floor = math.min, math.max, math.floor
+  local ix, iy = I(x), I(y)
   if math.abs(ny) >= math.abs(nx) then
     -- rows: the line's height at the left and right edges gives the band
     local yl = py - (x - px) * nx / ny
     local yr = py - (x2 - px) * nx / ny
-    local b1, b2 = math.max(y, math.min(yl, yr)), math.min(y2, math.max(yl, yr))
+    local b1, b2 = max(y, min(yl, yr)), min(y2, max(yl, yr))
     if ny > 0 then   -- ground below the band
-      if b2 < y2 then lcd.drawFilledRectangle(I(x), I(math.max(y, b2)), I(w), I(y2 - math.max(y, b2)) + 1) end
+      if b2 < y2 then local ys = I(max(y, b2)) fill(ix, ys, I(w), y2 - ys, CUST) end
     else             -- inverted: ground above the band
-      if b1 > y then lcd.drawFilledRectangle(I(x), I(y), I(w), I(math.min(y2, b1) - y) + 1) end
+      if b1 > y then fill(ix, iy, I(w), min(I(min(y2, b1) - y) + 1, y2 - iy), CUST) end
     end
     if nx ~= 0 then
       local st = STRIP   -- 6 px: taller strips (fewer calls) showed as steps under the horizon line
-      local yy = math.floor(b1)
+      local yy = floor(b1)
       while yy < b2 do
+        local sh = min(st, y2 - yy)
         local xb = px - (yy + st / 2 - py) * ny / nx
         if nx > 0 then
-          if xb < x2 then lcd.drawFilledRectangle(I(math.max(x, xb)), yy, I(x2 - math.max(x, xb)) + 1, st) end
+          if xb < x2 then local xs = I(max(x, xb)) fill(xs, yy, x2 - xs, sh, CUST) end
         elseif xb > x then
-          lcd.drawFilledRectangle(I(x), yy, I(math.min(x2, xb) - x) + 1, st)
+          fill(ix, yy, min(I(min(x2, xb) - x) + 1, x2 - ix), sh, CUST)
         end
         yy = yy + st
       end
@@ -73,21 +84,22 @@ local function groundRects(x, y, w, h, px, py, nx, ny)
     -- columns: steep horizon (banked past 45 deg)
     local xt = px - (y - py) * ny / nx
     local xb = px - (y2 - py) * ny / nx
-    local b1, b2 = math.max(x, math.min(xt, xb)), math.min(x2, math.max(xt, xb))
+    local b1, b2 = max(x, min(xt, xb)), min(x2, max(xt, xb))
     if nx > 0 then
-      if b2 < x2 then lcd.drawFilledRectangle(I(math.max(x, b2)), I(y), I(x2 - math.max(x, b2)) + 1, I(h)) end
+      if b2 < x2 then local xs = I(max(x, b2)) fill(xs, iy, x2 - xs, I(h), CUST) end
     else
-      if b1 > x then lcd.drawFilledRectangle(I(x), I(y), I(math.min(x2, b1) - x) + 1, I(h)) end
+      if b1 > x then fill(ix, iy, min(I(min(x2, b1) - x) + 1, x2 - ix), I(h), CUST) end
     end
     if ny ~= 0 then
       local st = STRIP
-      local xx = math.floor(b1)
+      local xx = floor(b1)
       while xx < b2 do
+        local sw = min(st, x2 - xx)
         local yb = py - (xx + st / 2 - px) * nx / ny
         if ny > 0 then
-          if yb < y2 then lcd.drawFilledRectangle(xx, I(math.max(y, yb)), st, I(y2 - math.max(y, yb)) + 1) end
+          if yb < y2 then local ys = I(max(y, yb)) fill(xx, ys, sw, y2 - ys, CUST) end
         elseif yb > y then
-          lcd.drawFilledRectangle(xx, I(y), st, I(math.min(y2, yb) - y) + 1)
+          fill(xx, iy, sw, min(I(min(y2, yb) - y) + 1, y2 - iy), CUST)
         end
         xx = xx + st
       end

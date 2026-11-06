@@ -28,6 +28,9 @@ def build(sd_root, audio=None):
         if name.endswith('.lua'):
             shutil.copyfile(os.path.join(EDGETX, name), os.path.join(dst, name))
     shutil.copytree(os.path.join(SHARED, 'tones'), os.path.join(dst, 'tones'), dirs_exist_ok=True)
+    # main page logos (OpenTX's logo panel; Ethos X18-size screens)
+    if os.path.isdir(os.path.join(SHARED, 'logos')):
+        shutil.copytree(os.path.join(SHARED, 'logos'), os.path.join(dst, 'logos'), dirs_exist_ok=True)
     # SYS > Tools > OmniDeck Check: says why the widget is missing from the widget list
     tools = os.path.join(sd_root, 'SCRIPTS', 'TOOLS')
     os.makedirs(tools, exist_ok=True)

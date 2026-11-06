@@ -42,6 +42,14 @@ C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, eff
                zoomMode = 0, zoomSrc = "", tileSet = "*", trail = 1, startPage = 1, pageSwitch = "", pageSwMode = 0, sumAuto = 1, batCap = 0, lowVolt = 0, critVolt = 0,
                cells = 0, lowAlt = 0, inavWp = 0 }
 
+-- OpenTX only (no lcd.sizeText there, the same test etx.lua uses): the panel above the data
+-- blocks on the main page, the logo or a radar (as iNav LuaTelemetry's). EdgeTX's list and files
+-- stay as they were.
+if lcd and lcd.sizeText == nil then
+  C.ITEMS[#C.ITEMS + 1] = { "panel", "Top-right panel", { { 0, "Logo" }, { 1, "Radar" } } }
+  C.DEFAULTS.panel = 0
+end
+
 -- EdgeTX: io.read(f, n) / io.write(f, s); standard Lua (simulator): f:read / f:write
 local function fread(f)
   local parts = {}

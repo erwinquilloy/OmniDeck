@@ -320,11 +320,19 @@ local function lineH(f)
   if v == nil then lcd.font(f) local _, h = lcd.getTextSize("0") v = h fontH[f] = v end
   return v
 end
+-- OpenTX: the live layer draws with OpenTX's own calls (etx.lua OD_RAW), skipping the adapter:
+-- fewer Lua instructions per block; the bitmap behind it already holds the labels and frames
+local RAW = OD_RAW
+local rfill, rtext, rcolor = RAW and RAW.fill, RAW and RAW.text, RAW and RAW.color
+local RC = RAW and RAW.CUSTOM
+local RF = RAW and RAW.FONTS
+local RCENTER, RRIGHT = RAW and (RAW.ALIGN[1] or 0), RAW and (RAW.ALIGN[2] or 0)
 local function tileLive(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inset)
   if bar then
     h = h - 7
-    lcd.color(COL.dim)
-    lcd.drawFilledRectangle(I(x + 4), I(y + h + 1), I((w - 8) * bar), 4)
+    rcolor(COL.dim)
+    local bw = I((w - 8) * bar)
+    if bw > 0 then rfill(I(x + 4), I(y + h + 1), bw, 4, RC) end
   end
   local lh = lineH(fLbl)
   if note then
@@ -332,15 +340,14 @@ local function tileLive(x, y, w, h, label, value, color, fVal, fLbl, bar, note, 
     local lw = labelW[label]
     if lw == nil then lw = lcd.getTextSize(label) labelW[label] = lw end
     if lw + lcd.getTextSize(note) + 10 <= w then
-      lcd.color(COL.dim)
-      lcd.drawText(I(x + w - 4), I(y + 2), note, RIGHT)
+      rcolor(COL.dim)
+      rtext(I(x + w - 4), I(y + 2), note, RC + RF[fLbl] + RRIGHT)
     end
   end
   local vh = lineH(fVal)
-  lcd.font(fVal)
-  lcd.color(color or COL.txt)
+  rcolor(color or COL.txt)
   inset = inset or 0
-  lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
+  rtext(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, RC + RF[fVal] + RCENTER)
 end
 
 -- share of the pack left, 0..1. nil without a capacity, or when nothing shows a current sensor is
@@ -644,8 +651,8 @@ local function mainLayout(W, H)
   local bodyY, bodyH = barH, H - barH - msgH
   local hudW = R(W * 0.56)
   local rx, rw = hudW + 3, W - hudW - 3
-  -- OpenTX: no minimap (the Map page has the map); the data blocks take the whole panel
-  local mapH = OTX and 0 or math.min(rw, R(bodyH * 0.46))
+  -- the panel above the data blocks: minimap, radar or logo (OpenTX: radar or logo, see panelMode)
+  local mapH = math.min(rw, R(bodyH * 0.46))
   return barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH
 end
 
@@ -676,6 +683,11 @@ local function loadLogo(file)
   if ok and bmp then
     local okW, bw = pcall(function() return bmp:width() end)
     local okH, bh = pcall(function() return bmp:height() end)
+    -- OpenTX / EdgeTX bitmaps have no width() / height(): Bitmap.getSize(bmp) gives both
+    if not (okW and okH) and Bitmap and Bitmap.getSize then
+      local ok, a, b = pcall(Bitmap.getSize, bmp)
+      if ok and a and b then okW, bw, okH, bh = true, a, true, b end
+    end
     logo.bmp, logo.w, logo.h = bmp, okW and bw or 0, okH and bh or 0
   end
 end
@@ -685,7 +697,8 @@ local function logoPanel(x, y, w, h)
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
   local box = math.min(w, h) - 16
-  local k = math.min(1, box / logo.w, box / logo.h)
+  -- OpenTX draws a bitmap at its own size only: centred as it is (100 x 100 fits its 208 x 105)
+  local k = OTX and 1 or math.min(1, box / logo.w, box / logo.h)
   local dw, dh = I(logo.w * k), I(logo.h * k)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
   if k < 1 then
@@ -695,12 +708,29 @@ local function logoPanel(x, y, w, h)
   end
 end
 
+-- what the panel above the data blocks shows: OpenTX its setting (radar or logo, no minimap: the
+-- Lua budget), Ethos 480 px wide or less the logo (test41), otherwise the minimap as before
+local function panelMode(w, W)
+  if OTX then return w.panel == 1 and "radar" or "logo" end
+  if noMinimap(W) then return "logo" end
+  return "map"
+end
+local radarO = {}
+local function radarOpts(w, u)
+  local f = FS.live()
+  radarO.orient, radarO.distF = ORIENT[w.orient] or "north", u.distF
+  radarO.maxDist = f and f.maxHome or nil
+  return radarO
+end
+
 local function pageMain(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
   local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
   -- map first: on EdgeTX a tile can hang over the map's edge, and what follows covers it
-  if noMinimap(W) then logoPanel(rx, bodyY, rw, mapH)
-  elseif not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
+  local pm = panelMode(w, W)
+  if pm == "logo" then logoPanel(rx, bodyY, rw, mapH)
+  elseif pm == "radar" then safe("radar", MAP.radar, rx, bodyY, rw, mapH, s, radarOpts(w, u))
+  else safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(hudW, bodyY, 3, bodyH)
   lcd.drawFilledRectangle(rx, bodyY + mapH, rw, bodyH - mapH)
@@ -1213,6 +1243,8 @@ local function wakeup(w)
   if not OD_LITE then
     if noMinimap(select(1, lcd.getWindowSize())) then loadLogo(w.logoFile) end
     perfNote(false, t0)
+  elseif OTX and w.panel ~= 1 then
+    loadLogo(w.logoFile)   -- OpenTX: the logo panel (a file read, so here and once)
   end
 end
 
