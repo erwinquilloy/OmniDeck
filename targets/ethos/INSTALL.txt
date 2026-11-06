@@ -1,0 +1,259 @@
+OmniDeck 0.2.0-test41 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+One telemetry display for ArduPilot, INAV and Betaflight.
+Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
+
+
+
+
+
+WHAT'S NEW IN TEST 41
+Ethos only. Made after an X18 froze and showed "Max instructions count reached" in flight.
+- About half the Lua work per screen update is gone: the main page drops from about 12,700 to
+  5,700 Lua steps on an X18 (worst case 13,300 -> 6,000), the map page from 15,100 to 8,200.
+  Pixel positions now use the radio's own rounding (EdgeTX always did); displayed numbers are
+  rounded exactly as before.
+- X18 and other screens 480 px wide or less: the main page shows a logo where the minimap was
+  (the map page still has the full map). Pick it per model in the widget settings: "Main page
+  logo (X18-size screens)". Any PNG in /scripts/omnideck/logos/ shows up there (square, about
+  100 x 100 px; bigger pictures are scaled down). OmniDeck and Stratos logos are included.
+- If Ethos's Lua limit is ever reached, OmniDeck no longer catches it and keeps drawing: Ethos
+  ends that update the way it expects (as Yaapu and the INAV dashboard do).
+- No writes to the SD card while drawing or sitting on the bench: error.log is no longer written
+  on Ethos, and the last GPS position (lastpos.txt) is saved once per landing instead of every
+  minute while there is a fix.
+- Another model selected: noticed within a second, and OmniDeck starts fresh (nothing kept from
+  the old model) and says the welcome again, as Yaapu does.
+- Page 5 (sensor check): a new line "Lua ms: draw .. bg .. limit hits ..": how long the screen
+  update and the background work take (now and the worst since power-up) and how often Ethos's
+  Lua limit was reached. Please send a photo of it after a flight.
+- Changed since test 39: audio.lua, hud.lua, main.lua, map.lua, telem.lua, ui.lua, new folder
+  logos/. Test 40 (FrSky LQ/RSSI) is not in this build.
+  After copying, delete any .luac files in /scripts/omnideck/ (old compiled copies).
+
+WHAT'S NEW IN TEST 39
+- ArduPilot over R9 / F.Port / FBUS on Ethos: frames are now read and taken apart exactly the
+  way test 10 did (the last version that worked on the X18 tester's R9). Since test 28 a bit32
+  library found on the radio was used to take the values apart; on Ethos that is no longer
+  used (EdgeTX keeps it). The exact 32-bit values from test 37 stay.
+- Sensor check (page 5): the S.Port line now also shows "bit32 yes/no" and the last roll
+  value decoded from ArduPilot.
+- The lean drawing (the Crossfire "Max instructions" fix) is unchanged.
+- Changed since test 38: telem.lua and ui.lua.
+  After copying, delete any .luac files in /scripts/omnideck/ (old compiled copies).
+
+WHAT'S NEW IN TEST 38
+- ArduPilot over R9 / F.Port / FBUS: the S.Port reading is back to what test 10 did, the
+  last version that worked on the X18 tester's R9: both of the radio's S.Port readers are
+  read all the time (from test 29 on only one was, and on the X18 part of the data, the
+  horizon, battery and GPS, never arrived). A frame that is an exact copy of one the other
+  reader just brought is dropped, so radios that give both readers every frame (X20S) don't
+  get messages mixed up.
+- Sensor check (page 5): two new lines under the 5000/5001 line. "S.Port rd 2 def N ext N"
+  counts the ArduPilot frames each reader brought ("dup" = copies dropped, "val integer" is
+  normal); the next line counts them per kind (GPS, 00 to 06) as default/external.
+- The lean drawing from test 36 (the Crossfire "Max instructions" fix) is unchanged.
+- Changed since test 37: telem.lua and ui.lua.
+  After copying, delete any .luac files in /scripts/omnideck/ (old compiled copies).
+
+WHAT'S NEW IN TEST 37
+- ArduPilot over S.Port / F.Port / FBUS on radios whose Lua uses 32-bit numbers (the X18;
+  page 5 shows "32-bit LOST"): every value now arrives exact. The flight mode read -1, status
+  messages lost every 4th letter and battery, GPS and other values were slightly off, because
+  each 32-bit value lost its lowest bits on the way in. OmniDeck now splits it the way Yaapu
+  does. Radios with 64-bit Lua (X20 family, "32-bit OK") were never affected.
+- Changed since test 36: telem.lua and ui.lua.
+  After copying, delete any .luac files in /scripts/omnideck/ (old compiled copies).
+
+WHAT'S NEW IN TEST 36
+- ArduPilot over R9 / F.Port / FBUS on an external module: telemetry arrives again (the
+  horizon stayed still and only the GPS position showed, X18 + R9). Since test 29 OmniDeck
+  read only one of the radio's two S.Port readers, and on some radios the external module's
+  frames come on the other one. Now both are opened and OmniDeck keeps the one ArduPilot's
+  frames arrive on (the other one's copies are thrown away, so messages don't get mixed up).
+  The sensor check page (page 5) shows which one at the end of its first line: "rd def" or
+  "rd ext" ("rd ?" = no ArduPilot frames yet).
+- Fixes "Max instructions count reached" (red text over the main page, the right half not
+  drawn; X18 with INAV + TBS Crossfire). The main page now needs about a quarter of the Lua
+  work it did. What looks different:
+    speed and altitude tapes: a number on every other mark
+    heading tape: marks every 15 degrees, N / E / S / W only (the box shows the exact heading)
+    pitch ladder: every 10 degrees, numbered on one side
+    roll scale: no 45 degree marks
+    the small map on the main page: no trail and no mission (the map page still shows both;
+    long trails and missions are drawn there from fewer points)
+- INAV mission download is now Off for a newly added widget (a widget you already have keeps
+  its setting). Turn it on in the widget settings if you use INAV missions.
+- Changed since test 35: hud.lua, main.lua, map.lua, telem.lua, tiles.lua and ui.lua.
+  After copying, delete any .luac files in /scripts/omnideck/ (old compiled copies).
+
+WHAT'S NEW IN TEST 35 (test 34 was withdrawn; its change is included)
+- INAV and Betaflight: ACRO with airmode on now shows (and is spoken) as ACRO.
+  INAV 6.x to 8.0.x and Betaflight send "AIR" for it, which OmniDeck showed as is.
+- Changed since test 33: telem.lua, ui.lua and hud.lua (the hud.lua change only does
+  anything on EdgeTX).
+
+WHAT'S NEW IN TEST 33
+- New male voice: Guy (US English, the same voice family as Aria). Ethos now has Aria, Guy,
+  Christopher and Michelle.
+- Two sounds have shorter file names: critvolt.wav (was criticalvoltage.wav) and
+  notready.wav (was notreadytoarm.wav). Copy the audio folder from this package; the old
+  two files can be deleted.
+
+WHAT'S NEW IN TEST 32
+- INAV missions: all waypoints show. On a slow link (seen with TBS Crossfire) a late reply to
+  a repeated request was taken as the next waypoint, so a 6-WP mission showed only WP1 and
+  WP4. Each reply is now checked against the waypoint asked for.
+- INAV missions uploaded after the radio started now appear: while disarmed, OmniDeck asks
+  for the waypoint count every 10 s and downloads the mission again if it changed.
+- Sensor check page (page 5): a line for the INAV mission download (what INAV reported, how
+  many waypoints arrived, the end marker, and late replies thrown away).
+
+WHAT'S NEW IN TEST 31
+- Main page: a FLIGHT TIME block takes the place of TOTAL DIST. The total distance flown is
+  now the small note in the HOME block ("TOTAL 8.33km"); the max distance from home is in
+  the flight summary.
+- Flight time, on the main page and in the flight summary:
+  ArduPilot: counts only while ArduPilot says it is flying (like Yaapu), so time armed on
+  the ground is left out and it pauses after landing. On the bench it stays at 00:00.
+  INAV / Betaflight: they send no "flying" flag, so it counts from arming (like the iNav
+  OpenTX widget).
+  After disarm the last flight's time stays, dimmed, until the next arming.
+
+WHAT'S NEW IN TEST 30
+- Messages page: the same message repeated in a row shows as one line with a count, like
+  Yaapu ("PreArm: AHRS: waiting for home (x4)"). A repeat updates the line's age and still
+  keeps NOT READY TO ARM up, but adds no line and no second call-out.
+
+WHAT'S NEW IN TEST 29
+- Main page: the values in the right-hand blocks are centred (HOME keeps clear of its arrow).
+- Arming always brings the main page back, also from the flight summary.
+- ArduPilot: no false READY TO ARM while PreArm errors repeat. Over F.Port, pieces of
+  messages can go missing (also the "PreArm:" word); every critical message now counts,
+  so NOT READY TO ARM stays up while the errors repeat.
+- S.Port / F.Port / FBUS: telemetry is read through one reader, like Yaapu does. Two were
+  used before, which could repeat or mix up message pieces ("ass Healass Heal").
+
+WHAT'S NEW IN TEST 28
+- No change on Ethos (EdgeTX telemetry speed-up only).
+
+WHAT'S NEW IN TEST 27
+- ArduPilot: pulling the flight battery (or losing the link) no longer flashes ARMED and opens
+  the flight summary. ArduPilot's own flight mode text carries no "disarmed" mark by default,
+  and it was read as armed once the passthrough telemetry stopped.
+
+WHAT'S NEW IN TEST 26
+- The model name is shown in the middle of the top bar, next to the radio battery
+  ("TX 8.1V"). With little room the radio battery is left out first, then the name is shortened.
+  (Test 25 moved it to the lower right corner; back in the top bar now.)
+
+WHAT'S NEW IN TEST 22
+- Lost telemetry is detected from Ethos's own "telemetry lost" state: header "tlm LOST" and a
+  red frame, even though Ethos keeps showing the last LQ / RSSI values.
+- The link (CRSF or S.Port) stays as it was while telemetry is lost.
+- Switching models starts clean: the flight controller, home and messages of the model
+  before no longer carry over (a Betaflight plane showed "fc ArduPilot" after an ArduPilot one).
+- Page 5, SENSOR CHECK: every sensor OmniDeck reads, with its value. Please send a photo of it
+  with any telemetry problem.
+
+WHAT'S NEW IN TEST 7
+- INAV over TBS Crossfire: fixed ARMED showing before arming, the tilted horizon and
+  missing GPS (the wrong sensor was read for the flight mode).
+- INAV over R9 / FrSky S.Port: telemetry now shows. Ethos doesn't find INAV's Flight Mode,
+  Roll, Pitch and Satellites sensors by itself, so OmniDeck adds them to the model's
+  telemetry list (same as the INAV dashboard). Give it about 20 s after the link comes up.
+- Telemetry link Auto: picks the link that is actually receiving, so sensors left from
+  another receiver no longer confuse it.
+- Please check on INAV: plane level, then roll it right wing down. The horizon should
+  tilt like the view from a plane banking right (ground rising on the right).
+
+WHAT'S NEW IN TEST 6
+- Battery alarms in the widget settings (volts per cell, 0 = off): Low voltage alarm says
+  "Low voltage" (voltage turns amber), Critical voltage alarm says "Critical voltage" (red).
+  Each needs 5 s below its value. Set Battery cells for Li-ion or part-charged packs.
+- Low altitude alarm (0 = off): says "Terrain, pull up" when the aircraft drops below it,
+  only after it has been above it once, with a red frame round the altitude box.
+  (EdgeTX: these alarms are not available yet.)
+
+WHAT'S NEW IN TEST 5
+- INAV/Betaflight: the artificial horizon now follows roll and pitch the right way.
+
+WHAT'S NEW IN TEST 3
+- mLRS: the GPS position is now right (mLRS sends it encoded wrongly; OmniDeck corrects it).
+- Telemetry lost is also shown when the radio's module is switched off.
+- Map view setting (also the third map button): PLANE = aircraft in the middle, you zoom;
+  HOME = home in the middle, zooms out to keep the aircraft on the map and back in on return.
+- When home is off the map, a small home icon on the edge shows its direction and distance.
+- The compass (heading tape) is transparent; the flight summary opens on any page after disarm.
+- "Omni Deck telemetry ready" plays as soon as the widget starts.
+
+WHAT'S NEW IN TEST 2
+- Settings now stay after a radio restart. Set the widget settings once more after installing.
+- READY TO ARM no longer pops up when the aircraft isn't ready (ArduPilot over CRSF).
+- Lost telemetry: the screen edges flash red and the top bar reads NO TELEMETRY.
+- With no GPS fix the map centres on the last known position, so map tiles still show.
+- The map page shows the aircraft's GPS position along the bottom (Lat, Lon).
+
+
+THIS IS A TEST BUILD. It has been checked in a simulator and on one X20S on the bench,
+not in flight. Do not rely on it, or on its voice call-outs, to fly.
+
+
+INSTALL
+1. Connect the radio to the PC by USB and choose the SD card (or use a card reader).
+2. Copy the "scripts" and "bitmaps" folders from this folder to the ROOT of the SD card.
+   You should end up with:
+       scripts/omnideck/main.lua
+       scripts/omnideck/x18/   scripts/omnideck/x20/   (the OmniDeck code, one copy per screen size)
+       scripts/omnideck/audio/   scripts/omnideck/tones/   scripts/omnideck/logos/
+       scripts/omnideck/missions/
+       bitmaps/ethosmaps/maps/
+   The radio picks x18/ (screens 480 px wide or less) or x20/ by itself; nothing to set.
+   UPDATING FROM TEST 41 OR EARLIER: in scripts/omnideck/ delete the old .lua and .luac files
+   (audio.lua, hud.lua, map.lua, mission.lua, mspclient.lua, summary.lua, telem.lua, tiles.lua,
+   ui.lua) but keep main.lua (the new one replaces it) and the folders. They are no longer used.
+   If you installed the earlier test build called AvMap, delete scripts/avmap from the card.
+3. Eject the card and restart the radio.
+4. Add OmniDeck to a screen with a FULL-SCREEN layout. In a smaller slot it only shows the minimap.
+5. Tap the screen or press ENTER to change page: Main, Map, Messages, and the flight summary
+   after a flight. The wheel zooms the map and scrolls the messages.
+
+
+TELEMETRY SETUP
+ArduPilot (FrSky passthrough, the same data Yaapu uses):
+  CRSF/ELRS/TBS Crossfire: set RC_OPTIONS bit 8 (CRSF passthrough). With ELRS keep packet rate x
+              telemetry ratio above about 30 telemetry frames per second.
+  S.Port (R9 etc.): SERIALn_PROTOCOL 10      F.Port: SERIALn_PROTOCOL 23
+  mLRS:       set the Tx module to send CRSF passthrough to the radio.
+INAV / Betaflight: nothing to set on the aircraft beyond normal telemetry. Discover the sensors
+  on the radio (Model > Telemetry > Discover new sensors) before using OmniDeck.
+
+
+SETTINGS (long-press the widget > Configure widget)
+- Voice: Aria, Guy, Christopher or Michelle, or Off. Picking one plays a short test clip.
+  If you have Yaapu's English sounds, a copy of that folder in scripts/omnideck/audio/ also works.
+- Message beep: a short tone on new status messages (every message, warnings and errors, or off).
+- Battery mAh (INAV/BF only): your pack size. INAV and Betaflight don't send it; ArduPilot sends
+  BATT_CAPACITY. The battery bar needs it, and a working current sensor.
+- Efficiency units, speed and altitude units, map orientation, map tiles, flight summary on disarm.
+
+
+MAP TILES (optional; without them you get a vector map with range rings)
+1. On the PC open https://martinovem.github.io/High-Resolution-Map-Generator/ in Chrome or Edge.
+2. Output Target: "b14ckyy ETHOS Mapping Widget". Pick provider and type (e.g. Google Satellite)
+   and zoom 12 to 17 around your field. Draw a box bigger than where you fly.
+3. Save to the ROOT of the SD card (or extract the ZIP there). Check the path, capitals included:
+       bitmaps/ethosmaps/maps/GOOGLE/Satellite/15/...
+4. Restart the radio and pick the set under "Map tiles" in the widget settings.
+
+
+WHAT TO REPORT
+Please send: radio model and Ethos version, flight controller (ArduPilot/INAV/Betaflight and
+version), the link (ELRS, Crossfire, mLRS, R9...), and for any problem a photo or video of the
+screen. If a script error shows, the exact text.
+Things worth checking:
+- Do the flight mode, armed/disarmed and READY TO ARM / NOT READY TO ARM show correctly?
+- Does the horizon move the right way when you roll and pitch the aircraft?
+- Do airspeed, ground speed (green box), altitude, home distance and the home arrow look right?
+- Do you hear the voice call-outs and message beeps, and are they loud enough?
+- After a flight of more than 10 s, does the flight summary open on disarm?
+- With tiles: do they line up with the aircraft?

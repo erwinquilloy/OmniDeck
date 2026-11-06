@@ -9,7 +9,8 @@ The zip holds scripts/omnideck/ as it goes on the radio's SD card:
     main.lua      the loader: picks x18/ (screens 480 px wide or less) or x20/
     x18/, x20/    the two separate copies of OmniDeck (targets/ethos/x18, x20)
     tones/, logos/, missions/ (empty), audio/<pack>/ (voice packs, if given)
-plus INSTALL.txt at the top, if given. Voice packs are not in the repository (14 MB
+plus INSTALL.txt at the top (targets/ethos/INSTALL.txt unless --install names another;
+its first line gets the version from x20/ui.lua). Voice packs are not in the repository (14 MB
 each): take them from a folder (--audio) or from an older tester zip (--audio-from).
 Paths in the zip use forward slashes (PowerShell's Compress-Archive writes backslashes,
 which break on Mac and Linux).
@@ -64,8 +65,11 @@ def audio_files(folder=None, older_zip=None):
 
 def build(out_zip, audio=None, audio_from=None, install=None):
     entries = files() + audio_files(audio, audio_from)
-    if install:
-        entries.append(('INSTALL.txt', open(install, 'rb').read()))
+    install = install or os.path.join(SRC, 'INSTALL.txt')
+    if os.path.isfile(install):
+        txt = open(install, 'rb').read().decode('utf-8')
+        txt = re.sub(r'^OmniDeck \S+', 'OmniDeck ' + version('x20'), txt, count=1)
+        entries.append(('INSTALL.txt', txt.encode('utf-8')))
     with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr(zipfile.ZipInfo(DST + 'missions/'), b'')
         for name, data in entries:
