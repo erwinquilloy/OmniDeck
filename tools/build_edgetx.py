@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Assemble the EdgeTX widget folder.
+"""Assemble the EdgeTX or OpenTX widget for an SD card.
 
-    python tools/build_edgetx.py <SD root> [--audio <folder with voice packs>]
+    python tools/build_edgetx.py <SD root> [--otx] [--audio <folder with voice packs>]
 
-Writes <SD root>/WIDGETS/OmniDeck/: the shared modules from scripts/omnideck (all but
-the Ethos main.lua), the EdgeTX main.lua and etx.lua from edgetx/WIDGETS/OmniDeck,
-the message tones, an empty missions folder and, with --audio, the voice packs.
-Copy the WIDGETS folder to the root of the radio's SD card.
+Copies targets/edgetx (or, with --otx, targets/opentx): WIDGETS/OmniDeck/ and
+SCRIPTS/TOOLS/, plus an empty missions folder and, with --audio, the voice packs.
+EdgeTX and OpenTX are separate copies of OmniDeck: a change to one can't affect the
+other (see tools/compare_targets.py). Copy WIDGETS and SCRIPTS to the radio's SD card.
 """
 import os
 import shutil
@@ -14,38 +14,23 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.join(HERE, '..')
-SHARED = os.path.join(REPO, 'scripts', 'omnideck')
-EDGETX = os.path.join(REPO, 'edgetx', 'WIDGETS', 'OmniDeck')
 
 
-def build(sd_root, audio=None):
+def target_dir(otx=False):
+    return os.path.join(REPO, 'targets', 'opentx' if otx else 'edgetx')
+
+
+def build(sd_root, audio=None, otx=False):
+    src = target_dir(otx)
+    shutil.copytree(os.path.join(src, 'WIDGETS'), os.path.join(sd_root, 'WIDGETS'), dirs_exist_ok=True)
+    shutil.copytree(os.path.join(src, 'SCRIPTS'), os.path.join(sd_root, 'SCRIPTS'), dirs_exist_ok=True)
     dst = os.path.join(sd_root, 'WIDGETS', 'OmniDeck')
-    os.makedirs(dst, exist_ok=True)
-    for name in sorted(os.listdir(SHARED)):
-        if name.endswith('.lua') and name != 'main.lua':
-            shutil.copyfile(os.path.join(SHARED, name), os.path.join(dst, name))
-    for name in sorted(os.listdir(EDGETX)):
-        if name.endswith('.lua'):
-            shutil.copyfile(os.path.join(EDGETX, name), os.path.join(dst, name))
-    shutil.copytree(os.path.join(SHARED, 'tones'), os.path.join(dst, 'tones'), dirs_exist_ok=True)
-    # main page logos (OpenTX's logo panel; Ethos X18-size screens)
-    if os.path.isdir(os.path.join(SHARED, 'logos')):
-        shutil.copytree(os.path.join(SHARED, 'logos'), os.path.join(dst, 'logos'), dirs_exist_ok=True)
-    # SYS > Tools > OmniDeck Check: says why the widget is missing from the widget list
-    tools = os.path.join(sd_root, 'SCRIPTS', 'TOOLS')
-    os.makedirs(tools, exist_ok=True)
-    for tool in ('OmniDeck Check.lua', 'OmniDeck Setup.lua'):
-        shutil.copyfile(os.path.join(REPO, 'edgetx', 'SCRIPTS', 'TOOLS', tool), os.path.join(tools, tool))
     os.makedirs(os.path.join(dst, 'missions'), exist_ok=True)
-    # OpenTX: bitmaps of the data blocks' fixed layer (tools/sim_edgetx.py --otx-panels)
-    otx = os.path.join(EDGETX, 'otx')
-    if os.path.isdir(otx):
-        shutil.copytree(otx, os.path.join(dst, 'otx'), dirs_exist_ok=True)
     if audio:
         for pack in sorted(os.listdir(audio)):
-            src = os.path.join(audio, pack)
-            if os.path.isdir(src):
-                shutil.copytree(src, os.path.join(dst, 'audio', pack), dirs_exist_ok=True)
+            p = os.path.join(audio, pack)
+            if os.path.isdir(p):
+                shutil.copytree(p, os.path.join(dst, 'audio', pack), dirs_exist_ok=True)
     # compiled copies from an older version would shadow the new sources
     for name in os.listdir(dst):
         if name.endswith('.luac'):
@@ -60,6 +45,6 @@ if __name__ == '__main__':
         i = args.index('--audio')
         audio = args[i + 1]
         del args[i:i + 2]
-    if len(args) != 1:
-        sys.exit(__doc__)
-    print('built', build(args[0], audio))
+    otx = '--otx' in args
+    args = [a for a in args if a != '--otx']
+    print(build(args[0], audio, otx))

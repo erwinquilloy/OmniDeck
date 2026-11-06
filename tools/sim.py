@@ -1,7 +1,7 @@
 """
 Off-radio test harness for the OmniDeck Ethos widget.
 
-Runs scripts/omnideck/main.lua in Lua 5.4 (lupa) against a stubbed Ethos API,
+Runs targets/ethos/main.lua (which loads x18/ or x20/ by screen width) in Lua 5.4 (lupa) against a stubbed Ethos API,
 feeds ArduPilot passthrough packets encoded exactly like
 AP_Frsky_SPort_Passthrough.cpp (as CRSF 0x80/0xF2 frames or S.Port frames),
 checks the decoded state and renders each page to PNG.
@@ -13,7 +13,7 @@ from lupa import lua54
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, '..', 'scripts', 'omnideck')
+SRC = os.path.join(HERE, '..', 'targets', 'ethos')   # the loader picks x18/ or x20/ by screen width
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
 OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out')
 SPORT = '--sport' in sys.argv
@@ -375,7 +375,9 @@ G._NV = lambda k: native_vals.get(k)
 G._TXV = lambda: TX_VOLTS[0]
 TLM_ON = [True]
 G._TLMON = lambda: TLM_ON[0]
-G.system = L.table_from({'getSource': get_source, 'registerWidget': None, 'playFile': lambda f: played.append(os.path.basename(f)[:-4]), 'listFiles': list_files})
+G.system = L.table_from({'getSource': get_source, 'registerWidget': None, 'playFile': lambda f: played.append(os.path.basename(f)[:-4]), 'listFiles': list_files,
+    # the radio's screen, as Ethos reports it (the loader in targets/ethos/main.lua reads lcdWidth)
+    'getVersion': lambda: L.table_from({'lcdWidth': int(RES.split('x')[0]), 'lcdHeight': int(RES.split('x')[1]), 'board': 'X18' if int(RES.split('x')[0]) <= 480 else 'X20S'})})
 # SD-card paths ("/scripts/...", "/bitmaps/...") open inside the fake card
 G._SDROOT = SD.replace(chr(92), '/')
 L.execute('local o = io.open; io.open = function(p, m) if p:sub(1, 1) == "/" then p = _SDROOT .. p end return o(p, m) end')
@@ -738,7 +740,7 @@ assert any('SENSOR CHECK' in t for t, c, x in drawn), 'sensor check page draws'
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
 assert widget.page == 1, 'enter wraps to page 1'
 os.remove(os.path.join(OUT, '_tmp.png'))
-MAPmod = L.execute(open('map.lua', encoding='utf8').read())
+MAPmod = L.execute(open(os.path.join('x18' if W <= 480 else 'x20', 'map.lua'), encoding='utf8').read())   # the copy the loader picked
 print('input checks OK')
 
 # ------------------------------------------------------------------ flight summary

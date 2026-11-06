@@ -29,7 +29,7 @@ NATIVE = '--native' in sys.argv
 # EdgeTX's). The run measures every page against that limit and stops before the EdgeTX checks.
 OTX = '--otx' in sys.argv or '--otx-panels' in sys.argv
 # --otx-panels: write the OpenTX bitmaps of the data blocks' fixed layer (one per speed unit)
-# into edgetx/WIDGETS/OmniDeck/otx/, from ui.lua's own drawing code, then stop
+# into targets/opentx/WIDGETS/OmniDeck/otx/, from ui.lua's own drawing code, then stop
 OTX_PANELS = '--otx-panels' in sys.argv
 RES = '480x272'
 for i, a in enumerate(sys.argv):
@@ -41,10 +41,13 @@ tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + '_' + 
 # ------------------------------------------------------------------ fake SD card
 SD = os.path.join(OUT, 'sd_' + tag)
 if os.path.isdir(SD): shutil.rmtree(SD)
-build_edgetx.build(SD)
+build_edgetx.build(SD, otx=OTX)
 for pack in ('Aria', 'Michelle'):                       # voice folders, contents don't matter here
     os.makedirs(os.path.join(SD, 'WIDGETS', 'OmniDeck', 'audio', pack), exist_ok=True)
 def sd_path(p): return os.path.join(SD, *[x for x in str(p).split('/') if x])
+# OD_PANEL=1: OpenTX's top-right panel set to the radar in the model's settings file (0 = logo)
+if os.environ.get('OD_PANEL') is not None:
+    with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('panel=%s\n' % os.environ['OD_PANEL'])
 
 # ------------------------------------------------------------------ drawing
 # approximate EdgeTX colour-screen font heights at 480x272 (pixels)
@@ -89,7 +92,7 @@ if OTX:
     import re
     _here = os.path.dirname(os.path.abspath(__file__))
     _fd = os.path.join(_here, 'otxfonts')
-    _src = open(os.path.join(_here, '..', 'edgetx', 'WIDGETS', 'OmniDeck', 'etx.lua'), encoding='utf-8').read()
+    _src = open(os.path.join(build_edgetx.target_dir(OTX), 'WIDGETS', 'OmniDeck', 'etx.lua'), encoding='utf-8').read()
     _wt = {m.group(1): [int(v) for v in m.group(2).split(',')] for m in re.finditer(r'local W_(\w+) = \{ ([^}]*) \}', _src)}
     if len(_wt) == 6 and os.path.isfile(os.path.join(_fd, 'Roboto-Regular.ttf')):
         _reg, _bold = os.path.join(_fd, 'Roboto-Regular.ttf'), os.path.join(_fd, 'Roboto-Bold.ttf')
@@ -128,6 +131,10 @@ def rect(x, y, w, h, flags=0, t=1):
     cv.d.rectangle([x, y, x + w - 1, y + h - 1], outline=col())
 def line(x1, y1, x2, y2, pattern=0, flags=0):
     DRAWS['line'] += 1
+    # C: luaL_check* truncates toward zero, as in line_clip below. The EdgeTX trail fast path
+    # (map.lua, OD_LITE) passes unrounded coordinates on purpose: 479.6 is drawn at 479, inside a
+    # 480-wide widget; checked unrounded it read as 480.6 and failed "drawn outside the widget".
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
     cv.check('line', min(x1, x2), min(y1, y2), max(x1, x2) + 1, max(y1, y2) + 1)
     cv.d.line([x1, y1, x2, y2], fill=col())
 def tri(x1, y1, x2, y2, x3, y3, flags=0):
@@ -221,7 +228,10 @@ G.lcd = L.table_from({'RGB': rgb, 'setColor': set_color, 'sizeText': size_text, 
     'drawCircle': circle, 'drawFilledCircle': fcircle, 'drawBitmap': draw_bitmap,
     'drawLineWithClipping': line_clip, 'drawHudRectangle': hud_rect})
 G.getVersion = L.eval('function() return "%d.%d.%d", "tx16s", %d, %d, %d, "EdgeTX" end' % (ETXVER * 2))
-G.Bitmap = L.table_from({'open': bitmap_open})
+def bitmap_size(bmp):   # OpenTX / EdgeTX Bitmap.getSize(bitmap) -> width, height
+    img = bitmaps[bmp['_id']]
+    return img.width, img.height
+G.Bitmap = L.table_from({'open': bitmap_open, 'getSize': bitmap_size})
 for k, v in {'LCD_W': W, 'LCD_H': H, 'CUSTOM_COLOR': CUSTOM, 'SOLID': 0, 'SMLSIZE': 0x200, 'MIDSIZE': 0x300,
              'DBLSIZE': 0x400, 'XXLSIZE': 0x500, 'TINSIZE': 0x600, 'VALUE': 1, 'BOOL': 2, 'CENTER': 0x10000, 'RIGHT': 0x20000,
              'EVT_TOUCH_FIRST': 0x1001, 'EVT_TOUCH_BREAK': 0x1002, 'EVT_TOUCH_SLIDE': 0x1003, 'EVT_TOUCH_TAP': 0x1004,
@@ -472,7 +482,7 @@ def ui_module():
 step(0.1, 40)
 UIm = ui_module()
 if OTX_PANELS:
-    pdir = os.path.join(HERE, '..', 'edgetx', 'WIDGETS', 'OmniDeck', 'otx')
+    pdir = os.path.join(build_edgetx.target_dir(True), 'WIDGETS', 'OmniDeck', 'otx')
     os.makedirs(pdir, exist_ok=True)
     for unit in range(4):
         wd.spdUnit = unit

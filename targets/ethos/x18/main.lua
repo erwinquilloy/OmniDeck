@@ -8,7 +8,7 @@
   the EdgeTX version shares. Use it as a full-screen widget.
 ]]
 
-local UI = assert(loadfile("ui.lua"))()
+local UI = assert(loadfile((OD_DIR or "") .. "ui.lua"))()
 local VERSION = UI.VERSION
 local T, MAP, TL, MI, MSPC, AU = UI.T, UI.MAP, UI.TL, UI.MI, UI.MSPC, UI.AU
 
