@@ -134,8 +134,10 @@ def load_bitmap(p):
     bitmaps[id(img)] = img
     stats['loads'] += 1
     return L.table_from({'_id': id(img), 'width': lambda self=None: img.width, 'height': lambda self=None: img.height})
-def draw_bitmap(x, y, bmp):
+def draw_bitmap(x, y, bmp, w=None, h=None):
     img = bitmaps[bmp['_id']]
+    if w is not None and h is not None:   # Ethos scales the picture to w x h
+        img = img.resize((int(w), int(h)))
     def f(d, img=img, x=x, y=y):
         d._image.paste(img.convert('RGBA'), (int(x), int(y)))
     cv._clipped(f)
@@ -389,6 +391,11 @@ def st_read(k):
 store = {}
 played = []
 os.makedirs(os.path.join(SD, 'scripts', 'omnideck', 'audio', 'Aria'), exist_ok=True)
+# the main page logos (X18-size screens, test41), as the install zip puts them on the card
+import shutil as _sh
+_LOGOS = os.path.join(SRC, 'logos')
+if os.path.isdir(_LOGOS):
+    _sh.copytree(_LOGOS, os.path.join(SD, 'scripts', 'omnideck', 'logos'), dirs_exist_ok=True)
 G.storage = L.table_from({'read': st_read, 'write': st_write})
 def do_write():
     del slots[:]; del wr_log[:]

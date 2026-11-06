@@ -157,6 +157,8 @@ local function pump(now)
 end
 
 local greeted = false
+-- another model selected: say the welcome again (Yaapu does too), so a switch is heard as a fresh start
+function A.greetAgain() greeted = false end
 
 function A.update(s, alive, now)
   -- "Omni Deck telemetry ready" once when the widget starts (as Yaapu does), as soon as the

@@ -19,7 +19,15 @@ H.C = C
 
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
 -- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
-local I = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- test41: Ethos too. The rounding helper this was (floor, then NaN and infinity tests) was half of
+-- the main page's Lua time on an X18; bad telemetry is now checked once per update where it comes
+-- in (H.draw), and coordinates floor straight away as EdgeTX's always did (at most 1 px apart)
+local I = math.floor
+-- displayed numbers: rounded to the nearest whole number on Ethos (NaN/inf shown as 0), as I() did
+-- before test41; EdgeTX/OpenTX floor them as they always did. A few calls per update, so not I().
+local R = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- a finite number, or nil: NaN and infinity from bad sensor data would stop a drawing call
+local function fin(v) if v == nil or v ~= v or v == math.huge or v == -math.huge then return nil end return v end
 -- Lighter drawing on every radio (EdgeTX / OpenTX since test17, Ethos since test36): numbers on
 -- every other tape tick, 15 deg heading ticks, 10 deg pitch rungs numbered on one side, no 45 deg
 -- roll ticks, one-pixel text shadows. The full set put a tester's X18 over Ethos's per-call Lua
@@ -458,22 +466,28 @@ end
 function H.draw(x, y, w, h, s, u)
   -- bodies are ~400 px tall on 800x480 and ~270 px on 480x320
   local big, med, font, boxFont, hdgFont, tapeW, headH, varW = hudLayout(w, h)
+  -- Ethos: the telemetry this draws from, checked once (EdgeTX / OpenTX: as it was)
+  local roll, pitch, aspd, gspd, alt, vspd, yaw, homeBrg = s.roll, s.pitch, s.aspd, s.gspd, s.alt, s.vspd, s.yaw, s.homeBrg
+  if not OD_LITE then
+    roll, pitch, aspd, gspd, alt = fin(roll), fin(pitch), fin(aspd), fin(gspd), fin(alt)
+    vspd, yaw, homeBrg = fin(vspd), fin(yaw), fin(homeBrg)
+  end
   local ov = OTX and overlayFor(w, h) or nil   -- nil (not false) on EdgeTX and Ethos: they draw it all
 
   local hx, hy, hw, hh = x, y, w, h
-  horizon(hx, hy, hw, hh, s.roll or 0, s.pitch or 0, big and FONT_S or (med and FONT_XS or FONT_XXS), ov ~= nil)
+  horizon(hx, hy, hw, hh, roll or 0, pitch or 0, big and FONT_S or (med and FONT_XS or FONT_XXS), ov ~= nil)
   if ov then lcd.drawBitmap(I(x), I(y), ov) end
 
-  local spd = s.aspd or s.gspd
+  local spd = aspd or gspd
   if spd then
     local bx, by, bw = vtape(x, y + headH + 16, tapeW, h - headH - 22, u.spd(spd), u.spdStep, u.spdPpu(h), true, font, boxFont,
-      (s.aspd and "AS " or "GS ") .. u.spdLbl)
-    if s.aspd and s.gspd then
-      subReadout(bx, by + 3, bw, string.format("%d", I(u.spd(s.gspd))), hdgFont)
+      (aspd and "AS " or "GS ") .. u.spdLbl)
+    if aspd and gspd then
+      subReadout(bx, by + 3, bw, string.format("%d", R(u.spd(gspd))), hdgFont)
     end
   end
-  if s.alt then
-    local ax, ay, aw, ah = vtape(x + w - tapeW - varW, y + headH + 16, tapeW, h - headH - 22, u.alt(s.alt), u.altStep, u.altPpu(h), false, font, boxFont,
+  if alt then
+    local ax, ay, aw, ah = vtape(x + w - tapeW - varW, y + headH + 16, tapeW, h - headH - 22, u.alt(alt), u.altStep, u.altPpu(h), false, font, boxFont,
       "ALT " .. u.altLbl)
     if u.alarmA then   -- below the low altitude alarm: red frame round the altitude box
       lcd.color(C.bad)
@@ -482,9 +496,9 @@ function H.draw(x, y, w, h, s, u)
     end
   end
   -- OpenTX: no vertical-speed bar (Lua budget); its strip keeps the layout, so the overlay fits
-  if not OTX then vario(x + w - varW, y + headH + 16, varW, h - headH - 22, s.vspd) end
-  if s.yaw then
-    headingTape(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, s.yaw, s.homeBrg, font, hdgFont, ov ~= nil)
+  if not OTX then vario(x + w - varW, y + headH + 16, varW, h - headH - 22, vspd) end
+  if yaw then
+    headingTape(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, yaw, homeBrg, font, hdgFont, ov ~= nil)
   end
 end
 

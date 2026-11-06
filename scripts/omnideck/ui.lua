@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-test39"
+local VERSION = "0.2.0-test41"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -46,7 +46,13 @@ local ORIENT = { [0] = "north", [1] = "heading" }
 
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
 -- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
-local I = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- test41: Ethos too. The rounding helper this was (floor, then NaN and infinity tests) was half of
+-- the main page's Lua time on an X18; bad telemetry is now checked once per update where it comes
+-- in (H.draw), and coordinates floor straight away as EdgeTX's always did (at most 1 px apart)
+local I = math.floor
+-- displayed numbers: rounded to the nearest whole number on Ethos (NaN/inf shown as 0), as I() did
+-- before test41; EdgeTX/OpenTX floor them as they always did. A few calls per update, so not I().
+local R = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
 
 -- ---------------------------------------------------------------- units
 local SPD_UNITS = {
@@ -85,13 +91,13 @@ local function unitsBuild(w)
     if m == nil then return "--" end
     if au.lbl == "ft" then
       local ft = m * 3.28084
-      return ft < 5279.5 and string.format("%dft", I(ft)) or string.format("%.2fmi", ft / 5280)
+      return ft < 5279.5 and string.format("%dft", R(ft)) or string.format("%.2fmi", ft / 5280)
     end
-    return m < 999.5 and string.format("%dm", I(m)) or string.format("%.2fkm", m / 1000)
+    return m < 999.5 and string.format("%dm", R(m)) or string.format("%.2fkm", m / 1000)
   end
   local function altF(m)
     if m == nil then return "--" end
-    if au.lbl == "ft" then return string.format("%dft", I(m * 3.28084)) end
+    if au.lbl == "ft" then return string.format("%dft", R(m * 3.28084)) end
     return distF(m)
   end
   return {
@@ -163,6 +169,7 @@ local function create()
     linkMode = T.LINK_AUTO, orient = 0, zoomMode = 0, zoomSource = nil,
     spdUnit = 0, altUnit = 0, startPage = 1, trail = 1,
     tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
+    logoFile = "omnideck.png",   -- main page logo on X18-size screens (test41)
     lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
@@ -458,7 +465,7 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
     maxSpd(items[4], lbl[2], f and f.maxGspd, s.gspd)
   end
   it = items[6]
-  it[1], it[2] = "USED", s.mah and string.format("%dmAh", I(s.mah)) or "--"
+  it[1], it[2] = "USED", s.mah and string.format("%dmAh", R(s.mah)) or "--"
   it[3], it[4], it[5] = (s.cap and s.cap > 0 and s.mah and s.mah > 0.8 * s.cap) and COL.warn or COL.txt, nil, nil
   it = items[7]
   it[1], it[2], it[3], it[4] = "CURR", s.curr and string.format("%.1fA", s.curr) or "--", COL.txt, nil
@@ -547,10 +554,17 @@ local function readLastPos()
   if la and lo and (la ~= 0 or lo ~= 0) then lastPos = { la, lo } end
 end
 
+-- Ethos: written once per landing (the first fix after a disarm), not every minute while there
+-- is a fix: no SD writes while sitting on the bench or flying (see safe() below)
+local posArmed = false
 local function rememberPos(s, now)
   if not (s.lat and (s.fix or 0) >= 3) then return end
   lastPos = { s.lat, s.lon }
-  if now - lastPosSaved < POS_SAVE_S then return end
+  if not OD_LITE then
+    local landed = posArmed and s.armed == false
+    if s.armed ~= nil then posArmed = s.armed == true end
+    if not landed then return end
+  elseif now - lastPosSaved < POS_SAVE_S then return end
   lastPosSaved = now
   pcall(function()
     local f = io.open(POS_FILE, "w")
@@ -579,17 +593,29 @@ end
 
 -- A Lua error in paint() leaves the screen half drawn (Ethos shows nothing else). Each part runs
 -- on its own, so one failing part leaves the rest of the screen, and the first error is shown
--- in red on the screen (and kept in error.log) for a tester to photograph.
+-- in red on the screen for a tester to photograph (EdgeTX/OpenTX also keep it in error.log).
+-- Ethos: its per-update Lua limit ("Max instructions count reached") is raised as a Lua error to
+-- stop the script. It is never caught here: re-raised at once, so Ethos ends the update the way
+-- it expects (Yaapu and the INAV dashboard never catch it either; test39 drew on after it).
+-- Nor is anything written to the SD card from paint on Ethos: a file call that stalls can't be
+-- stopped by that limit, and an X18 froze (screen dead, RF working) after test39 had logged 88
+-- errors, each one a write made in the middle of a screen update.
 local ERR_FILE = (OD_ROOT or "/scripts/omnideck/") .. "error.log"
 local paintErr, loggedErr = nil, {}
+local limitHits = 0         -- Ethos limit hits this session (page 5)
 local function safe(part, fn, ...)
   local ok, err = pcall(fn, ...)
   if ok then return end
+  if not OD_LITE and string.find(tostring(err), "Max instructions", 1, true) then
+    limitHits = limitHits + 1
+    paintErr = paintErr or (part .. ": Lua limit")
+    error(err, 0)
+  end
   local W, H = lcd.getWindowSize()
   lcd.setClipping(0, 0, W, H)          -- the map leaves its clipping on when it fails
   local msg = part .. ": " .. tostring(err)
   paintErr = paintErr or msg
-  if not loggedErr[msg] then
+  if OD_LITE and not loggedErr[msg] then
     loggedErr[msg] = true
     pcall(function()
       local f = io.open(ERR_FILE, "a")
@@ -613,21 +639,68 @@ end
 
 -- main page layout, shared with the OpenTX panel bitmap export so both line up exactly
 local function mainLayout(W, H)
-  local barH = I(H * 0.09)
-  local msgH = I(H * 0.075)
+  local barH = R(H * 0.09)
+  local msgH = R(H * 0.075)
   local bodyY, bodyH = barH, H - barH - msgH
-  local hudW = I(W * 0.56)
+  local hudW = R(W * 0.56)
   local rx, rw = hudW + 3, W - hudW - 3
   -- OpenTX: no minimap (the Map page has the map); the data blocks take the whole panel
-  local mapH = OTX and 0 or math.min(rw, I(bodyH * 0.46))
+  local mapH = OTX and 0 or math.min(rw, R(bodyH * 0.46))
   return barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH
+end
+
+-- Ethos on a screen 480 px wide or less (X18): no minimap on the main page, a logo in its place.
+-- The minimap was the part whose cost jumped from update to update (trail, home, arrow) and the
+-- X18 ran out of its per-update Lua limit; the map page still has the full map. (test41)
+-- The logo is a per-model setting (any PNG in logos/, "" = none), loaded in wakeup (a file read),
+-- never in paint; a picture bigger than the panel is scaled down by the radio when it is drawn.
+local LOGO_DIR = (OD_ROOT or "/scripts/omnideck/") .. "logos/"
+local logo = { file = nil, bmp = nil, w = 0, h = 0 }
+local function noMinimap(W) return not OD_LITE and W <= 480 end
+local function logoFiles()
+  if not (system and system.listFiles) then return {} end
+  local ok, entries = pcall(system.listFiles, LOGO_DIR)
+  if not ok or type(entries) ~= "table" then return {} end
+  local out = {}
+  for _, n in ipairs(entries) do
+    if type(n) == "string" and string.match(string.lower(n), "%.png$") then out[#out + 1] = n end
+  end
+  table.sort(out)
+  return out
+end
+local function loadLogo(file)
+  if file == logo.file then return end
+  logo.file, logo.bmp, logo.w, logo.h = file, nil, 0, 0
+  if file == nil or file == "" then return end
+  local ok, bmp = pcall(lcd.loadBitmap, LOGO_DIR .. file)
+  if ok and bmp then
+    local okW, bw = pcall(function() return bmp:width() end)
+    local okH, bh = pcall(function() return bmp:height() end)
+    logo.bmp, logo.w, logo.h = bmp, okW and bw or 0, okH and bh or 0
+  end
+end
+local function logoPanel(x, y, w, h)
+  lcd.color(COL.panel)
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  local b = logo.bmp
+  if not b or logo.w <= 0 or logo.h <= 0 then return end
+  local box = math.min(w, h) - 16
+  local k = math.min(1, box / logo.w, box / logo.h)
+  local dw, dh = I(logo.w * k), I(logo.h * k)
+  local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
+  if k < 1 then
+    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh) then lcd.drawBitmap(bx, by, b) end
+  else
+    lcd.drawBitmap(bx, by, b)
+  end
 end
 
 local function pageMain(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
   local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
   -- map first: on EdgeTX a tile can hang over the map's edge, and what follows covers it
-  if not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
+  if noMinimap(W) then logoPanel(rx, bodyY, rw, mapH)
+  elseif not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(hudW, bodyY, 3, bodyH)
   lcd.drawFilledRectangle(rx, bodyY + mapH, rw, bodyH - mapH)
@@ -660,7 +733,7 @@ end
 
 local function pageMap(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
-  local barH = I(H * 0.09)
+  local barH = R(H * 0.09)
   -- bottom strip for the GPS position, below the map so it never covers it
   lcd.font(fMid)
   local _, ch = lcd.getTextSize("0")
@@ -700,8 +773,8 @@ local function pageMap(w, W, H, s, u)
   local _, th = lcd.getTextSize("0")
   local lines = {
     string.format("HOME %s", s.homeDist and u.distM(s.homeDist) or "--"),
-    string.format("ALT %s", s.alt and string.format("%d%s", I(u.alt(s.alt)), u.altLbl) or "--"),
-    string.format("%s %s", s.aspd and "AS" or "GS", (s.aspd or s.gspd) and string.format("%d%s", I(u.spd(s.aspd or s.gspd)), u.spdLbl) or "--"),
+    string.format("ALT %s", s.alt and string.format("%d%s", R(u.alt(s.alt)), u.altLbl) or "--"),
+    string.format("%s %s", s.aspd and "AS" or "GS", (s.aspd or s.gspd) and string.format("%d%s", R(u.spd(s.aspd or s.gspd)), u.spdLbl) or "--"),
   }
   if s.wpNum and s.wpDist then lines[#lines + 1] = string.format("WP%d %s", s.wpNum, u.distM(s.wpDist)) end
   local ts = activeTileSet(w)
@@ -728,7 +801,7 @@ end
 
 local function pageMsgs(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
-  local barH = I(H * 0.09)
+  local barH = R(H * 0.09)
   topBar(w, 0, 0, W, barH, s, u, H)
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(0, barH, W, H - barH)
@@ -802,6 +875,22 @@ end
 -- ---------------------------------------------------------------- sensor check page
 -- One row per native sensor: the query that matched, the sensor's name on the radio, its raw
 -- value and unit code. For testers: a photo of this page shows what the telemetry code reads.
+-- Ethos: how long paint() and wakeup() take (ms), worst in the last 10 s and since power-up, for
+-- page 5: a tester can tell how close the radio runs to its limit instead of waiting for it
+local perf = { p = 0, pAll = 0, w = 0, wAll = 0, at = 0 }
+local function perfNote(isPaint, t0)
+  local now = os.clock()
+  local ms = (now - t0) * 1000
+  if now - perf.at >= 10 then perf.at, perf.p, perf.w = now, 0, 0 end
+  if isPaint then
+    if ms > perf.p then perf.p = ms end
+    if ms > perf.pAll then perf.pAll = ms end
+  else
+    if ms > perf.w then perf.w = ms end
+    if ms > perf.wAll then perf.wAll = ms end
+  end
+end
+
 local function pageCheck(w, W, H, s, u)
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(0, 0, W, H)
@@ -819,6 +908,12 @@ local function pageCheck(w, W, H, s, u)
   if OD_STATS then
     lcd.color(COL.ok)
     for _, l in ipairs(OD_STATS()) do lcd.drawText(4, y, l) y = y + th end
+  end
+  if not OD_LITE then
+    lcd.color(limitHits > 0 and COL.bad or COL.ok)
+    lcd.drawText(4, y, string.format("Lua ms: draw %.0f (max %.0f)  bg %.0f (max %.0f)  limit hits %d",
+      perf.p, perf.pAll, perf.w, perf.wAll, limitHits))
+    y = y + th
   end
   lcd.color(COL.txt)
   lcd.drawText(4, y, T.rawCheck())
@@ -866,7 +961,7 @@ end
 
 local function pageSummary(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
-  local barH = I(H * 0.09)
+  local barH = R(H * 0.09)
   topBar(w, 0, 0, W, barH, s, u, H)
   local f = FS.last()
   if not f then return end
@@ -881,12 +976,12 @@ local function pageSummary(w, W, H, s, u)
     { "MAX ALT", alt(f.maxAlt) },
     { "MAX GSPD " .. u.spdLbl, spd(f.maxGspd) },
     { "MAX AS " .. u.spdLbl, spd(f.maxAspd) },
-    { "USED", f.used and string.format("%dmAh", I(f.used)) or "--",
+    { "USED", f.used and string.format("%dmAh", R(f.used)) or "--",
       (s.cap and s.cap > 0 and f.used and f.used > 0.8 * s.cap) and COL.warn or nil },
     { u.effLbl, u.effVal(perKm, f.voltN and f.voltSum / f.voltN) },
     { "MIN VOLT", f.minVolt and string.format("%.1fV", f.minVolt) or "--" },
     { "MAX CURR", f.maxCurr and string.format("%.1fA", f.maxCurr) or "--" },
-    { f.minLq and "MIN LQ" or "MIN RSSI", (f.minLq or f.minRssi) and string.format("%d", I(f.minLq or f.minRssi)) or "--" },
+    { f.minLq and "MIN LQ" or "MIN RSSI", (f.minLq or f.minRssi) and string.format("%d", R(f.minLq or f.minRssi)) or "--" },
     { "LINK LOST", f.lost > 0 and fmtTime(f.lost) or "none", f.lost > 0 and COL.warn or nil },
   }
   local fVal = H >= 400 and FONT_XL or fBig
@@ -956,6 +1051,7 @@ local function lostFrame(W, H)
 end
 
 local function paint(w)
+  local t0 = os.clock()
   local W, H = lcd.getWindowSize()
   local s, u = T.s, units(w)
   u.alarmV, u.alarmA = w.alarmV, w.alarmA
@@ -976,6 +1072,7 @@ local function paint(w)
   else safe("main", pageMain, w, W, H, s, u) end
   lostFrame(W, H)
   errorBanner(W, H)
+  if not OD_LITE then perfNote(true, t0) end
 end
 
 local function zoomFromSource(w)
@@ -999,6 +1096,16 @@ local function zoomFromSource(w)
 end
 
 local function wakeup(w)
+  local t0 = os.clock()
+  -- Ethos: another model is noticed within a second, as Yaapu does. create() alone was not
+  -- enough: Ethos builds the new model's widget before model.name() changes (the old name stayed
+  -- 2 s on an X18), so the old model's state was kept. A switch is a fresh start, welcome included.
+  if not OD_LITE and os.clock() - (w.modelAt or -10) >= 1 then
+    w.modelAt = os.clock()
+    if T.checkModel() then AU.greetAgain() end
+    local n = T.modelName()
+    if n ~= w.modelName then w.modelName = n end
+  end
   T.wakeup(w.linkMode)
   local s = T.s
   -- ArduPilot sends BATT_CAPACITY; INAV and Betaflight don't, so the pilot enters it
@@ -1103,6 +1210,10 @@ local function wakeup(w)
       lcd.invalidate()
     end
   end
+  if not OD_LITE then
+    if noMinimap(select(1, lcd.getWindowSize())) then loadLogo(w.logoFile) end
+    perfNote(false, t0)
+  end
 end
 
 -- the summary joins the cycle only once there is a flight to show
@@ -1187,7 +1298,7 @@ end
 return {
   VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage,
   exportPanel = exportPanel, exportHud = exportHud,
-  T = T, MAP = MAP, TL = TL, MI = MI, MSPC = MSPC, AU = AU, FS = FS,
+  T = T, MAP = MAP, TL = TL, MI = MI, MSPC = MSPC, AU = AU, FS = FS, logoFiles = logoFiles,
   -- the settings list the tile sets on the card; the pages use the same list
   scanTiles = function() tileSets = TL.scan() return tileSets end,
 }

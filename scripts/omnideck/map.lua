@@ -83,7 +83,10 @@ M.fmtDist = fmtDist
 -- ---------------------------------------------------------------- drawing helpers
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
 -- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
-local I = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- test41: Ethos too. The rounding helper this was (floor, then NaN and infinity tests) was half of
+-- the main page's Lua time on an X18; bad telemetry is now checked once per update where it comes
+-- in (H.draw), and coordinates floor straight away as EdgeTX's always did (at most 1 px apart)
+local I = math.floor
 -- Lighter drawing on every radio (EdgeTX / OpenTX since test17, Ethos since test36): numbers on
 -- every other tape tick, 15 deg heading ticks, 10 deg pitch rungs numbered on one side, no 45 deg
 -- roll ticks, one-pixel text shadows. The full set put a tester's X18 over Ethos's per-call Lua

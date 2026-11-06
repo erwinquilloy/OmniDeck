@@ -113,6 +113,18 @@ local function configure(w)
   line = form.addLine("Start page")
   form.addChoiceField(line, nil, { { "Main", 1 }, { "Map", 2 } },
     function() return w.startPage end, function(v) w.startPage = v end)
+  -- X18-size screens (480 px wide or less): the main page shows a logo where the minimap was.
+  -- Any PNG in /scripts/omnideck/logos/ (square, about 100 x 100 px; bigger ones are scaled down)
+  local logos = UI.logoFiles()
+  local lchoices = { { "None", 0 } }
+  for i, n in ipairs(logos) do lchoices[#lchoices + 1] = { n, i } end
+  line = form.addLine("Main page logo (X18-size screens)")
+  form.addChoiceField(line, nil, lchoices,
+    function()
+      for i, n in ipairs(logos) do if n == w.logoFile then return i end end
+      return 0
+    end,
+    function(v) w.logoFile = (v > 0 and logos[v]) or "" end)
   if form.addTextButton then
     line = form.addLine("Clear trail + learned WPs")
     form.addTextButton(line, nil, "Clear", function() MAP.resetTrail() MI.clearLearned() return true end)
@@ -135,6 +147,8 @@ local SETTINGS = {
   { "batCap", "n", 0 }, { "effUnit", "n", 0 }, { "beep", "n", 1 },
   -- added in 0.2.0-test6: at the end, so settings saved before still read back in place
   { "lowVolt", "n", 0 }, { "cells", "n", 0 }, { "lowAlt", "n", 0 }, { "critVolt", "n", 0 },
+  -- added in 0.2.0-test41, at the end for the same reason
+  { "logoFile", "s", "omnideck.png" },
 }
 
 local function isSource(v) return type(v) == "userdata" end

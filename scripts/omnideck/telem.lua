@@ -1037,9 +1037,11 @@ function T.resetModel()
 end
 function T.checkModel()
   local n = modelName()
-  if n == nil then return end
-  if curModel ~= nil and n ~= curModel then T.resetModel() end
+  if n == nil then return false end
+  local changed = curModel ~= nil and n ~= curModel
+  if changed then T.resetModel() end
   curModel = n
+  return changed
 end
 -- the selected model's name for the top bar (read when a widget is created, not every paint)
 function T.modelName()
