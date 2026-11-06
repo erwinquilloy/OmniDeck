@@ -140,11 +140,12 @@ local STARVE_PCT = 90
 local drawn, starved = 0, false
 local W, H = LCD_W or 480, LCD_H or 272
 local cx1, cy1, cx2, cy2 = 0, 0, W, H        -- clip box, x2/y2 exclusive
+local full = true                            -- no clipping: the clip box is the whole window
 local min, max = math.min, math.max
 
 
 -- start of a screen update: the window, and other code may have changed the colour slot
-function L.setWindow(w, h) W, H = w, h cx1, cy1, cx2, cy2 = 0, 0, w, h sent = nil drawn, starved = 0, false end
+function L.setWindow(w, h) W, H = w, h cx1, cy1, cx2, cy2 = 0, 0, w, h full = true sent = nil drawn, starved = 0, false end
 function L.starved() return starved end
 function L.getWindowSize() return W, H end
 function L.RGB(r, g, b) return rawlcd.RGB(r, g, b) end
@@ -152,7 +153,7 @@ function L.color(c) col = c end
 function L.font(f) fontFlag = FONTS[f] or 0 end
 function L.invalidate() end
 function L.isVisible() return true end
-function L.setClipping(x, y, w, h) cx1, cy1, cx2, cy2 = x, y, x + w, y + h end
+function L.setClipping(x, y, w, h) cx1, cy1, cx2, cy2 = x, y, x + w, y + h full = x == 0 and y == 0 and w == W and h == H end
 
 function L.getTextSize(text) return rawSize(text, fontFlag) end
 
@@ -162,7 +163,7 @@ function L.drawText(x, y, text, align)
   if drawn >= 8 then drawn = 0 if getUsage and getUsage() >= STARVE_PCT then starved = true end end
   if starved then return end
   -- no clip area: EdgeTX keeps text inside the widget itself and does the alignment
-  if cx1 == 0 and cy1 == 0 and cx2 == W and cy2 == H then
+  if full then
     if col ~= sent then rawSetColor(CUSTOM, col) sent = col end
     rawText(x, y, text, CUSTOM + fontFlag + (ALIGN[align] or 0))
     return
@@ -611,6 +612,29 @@ local fillTick = -1
 local spA, spB, spC, spD, spHead, spN = {}, {}, {}, {}, 1, 0
 -- same for S.Port: drained completely, one value per frame, so more of them are kept
 local function sportFill(wantMsp)
+  if OTX then
+    -- OpenTX: only ArduPilot's passthrough window (0x0800, 0x5000-0x50FF) is decoded from this
+    -- queue (no MSP on OpenTX; plain FrSky sensors are read as sensors), so nothing else is kept,
+    -- and only appId and value. OpenTX's own queue is 256 bytes, 31 frames at most, all taken.
+    local n, k, M = 0, 0, SP_MAX
+    local wi = (spHead + spN - 2) % M + 1     -- the slot written last
+    for _ = 1, 40 do
+      local physId, primId, appId, value = sportTelemetryPop()
+      if physId == nil then break end
+      n = n + 1
+      if primId == 0x10 and ((appId >= 0x5000 and appId <= 0x50FF) or appId == 0x0800) then
+        wi = wi % M + 1
+        spC[wi], spD[wi] = appId, value
+        k = k + 1
+      end
+    end
+    if n == 0 then return end
+    ST.sp = ST.sp + n
+    spN = spN + k
+    if spN > M then ST.drop = ST.drop + spN - M spN = M spHead = wi % M + 1 end
+    stData()
+    return
+  end
   local got = false
   for _ = 1, 64 do
     local physId, primId, appId, value = sportTelemetryPop()
@@ -648,6 +672,7 @@ local function sportSensor(msp)
       if spN == 0 then return nil end
       local h = spHead
       spHead, spN = h % SP_MAX + 1, spN - 1
+      if OTX then return 1, 0x10, spC[h], spD[h] end   -- only passthrough is kept there
       return spA[h], spB[h], spC[h], spD[h]
     end or nil,
     popFrame = function(self)

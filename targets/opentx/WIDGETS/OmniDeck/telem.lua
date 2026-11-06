@@ -1053,14 +1053,21 @@ end
 -- allows (getUsage() = percent of EdgeTX's per-call limit used so far). The main page reads only
 -- one frame before drawing; ArduPilot over ELRS sends more than that, so the queue grew and the
 -- display fell behind ("sluggish", TX16S + ELRS + ArduPilot, 2026-11-03).
+-- OpenTX (getUsage since 2.3.0): reading and decoding one frame costs up to about 15 % of its
+-- 10,000-instruction limit, so a frame is read only while the dearest one so far still fits
+-- under limitPct: checking "under limitPct" alone let the last frame end the update near 90 %.
+local popCost = 0
 function T.drainCrsf(limitPct, maxN)
   -- S.Port (or nothing heard yet): no CRSF queue to read, and the call itself costs budget
   -- (the S.Port mission page sits at the 88 % margin)
   if not getUsage or s.link ~= "CRSF" then return 0 end
   local n = 0
   for _ = 1, maxN do
-    if getUsage() >= limitPct then break end
+    local u = getUsage()
+    if u + popCost >= limitPct then break end
     if not crsfPop() then break end
+    local c = getUsage() - u
+    if c > popCost then popCost = c end
     n = n + 1
   end
   return n

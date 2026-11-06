@@ -101,6 +101,10 @@ local MAX_WPS = OD_MAX_WPS or (LEAN and 30 or nil)
 -- gets 10,000 Lua instructions per screen update. Shapes are drawn as outlines there.
 local OTX = OD_OTX
 local misX, misY = {}, {}   -- the mission's screen points, reused every update
+-- OpenTX: OpenTX's own line call (etx.lua OD_RAW) for lines wholly inside the map box, which
+-- M.draw records here; anything that crosses its edge still goes through the adapter's clipping
+local RAWL = OTX and OD_RAW or nil
+local boxX1, boxY1, boxX2, boxY2 = 0, 0, 0, 0
 
 local function arrow(cx, cy, ang, size, fill, edge)
   local r = math.rad(ang)
@@ -112,6 +116,15 @@ local function arrow(cx, cy, ang, size, fill, edge)
   local dx, dy = pt(-size * 0.62, size * 0.78)
   if OTX then   -- the outline in the fill colour, with a spine so it still reads as solid
     lcd.color(fill)
+    if RAWL and ax >= boxX1 and ax < boxX2 and bx >= boxX1 and bx < boxX2 and mx >= boxX1 and mx < boxX2
+       and dx >= boxX1 and dx < boxX2 and ay >= boxY1 and ay < boxY2 and by >= boxY1 and by < boxY2
+       and my >= boxY1 and my < boxY2 and dy >= boxY1 and dy < boxY2 then
+      RAWL.color(fill)
+      local l, LN, CU = RAWL.line, RAWL.LINE, RAWL.CUSTOM
+      l(ax, ay, bx, by, LN, CU) l(bx, by, mx, my, LN, CU) l(mx, my, dx, dy, LN, CU)
+      l(dx, dy, ax, ay, LN, CU) l(ax, ay, mx, my, LN, CU)
+      return
+    end
     lcd.drawLine(I(ax), I(ay), I(bx), I(by)); lcd.drawLine(I(bx), I(by), I(mx), I(my))
     lcd.drawLine(I(mx), I(my), I(dx), I(dy)); lcd.drawLine(I(dx), I(dy), I(ax), I(ay))
     lcd.drawLine(I(ax), I(ay), I(mx), I(my))
@@ -305,6 +318,8 @@ function M.draw(x, y, w, h, s, o)
   end
 
   lcd.setClipping(I(x), I(y), I(w), I(h))
+  boxX1, boxY1 = I(x), I(y)
+  boxX2, boxY2 = boxX1 + I(w), boxY1 + I(h)
   lcd.color(C.bg)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
 
@@ -361,6 +376,10 @@ function M.draw(x, y, w, h, s, o)
       local a, b = cr * ppm, sr * ppm
       local te, tn, cnt, line = trail.e, trail.n, trail.count, lcd.drawLine
       local ox, oy = cx - se * a + sn * b, cy + se * b + sn * a   -- the screen point of (0, 0)
+      -- OpenTX: segments wholly inside the map with OpenTX's own call (colour sent once here)
+      local rl, LN, CU = RAWL and RAWL.line, RAWL and RAWL.LINE, RAWL and RAWL.CUSTOM
+      local x1, y1, x2, y2 = boxX1, boxY1, boxX2, boxY2
+      if rl then RAWL.color(C.trail) end
       while k < cnt do
         if starved and starved() then break end
         local nk = k + stride
@@ -369,7 +388,11 @@ function M.draw(x, y, w, h, s, o)
         k = nk
         local de, dn = te[idx], tn[idx]
         local qx, qy = ox + de * a - dn * b, oy - de * b - dn * a
-        line(px, py, qx, qy)
+        if rl and px >= x1 and px < x2 and qx >= x1 and qx < x2 and py >= y1 and py < y2 and qy >= y1 and qy < y2 then
+          rl(px, py, qx, qy, LN, CU)
+        else
+          line(px, py, qx, qy)
+        end
         px, py = qx, qy
       end
     else

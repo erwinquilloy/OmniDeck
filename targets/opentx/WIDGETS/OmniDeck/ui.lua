@@ -400,9 +400,11 @@ local function homeArrow(x, y, w, h, s, fLbl)
   local nx, ny = pt(-r * 0.45, 0)
   local rx, ry = pt(-r, r * 0.8)
   lcd.color(COL.home)
-  if OTX then   -- OpenTX: the arrow's outline
-    lcd.drawLine(I(tx), I(ty), I(lx), I(ly)) lcd.drawLine(I(lx), I(ly), I(nx), I(ny))
-    lcd.drawLine(I(nx), I(ny), I(rx), I(ry)) lcd.drawLine(I(rx), I(ry), I(tx), I(ty))
+  if OTX then   -- OpenTX: the arrow's outline, with OpenTX's own call (always inside its block)
+    rcolor(COL.home)
+    local l, LN, CU = RAW.line, RAW.LINE, RC
+    l(tx, ty, lx, ly, LN, CU) l(lx, ly, nx, ny, LN, CU)
+    l(nx, ny, rx, ry, LN, CU) l(rx, ry, tx, ty, LN, CU)
   else
     lcd.drawFilledTriangle(I(tx), I(ty), I(lx), I(ly), I(nx), I(ny))
     lcd.drawFilledTriangle(I(tx), I(ty), I(nx), I(ny), I(rx), I(ry))
@@ -1226,8 +1228,10 @@ local function wakeup(w)
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
   rememberPos(s, nowc)
   if runAL then checkAlarms(w, s, nowc) end
-  -- no folder listing (OpenTX): look for a tile set by its files at the map's position
-  if NO_LIST and (w.tileSet == nil or w.tileSet == "") then
+  -- no folder listing (OpenTX): look for a tile set by its files at the map's position. Only
+  -- while the map page shows: it is the only page with tiles on OpenTX (the main page has the
+  -- logo / radar panel), and each look costs Lua work out of that update's budget
+  if NO_LIST and (w.tileSet == nil or w.tileSet == "") and w.page == 2 then
     local lat, lon = s.lat, s.lon
     if not lat then local c = mapCenter() if c then lat, lon = c[1], c[2] end end
     local ts = TL.probe(lat, lon, os.clock())

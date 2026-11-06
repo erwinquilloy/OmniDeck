@@ -47,6 +47,7 @@ local STRIP = 6
 -- OpenTX: the strips skip the adapter (etx.lua OD_RAW): one OpenTX call each, colour set once
 local RAW = OD_RAW
 local rfill, CUST = RAW and RAW.fill, RAW and RAW.CUSTOM
+local rline, RLINE = RAW and RAW.line, RAW and RAW.LINE
 local lcdFill = lcd.drawFilledRectangle
 local function groundRects(x, y, w, h, px, py, nx, ny)
   local x2, y2 = x + w, y + h
@@ -360,13 +361,22 @@ local function horizon(x, y, w, h, roll, pitch, font, fixedDone)
   lcd.drawLine(I(ax), I(ay), I(bx), I(by))
 
   -- pitch ladder every 10 deg (5 deg short marks)
+  local kx1, ky1 = I(x), I(y)                 -- the clip box, as the adapter has it
+  local kx2, ky2 = kx1 + I(w), ky1 + I(h)
   lcd.font(font)
   local _, th = lcd.getTextSize("0")
   for a = -40, 40, LEAN and 10 or 5 do
     if a ~= 0 and math.abs(a - pitch) <= 22 then
       local half = (a % 10 == 0) and w * 0.14 or w * 0.06
       local lx, ly = px - nx * a * ppx, py - ny * a * ppd
-      lcd.drawLine(I(lx - dx * half), I(ly - dy * half), I(lx + dx * half), I(ly + dy * half))
+      local x1, y1, x2, y2 = lx - dx * half, ly - dy * half, lx + dx * half, ly + dy * half
+      -- OpenTX: a rung wholly inside the HUD with OpenTX's own call; else the adapter clips it
+      if rline and x1 >= kx1 and x2 >= kx1 and x1 < kx2 and x2 < kx2 and y1 >= ky1 and y2 >= ky1 and y1 < ky2 and y2 < ky2 then
+        RAW.color(C.line)
+        rline(x1, y1, x2, y2, RLINE, CUST)
+      else
+        lcd.drawLine(I(x1), I(y1), I(x2), I(y2))
+      end
       -- OpenTX: rungs without numbers, as Yaapu's horizon there
       if a % 10 == 0 and not OTX then
         lcd.drawText(I(lx + dx * (half + 16)), I(ly + dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)

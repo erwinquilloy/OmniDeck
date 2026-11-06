@@ -100,7 +100,8 @@ end
 function TL.canList() return system ~= nil and system.listFiles ~= nil end
 
 local ZORDER = { 17, 16, 18, 15, 14, 19, 13, 12, 20, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1 }
-local PROBE_PER_CALL, PROBE_IDLE_S = 3, 60
+-- OpenTX: one candidate per update (each is up to three file checks and a projection)
+local PROBE_PER_CALL, PROBE_IDLE_S = OD_OTX and 1 or 3, 60
 local probe = { c = 1, zi = 1, idleUntil = -1, found = nil }
 local cands = nil
 
