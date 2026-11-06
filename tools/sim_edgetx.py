@@ -24,7 +24,7 @@ args = [a for a in sys.argv[1:] if not a.startswith('--')]
 OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out_edgetx')
 SPORT = '--sport' in sys.argv
 NATIVE = '--native' in sys.argv
-# --otx: OpenTX 2.3 instead of EdgeTX. No lcd.sizeText, triangles, circles, getUsage or dir(),
+# --otx: OpenTX 2.3 instead of EdgeTX. No lcd.sizeText, triangles, circles or dir(),
 # refresh(widget) gets no event, and the limit is 10,000 instructions per call (half of
 # EdgeTX's). The run measures every page against that limit and stops before the EdgeTX checks.
 OTX = '--otx' in sys.argv or '--otx-panels' in sys.argv
@@ -306,6 +306,25 @@ function _CALL(what, f, ...)
           end
         end
         k = k or "other"
+      elseif _PROFLINE then
+        -- the line of OmniDeck code running (adapter work charged to the line that called it)
+        for lv = 2, 40 do
+          local i = debug.getinfo(lv, "Sl")
+          if not i then break end
+          local f = string.match(i.short_src or "?", "[^/]*$")
+          if f ~= "etx.lua" and f ~= "[C]" then k = f .. ":" .. (i.currentline or 0) break end
+        end
+        k = k or "etx.lua"
+      elseif _PROFCALLER then
+        -- the innermost function outside the adapter (etx.lua): adapter work is charged to the
+        -- OmniDeck function that asked for it
+        for lv = 2, 40 do
+          local i = debug.getinfo(lv, "Sn")
+          if not i then break end
+          local f = string.match(i.short_src or "?", "[^/]*$")
+          if f ~= "etx.lua" then k = f .. ":" .. (i.linedefined or 0) .. " " .. (i.name or "?") break end
+        end
+        k = k or "etx.lua"
       else
         local i = debug.getinfo(2, "Sn")
         if i then k = string.match(i.short_src or "?", "[^/]*$") .. ":" .. (i.linedefined or 0) .. " " .. (i.name or "?") end
@@ -326,7 +345,21 @@ end
 ''')
 
 # telemetry
-crsf_q, sport_q = [], []
+class _RadioQueue(list):
+    """The radio's Lua telemetry queue. OpenTX 2.3: one 256-byte FIFO (telemetry.h
+    LUA_TELEMETRY_INPUT_FIFO_SIZE) holding 8-byte S.Port packets, or CRSF frames as length + command
+    + payload; a frame that doesn't fit is dropped (counted). EdgeTX: no limit modelled."""
+    def __init__(self, crsf):
+        super().__init__()
+        self.crsf, self.dropped = crsf, 0
+    def _size(self, item):
+        return (len(item[1]) + 2) if self.crsf else 8
+    def append(self, item):
+        if OTX and sum(self._size(i) for i in self) + self._size(item) > 255:
+            self.dropped += 1
+            return
+        super().append(item)
+crsf_q, sport_q = _RadioQueue(True), _RadioQueue(False)
 streaming = [True]
 G.getRSSI = lambda: 90 if streaming[0] else 0
 def crsf_pop():
@@ -411,9 +444,12 @@ if OTX:
     L.execute('''
     lcd.sizeText, lcd.drawFilledTriangle, lcd.drawCircle, lcd.drawFilledCircle = nil, nil, nil, nil
     lcd.drawLineWithClipping, lcd.drawHudRectangle = nil, nil   -- OpenTX: Yaapu falls back to Lua for both
-    getUsage, dir = nil, nil
+    dir = nil
     getVersion = function() return "2.3.15", "x10", 2, 3, 15 end
     ''')
+    # OpenTX 2.3.0+ has getUsage() (api_general.cpp): percent of the 10,000-instruction limit used
+    # so far in this call, counted live by its hook (interface.cpp). One sim hook = 200 = 2 %.
+    G.getUsage = lambda: int(2 * (G._USE or 0))
     G._LIM = 50            # 50 hooks x 200 = 10,000 instructions
     # measure, don't stop: every update runs to the end and its count is recorded against 50
     G._NOLIMIT = not os.environ.get('OD_OTX_STRICT')
@@ -527,9 +563,17 @@ step(0.1, 10)
 if OTX:
     # OpenTX budget per page: instructions per refresh against the 10,000 limit
     OTX_LIM = 50
-    def otx_page(page, frames=40, mission=False):
+    _starved = L.execute('''return function(f) for i = 1, 200 do local n, v = debug.getupvalue(f, i)
+        if n == nil then return nil end if n == "E" then return v.lcd.starved end end end''')(widget_def['refresh'])
+    STARVED = {}
+    MEDIAN = {}
+    def otx_page(page, frames=40, mission=False, name=None):
         wd.page = page
         worst_n = 0
+        cut = 0
+        all_n = []
+        if mission and os.environ.get('OD_PROF'):
+            G._PROF = L.table_from({})
         for _ in range(frames):
             st['yaw'] = (st['yaw'] + 2) % 360
             st['lat'], st['lon'] = project(st['lat'], st['lon'], st['gs'] * 0.5, st['yaw'])
@@ -538,6 +582,13 @@ if OTX:
             sim_time[0] += 0.05
             frame()
             worst_n = max(worst_n, G._LASTN)
+            all_n.append(G._LASTN)
+            if _starved and _starved(): cut += 1
+        STARVED[name] = cut
+        MEDIAN[name] = sorted(all_n)[len(all_n) // 2]
+        if mission and os.environ.get('OD_PROF'):
+            prof[name] = sorted(((int(v), str(k)) for k, v in G._PROF.items()), reverse=True)
+            G._PROF = None
         return worst_n
     rep = {}
     prof = {}
@@ -545,8 +596,10 @@ if OTX:
         if os.environ.get('OD_PROF'):
             G._PROF = L.table_from({})
             G._PROFPARTS = os.environ.get('OD_PROF') == 'parts'   # OD_PROF=parts: by screen part
+            G._PROFCALLER = os.environ.get('OD_PROF') == 'caller' # OD_PROF=caller: adapter work charged to its caller
+            G._PROFLINE = os.environ.get('OD_PROF') == 'line'     # OD_PROF=line: by line of OmniDeck code
         DRAWS.clear()
-        rep[name] = otx_page(page)
+        rep[name] = otx_page(page, name=name)
         print('  draws per update on %s: %s' % (name, {k: round(v / 40) for k, v in sorted(DRAWS.items())}))
         if os.environ.get('OD_PROF'):
             prof[name] = sorted(((int(v), str(k)) for k, v in G._PROF.items()), reverse=True)
@@ -566,21 +619,22 @@ if OTX:
     _m = UIm.MI.current()
     assert (_m[0] if isinstance(_m, tuple) else _m) is None, 'OpenTX: no mission'
     assert UIm.MSPC.state() == 'off', 'OpenTX: no INAV mission download'
-    rep['main, WP flight, 3x feed'] = otx_page(1, mission=True)
-    rep['map, WP flight, 3x feed'] = otx_page(2, mission=True)
+    rep['main, WP flight, 3x feed'] = otx_page(1, mission=True, name='main, WP flight, 3x feed')
+    rep['map, WP flight, 3x feed'] = otx_page(2, mission=True, name='map, WP flight, 3x feed')
     st['armed'] = False
     step(0.2, 12)
-    rep['flight summary'] = otx_page(4) if wd.page == 4 else None
+    rep['flight summary'] = otx_page(4, name='flight summary') if wd.page == 4 else None
     if rep['flight summary'] is not None:
         cv.img.save(os.path.join(OUT, 'otx_flight_summary_%s.png' % tag))
+    print('OpenTX telemetry queue (256 bytes): %d CRSF / %d S.Port frames dropped while full' % (crsf_q.dropped, sport_q.dropped))
     print('OpenTX budget (limit %d instructions per call):' % (OTX_LIM * 200))
     for k, n in rep.items():
         if n is None: print('  %-24s not reached' % k); continue
-        print('  %-24s %6d instructions  %4d%%  %s' % (k, n * 200, round(100 * n / OTX_LIM), 'OK' if n <= OTX_LIM * 0.88 else 'OVER'))
+        print('  %-24s %6d instructions  %4d%%  %-4s  median %3d%%  drawing cut short in %d of 40 updates' % (k, n * 200, round(100 * n / OTX_LIM), 'OK' if n <= OTX_LIM * 0.88 else 'OVER', round(100 * MEDIAN.get(k, 0) / OTX_LIM), STARVED.get(k, 0)))
     for name, rows in prof.items():
         tot = sum(c for c, _ in rows) or 1
         print('profile %s (%d samples over 40 updates):' % (name, tot))
-        for c, k in rows[:14]:
+        for c, k in rows[:int(os.environ.get('OD_PROF_TOP', '14'))]:
             print('  %5.1f%%  %s' % (100 * c / tot, k))
     sys.exit(0)
 
