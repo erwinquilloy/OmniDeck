@@ -530,12 +530,17 @@ local NATIVE = {
   aspd  = { crsf = { "Airspeed", "Air speed", "ASpd", { crsfId = 0x0A, subIdStart = 0, subIdEnd = 1 } }, sport = { { appId = 0x0A00 } } },
   -- Betaflight over S.Port sends its mode in T1 (0x0400)
   mode  = { crsf = { "Flight mode" }, sport = { { category = TS, appId = 0x0470, subId = 0 }, { category = TS, appId = 0x0400 } } },
-  -- link sensors. CRSF RSSI is in dBm (negative); FrSky has no LQ, its RSSI (0xF101) is 0-100ish.
+  -- link sensors. CRSF RSSI is in dBm (negative). FrSky RSSI (0xF101) is FrSky's own "dB",
+  -- 0-100ish; FrSky VFR (0xF010) is the % of frames received, its counterpart of CRSF's LQ.
+  -- Ethos uses VFR as LQ and scales RSSI 0-100 (linkFigs below); EdgeTX/OpenTX (OD_LITE) keep
+  -- no FrSky LQ and VFR as a stand-in RSSI, as before.
   -- S.Port RSSI by app ID only, as the dashboard: a sensor merely NAMED "RSSI" read -1 on the
   -- X18 tester's R9 model (2026-11-03) and was taken as a dead link.
-  lq    = { crsf = { "Rx Quality", "RQly" } },
+  lq    = { crsf = { "Rx Quality", "RQly" },
+            sport = (not OD_LITE) and { { appId = 0xF010, subId = 0 } } or nil },
   rssi  = { crsf = { "Rx RSSI1", "1RSS", "Rx RSSI2", "2RSS" },
-            sport = { { appId = 0xF101, subId = 0 }, { appId = 0xF010, subId = 0 } } },
+            sport = (not OD_LITE) and { { appId = 0xF101, subId = 0 } }
+                    or { { appId = 0xF101, subId = 0 }, { appId = 0xF010, subId = 0 } } },
 }
 local srcCache, srcMissAt, srcQuery = {}, {}, {}
 
@@ -656,6 +661,20 @@ local function srcVal(key, kind)
     srcUnits[src] = u
   end
   return v, u or nil
+end
+
+-- Link figures: LQ and RSSI as shown, plus the raw RSSI for the link-lost test.
+-- FrSky links on Ethos only (kind "sport", not OD_LITE): RSSI on the 0-100 scale the flight controller's
+-- own OSD shows for F.Port. INAV and Betaflight scale the receiver's value as 0-100 (rx/fport.c),
+-- ArduPilot as 0-50 (AP_RCProtocol_FPort.cpp, "fport rssi 0-50"), so x2 there, capped at 100.
+-- CRSF / ELRS / mLRS and every EdgeTX/OpenTX link: the sensor values, unchanged.
+local FRSKY_PCT = not OD_LITE
+local function linkFigs(kind)
+  local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+  if kind ~= "sport" or not FRSKY_PCT or type(rssi) ~= "number" then return lq, rssi, rssi end
+  local pct = (s.fc == "ArduPilot") and rssi * 2 or rssi
+  if pct > 100 then pct = 100 elseif pct < 0 then pct = 0 end
+  return lq, pct, rssi
 end
 
 local function toMS(v, u)
@@ -811,7 +830,7 @@ local function readNative(kind)
     mode = (ok and type(sv) == "string" and sv ~= "" and tonumber(sv) == nil) and sv or nil
   end
   local roll = srcVal("roll", kind)
-  local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+  local lq, rssi, rawRssi = linkFigs(kind)
   -- nothing at all from this link: no position, mode, attitude, signal or battery
   if lat == nil and mode == nil and roll == nil and rssi == nil and lq == nil
      and srcVal("volt", kind) == nil then return end
@@ -820,7 +839,7 @@ local function readNative(kind)
   -- value, so nothing here is fresh then: lastRx is left alone and the link shows as lost.
   -- (No "values not changing" test: a craft sitting still reads the same values for minutes.)
   if telemActive() == false
-     or (kind == "crsf" and lq ~= nil and lq <= 0) or (kind == "sport" and rssi ~= nil and rssi == 0) then
+     or (kind == "crsf" and lq ~= nil and lq <= 0) or (kind == "sport" and rawRssi ~= nil and rawRssi == 0) then
     s.lq, s.rssi = lq, rssi
     return
   end
@@ -857,8 +876,7 @@ local function readNative(kind)
   s.volt = srcVal("volt", kind)
   s.curr = srcVal("curr", kind)
   s.mah = srcVal("mah", kind)
-  s.lq = srcVal("lq", kind)
-  s.rssi = srcVal("rssi", kind)
+  s.lq, s.rssi = linkFigs(kind)
 
   local armed
   if mode ~= nil then
@@ -1095,7 +1113,7 @@ function T.wakeup(linkMode)
     -- EdgeTX / OpenTX: the link sensors 5 times a second, as the native read above
     if not OD_LITE or now() - linkReadAt >= 0.2 then
       linkReadAt = now()
-      local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+      local lq, rssi = linkFigs(kind)
       if lq then s.lq = lq end
       if rssi then s.rssi = rssi end
     end

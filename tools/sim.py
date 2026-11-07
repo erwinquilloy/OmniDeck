@@ -285,7 +285,7 @@ G.crsf = L.eval('_mkcrsf')(None)
 G.sport = L.eval('_mksport')()
 native_vals = {}
 SPORT_APPIDS = {0x0100: 'Altitude', 0x0830: 'GPS speed', 0x0840: 'Yaw', 0x0480: 'GPS satellites',
-                0x0210: 'Rx Batt', 0xF101: 'RSSI', 0x0A00: 'Airspeed'}
+                0x0210: 'Rx Batt', 0xF101: 'RSSI', 0xF010: 'VFR', 0x0A00: 'Airspeed'}
 LINK_SENSORS = ('Rx Quality', 'Rx RSSI1', 'Flight mode')    # CRSF; these exist whatever the flight stack is
 TX_VOLTS = [8.1]
 # OD_R9=1 (with --native --sport): INAV over an R9 on Ethos. Ethos hasn't discovered INAV's mode,
@@ -347,7 +347,7 @@ def get_source(q):
     if not NATIVE:
         if isinstance(q, str):
             if SPORT or q not in LINK_SENSORS: return None
-        elif not (SPORT and 'appId' in q and int(q['appId']) == 0xF101):
+        elif not (SPORT and 'appId' in q and int(q['appId']) in (0xF101, 0xF010)):
             return None
     if not isinstance(q, str) and 'crsfId' in q:      # CRSF link statistics only exist on CRSF
         if int(q['crsfId']) != 0x14: return None
@@ -416,7 +416,7 @@ def feed(pkts):
     feed_n[0] += 1
     TLM_ON[0] = True                  # frames arriving: Ethos says telemetry is active
     wob = feed_n[0] % 2
-    native_vals.update({'Rx Quality': 96, 'Rx RSSI1': -72 - wob, 'RSSI': 88 - wob})
+    native_vals.update({'Rx Quality': 96, 'Rx RSSI1': -72 - wob, 'RSSI': 88 - wob, 'VFR': 98})
     if not NATIVE and not SPORT:
         native_vals['Flight mode'] = 'FBWA' + ('' if st['armed'] else '*')   # ArduPilot's own CRSF mode text
     if NATIVE:
@@ -473,6 +473,8 @@ wt = registered['w']
 widget = wt['create']()
 do_read()
 if NATIVE: widget.batCap = 5000           # INAV and Betaflight send no capacity
+# OD_PANEL=n: the main page's top-right panel setting (X20 copy, test41b: 0 minimap, 1 logo, 2 radar)
+if os.environ.get('OD_PANEL'): widget.panel = int(os.environ['OD_PANEL'])
 
 HOME = (43.49323, 142.88785)
 st = dict(lat=HOME[0], lon=HOME[1], hlat=HOME[0], hlon=HOME[1], mode=5, armed=True, thr=55, sats=14, hdop=0.8,
@@ -765,7 +767,13 @@ f = FS.last()
 print('summary: time %.0f dist %.0f home %s alt %s gspd %s as %s used %s volt %s curr %s lq %s rssi %s lost %s' % (
     f.time, f.dist, f.maxHome, f.maxAlt, f.maxGspd, f.maxAspd, f.used, f.minVolt, f.maxCurr, f.minLq, f.minRssi, f.lost))
 if SPORT:
-    assert S.rssi in (87, 88) and S.lq is None, 'S.Port has RSSI, no LQ (%s %s)' % (S.rssi, S.lq)
+    if W > 480:
+        # X20 copy (test40 change, test41b): LQ = VFR (0xF010), RSSI as the FC's own F.Port %
+        # (INAV/BF 0-100, ArduPilot 0-50 so x2, max 100)
+        want = (100,) if S.fc == 'ArduPilot' else (87, 88)
+        assert S.rssi in want and S.lq == 98, 'S.Port: LQ from VFR, RSSI %% (%s %s %s)' % (S.rssi, S.lq, S.fc)
+    else:
+        assert S.rssi in (87, 88) and S.lq is None, 'S.Port has RSSI, no LQ (%s %s)' % (S.rssi, S.lq)
 elif not INAV:
     assert S.lq == 96 and S.rssi in (-72, -73), 'CRSF has LQ and RSSI (%s %s)' % (S.lq, S.rssi)
 assert f.time > 100 and f.dist > 3000 and abs(f.maxAlt - 120) < 1 and f.lost == 0, 'summary values'

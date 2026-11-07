@@ -139,6 +139,71 @@ local function homeIcon(x, y, sz)
   lcd.drawFilledRectangle(I(x - sz * 0.65), I(y - sz * 0.1), I(sz * 1.3), I(sz * 0.9))
 end
 
+-- ---------------------------------------------------------------- radar
+-- The radar of iNav LuaTelemetry's colour-screen view (iNavFlight/LuaTelemetry, src/iNav/horus.lua,
+-- "Radar"), written again here: no map, trail or tiles, only home and the aircraft.
+--  - scale: maxDist = max(min(furthest from home this flight, distance x 6), distRef x 10), distRef
+--    6 m; the aircraft sits distance / maxDist x reach from home, kept between 7 px and reach
+--  - home and the aircraft are centred as a pair (home moved back by half the offset)
+--  - home: an icon from 12 px out, a 3 px dot closer; at home (under 6 m) only the aircraft, centred
+--  - the aircraft: three lines, 8 px, at its heading and +-145 deg, the back one grey
+--  - the distance bottom left; W and E on the sides when north is up (its dir[6] and dir[2])
+-- o: { orient = "north" | "heading", maxDist = furthest from home (m), distF = fn(m) -> text }
+local RADAR_DIST_REF = 6
+local GREY = lcd.RGB(160, 160, 160)
+function M.radar(x, y, w, h, s, o)
+  local sin, cos, rad, floor, min, max = math.sin, math.cos, math.rad, math.floor, math.min, math.max
+  lcd.color(C.bg)
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  local cxp, cyp = x + w / 2, y + h / 2
+  -- LuaTelemetry's sizes are for its 126 px tall panel (480 x 272 screens): on a bigger panel
+  -- (X20, about 190 px) every size is scaled by k, so the radar keeps its proportions
+  local k = max(1, min(w, h) / 126)
+  local reach = min(100 * k, (min(w, h) / 2 - 10) * 2)
+  local north = o.orient ~= "heading"
+  local hdg = s.yaw or 0
+  local rot = north and 0 or hdg
+  local cx, cy = cxp, cyp
+  local dist, brg = s.homeDist, s.homeBrg
+  lcd.font(FONT_S)
+  local _, th = lcd.getTextSize("0")
+  if dist and brg and s.homeLat ~= false then
+    local maxDist = max(min(o.maxDist or dist, dist * 6), RADAR_DIST_REF * 10)
+    local d = dist >= RADAR_DIST_REF and min(max(dist / maxDist * reach, 7 * k), reach) or 1
+    local r = rad(brg + 180 - rot)                  -- homeBrg points to home; this is home -> aircraft
+    local ox, oy = floor(sin(r) * d + 0.5), floor(cos(r) * d + 0.5)
+    local hx, hy = cxp, cyp
+    if d > 9 * k then hx, hy = hx - ox * 0.5, hy + oy * 0.5 end
+    if d >= 12 * k then homeIcon(hx, hy, 7 * k)
+    elseif d > 1 then
+      local dot = I(3 * k)
+      lcd.color(C.home)
+      lcd.drawFilledRectangle(I(hx - dot / 2), I(hy - dot / 2), dot, dot)
+    end
+    if d ~= 1 then cx, cy = hx + ox, hy - oy end
+    if o.distF then
+      lcd.color(C.text)
+      lcd.drawText(I(x + 2), I(y + h - th - 1), o.distF(dist))
+    end
+  end
+  if north then
+    lcd.color(C.text)
+    lcd.drawText(I(x + 2), I(cyp - th / 2), "W")
+    lcd.drawText(I(x + w - 2), I(cyp - th / 2), "E", RIGHT)
+  end
+  local r1 = rad(hdg - rot)
+  local r2, r3 = r1 + 2.5307, r1 - 2.5307             -- 145 deg
+  local a = 8 * k
+  local x1, y1 = cx + sin(r1) * a, cy - cos(r1) * a
+  local x2, y2 = cx + sin(r2) * a, cy - cos(r2) * a
+  local x3, y3 = cx + sin(r3) * a, cy - cos(r3) * a
+  lcd.color(GREY)
+  lcd.drawLine(I(x2), I(y2), I(x3), I(y3))
+  lcd.color(C.own)
+  lcd.drawLine(I(x1), I(y1), I(x2), I(y2))
+  lcd.drawLine(I(x1), I(y1), I(x3), I(y3))
+end
+
 -- ---------------------------------------------------------------- main draw
 -- s: telemetry state; o: { level=, orient="north"|"heading", mini=bool, trail=bool, homeView=bool,
 --   home={lat,lon} (centre on home), center={lat,lon} (stand-in centre with no fix),

@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-test41"
+local VERSION = "0.2.0-test41b"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -169,7 +169,8 @@ local function create()
     linkMode = T.LINK_AUTO, orient = 0, zoomMode = 0, zoomSource = nil,
     spdUnit = 0, altUnit = 0, startPage = 1, trail = 1,
     tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
-    logoFile = "omnideck.png",   -- main page logo on X18-size screens (test41)
+    logoFile = "omnideck.png",   -- main page logo (test41)
+    panel = 0,                   -- main page top-right panel: 0 minimap, 1 logo, 2 radar (test41b)
     lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
@@ -695,11 +696,29 @@ local function logoPanel(x, y, w, h)
   end
 end
 
+-- the panel above the data blocks (setting "Main page top-right panel"): 0 minimap (as before),
+-- 1 logo, 2 radar (as iNav LuaTelemetry's). A screen 480 px wide or less never gets the minimap.
+local function panelMode(w, W)
+  local p = w.panel or 0
+  if p == 2 then return "radar" end
+  if p == 1 or noMinimap(W) then return "logo" end
+  return "map"
+end
+local radarO = {}
+local function radarOpts(w, u)
+  local f = FS.live()
+  radarO.orient, radarO.distF = ORIENT[w.orient] or "north", u.distF
+  radarO.maxDist = f and f.maxHome or nil
+  return radarO
+end
+
 local function pageMain(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
   local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
   -- map first: on EdgeTX a tile can hang over the map's edge, and what follows covers it
-  if noMinimap(W) then logoPanel(rx, bodyY, rw, mapH)
+  local pm = panelMode(w, W)
+  if pm == "logo" then logoPanel(rx, bodyY, rw, mapH)
+  elseif pm == "radar" then safe("radar", MAP.radar, rx, bodyY, rw, mapH, s, radarOpts(w, u))
   elseif not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(hudW, bodyY, 3, bodyH)
@@ -1211,7 +1230,7 @@ local function wakeup(w)
     end
   end
   if not OD_LITE then
-    if noMinimap(select(1, lcd.getWindowSize())) then loadLogo(w.logoFile) end
+    if panelMode(w, (lcd.getWindowSize())) == "logo" then loadLogo(w.logoFile) end
     perfNote(false, t0)
   end
 end

@@ -6,6 +6,16 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
+WHAT'S NEW IN TEST 41b (X20 family only; X18-size screens stay on test 41)
+- Main page top-right panel, a new widget setting "Main page top-right panel":
+    Minimap (default, as before), Logo (the "Main page logo" setting picks the file), or Radar
+    (home and the aircraft, as in iNav LuaTelemetry's radar, scaled to the X20's bigger panel).
+- FrSky links (S.Port / F.Port / FBUS): LQ is read from the receiver's VFR sensor (the % of
+  frames received), and RSSI is shown on the 0-100 scale the flight controller's own OSD uses
+  (INAV / Betaflight as sent, ArduPilot's 0-50 doubled). The % sign is not shown. (Test 40's
+  change, now on top of test 41.)
+- Changed since test 41: x20/main.lua, x20/map.lua, x20/telem.lua, x20/ui.lua.
+
 WHAT'S NEW IN TEST 41
 Ethos only. Made after an X18 froze and showed "Max instructions count reached" in flight.
 - About half the Lua work per screen update is gone: the main page drops from about 12,700 to

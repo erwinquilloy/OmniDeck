@@ -113,12 +113,16 @@ local function configure(w)
   line = form.addLine("Start page")
   form.addChoiceField(line, nil, { { "Main", 1 }, { "Map", 2 } },
     function() return w.startPage end, function(v) w.startPage = v end)
-  -- X18-size screens (480 px wide or less): the main page shows a logo where the minimap was.
-  -- Any PNG in /scripts/omnideck/logos/ (square, about 100 x 100 px; bigger ones are scaled down)
+  -- the panel at the top right of the main page, above the data blocks
+  line = form.addLine("Main page top-right panel")
+  form.addChoiceField(line, nil, { { "Minimap", 0 }, { "Logo", 1 }, { "Radar", 2 } },
+    function() return w.panel end, function(v) w.panel = v end)
+  -- the logo for that panel: any PNG in /scripts/omnideck/logos/ (square, about 100 x 100 px;
+  -- bigger ones are scaled down)
   local logos = UI.logoFiles()
   local lchoices = { { "None", 0 } }
   for i, n in ipairs(logos) do lchoices[#lchoices + 1] = { n, i } end
-  line = form.addLine("Main page logo (X18-size screens)")
+  line = form.addLine("Main page logo")
   form.addChoiceField(line, nil, lchoices,
     function()
       for i, n in ipairs(logos) do if n == w.logoFile then return i end end
@@ -149,6 +153,8 @@ local SETTINGS = {
   { "lowVolt", "n", 0 }, { "cells", "n", 0 }, { "lowAlt", "n", 0 }, { "critVolt", "n", 0 },
   -- added in 0.2.0-test41, at the end for the same reason
   { "logoFile", "s", "omnideck.png" },
+  -- added in 0.2.0-test41b (X20), at the end for the same reason
+  { "panel", "n", 0 },
 }
 
 local function isSource(v) return type(v) == "userdata" end
