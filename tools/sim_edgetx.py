@@ -31,6 +31,9 @@ OTX = '--otx' in sys.argv or '--otx-panels' in sys.argv
 # --otx-panels: write the OpenTX bitmaps of the data blocks' fixed layer (one per speed unit)
 # into targets/opentx/WIDGETS/OmniDeck/otx/, from ui.lua's own drawing code, then stop
 OTX_PANELS = '--otx-panels' in sys.argv
+# --etx-panels: the same for EdgeTX (targets/edgetx .../fixed/): the blocks' shapes (labels stay
+# live, so one bitmap per screen size) and the HUD overlay
+ETX_PANELS = '--etx-panels' in sys.argv
 RES = '480x272'
 for i, a in enumerate(sys.argv):
     if a == '--res': RES = sys.argv[i + 1]
@@ -521,16 +524,17 @@ def ui_module():
 
 step(0.1, 40)
 UIm = ui_module()
-if OTX_PANELS:
-    pdir = os.path.join(build_edgetx.target_dir(True), 'WIDGETS', 'OmniDeck', 'otx')
+if OTX_PANELS or ETX_PANELS:
+    pdir = (os.path.join(build_edgetx.target_dir(True), 'WIDGETS', 'OmniDeck', 'otx') if OTX_PANELS
+            else os.path.join(build_edgetx.target_dir(False), 'WIDGETS', 'OmniDeck', 'fixed'))
     os.makedirs(pdir, exist_ok=True)
-    for unit in range(4):
+    for unit in (range(4) if OTX_PANELS else [0]):
         wd.spdUnit = unit
         cv = Canvas(W, H)
         px, py, pw, ph = UIm.exportPanel(wd, W, H)
         key = {0: 'kmh', 1: 'ms', 2: 'kt', 3: 'mph'}[unit]
         img = cv.img.crop((int(px), int(py), int(px + pw), int(py + ph))).convert('RGB')
-        out = os.path.join(pdir, 'panel_%dx%d_%s.png' % (W, H, key))
+        out = os.path.join(pdir, ('panel_%dx%d_%s.png' % (W, H, key)) if OTX_PANELS else ('panel_%dx%d.png' % (W, H)))
         img.save(out, optimize=True)
         print('wrote', out, img.size)
     wd.spdUnit = 0

@@ -1,10 +1,20 @@
-OmniDeck 0.2.0-etx3 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.2.0-etx3_test41 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.2.0-etx3_test41
+- About 10 % less Lua work again on the main page, the screen unchanged: the parts that never
+  change (the data blocks' backgrounds and bar tracks, the battery outline, the roll scale, the
+  aircraft symbol and the heading box frame) are drawn from two small pictures in the new
+  WIDGETS/OmniDeck/fixed/ folder instead of piece by piece. All text stays live. In the simulator
+  the heaviest update went from 66 % to 61 % of EdgeTX's limit.
+- Pictures for the TX16S MK2 (480 x 272) and MK3 (800 x 480); on any other screen size, or with
+  the widget in a smaller zone, everything is drawn live as before.
+- Changed since etx3: hud.lua, ui.lua, new folder fixed/.
 
 WHAT'S NEW IN 0.2.0-etx3
 - Main page top-right panel: SYS > Tools > OmniDeck Setup > "Top-right panel":

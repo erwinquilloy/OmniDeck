@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-etx3"
+local VERSION = "0.2.0-etx3_test41"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -311,6 +311,7 @@ local function tile(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inse
   lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
 end
 
+local exportShapes = false   -- exportPanel: the blocks' shapes only, for the panel bitmap
 -- EdgeTX (etx.lua OD_RAW): the same tile with EdgeTX's own calls. The blocks are drawn with no
 -- clip box, inside the widget, so each call is what the adapter would end in, without the Lua
 -- function in between (a fill of no width is skipped, as there).
@@ -320,20 +321,26 @@ do
     local rfill, rtext, rsize, rcolor, CU, FONTS, ALIGN = RAWE.fill, RAWE.text, RAWE.size, RAWE.color,
       RAWE.CUSTOM, RAWE.FONTS, RAWE.ALIGN
     local function fill(x, y, w, h) if w > 0 and h > 0 then rfill(x, y, w, h, CU) end end
-    tile = function(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inset)
-      rcolor(COL.tile)
-      fill(I(x), I(y), I(w), I(h))
+    -- nobg: the block panel bitmap has the background and bar track (fixed/panel_*.png)
+    tile = function(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inset, nobg)
+      if not nobg then
+        rcolor(COL.tile)
+        fill(I(x), I(y), I(w), I(h))
+      end
       if bar then
         h = h - 7
-        rcolor(COL.bar)
-        fill(I(x + 4), I(y + h + 1), I(w - 8), 4)
+        if not nobg then
+          rcolor(COL.bar)
+          fill(I(x + 4), I(y + h + 1), I(w - 8), 4)
+        end
         rcolor(COL.dim)
         fill(I(x + 4), I(y + h + 1), I((w - 8) * bar), 4)
       end
       local fl = FONTS[fLbl] or 0
       local _, lh = rsize("A", fl)
       rcolor(COL.dim)
-      rtext(I(x + 4), I(y + 2), label, CU + fl)
+      -- the bitmap export (exportPanel) leaves the label out: labels stay live text
+      if not exportShapes then rtext(I(x + 4), I(y + 2), label, CU + fl) end
       if note and rsize(label, fl) + rsize(note, fl) + 10 <= w then
         rtext(I(x + w - 4), I(y + 2), note, CU + fl + ALIGN[2])
       end
@@ -445,10 +452,11 @@ local flightClock = { sec = nil, txt = "--" }   -- FLIGHT TIME text, remade when
 local panelBmps = {}
 local function panelBitmap(u)
   local W, H = lcd.getWindowSize()
-  local key = W .. "x" .. H .. "_" .. string.gsub(u.spdLbl, "[^%w]", "")
+  -- EdgeTX: shapes only (labels stay live text), so one bitmap per screen size, in fixed/
+  local key = OTX and (W .. "x" .. H .. "_" .. string.gsub(u.spdLbl, "[^%w]", "")) or (W .. "x" .. H)
   local b = panelBmps[key]
   if b == nil then
-    local ok, bmp = pcall(lcd.loadBitmap, (OD_ROOT or "") .. "otx/panel_" .. key .. ".png")
+    local ok, bmp = pcall(lcd.loadBitmap, (OD_ROOT or "") .. (OTX and "otx/panel_" or "fixed/panel_") .. key .. ".png")
     b = (ok and bmp) or false
     panelBmps[key] = b
   end
@@ -461,9 +469,11 @@ local blockItems = { {}, {}, {}, {}, { gauge = true }, {}, {}, {} }   -- the 8 b
 local otxBlocks = { blockItems[1], blockItems[2], blockItems[5], blockItems[6], blockItems[7], blockItems[8] }
 -- layer: nil = all, "fixed" / "live" as for tile()
 local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
-  if OTX and layer == nil then
+  if layer == nil then
     local bmp = panelBitmap(u)
-    if bmp then lcd.drawBitmap(I(x), I(y), bmp) layer = "live" end
+    -- EdgeTX: over the bitmap the blocks draw without background / bar track ("nobg"), labels
+    -- live; OpenTX: its own live layer (tileLive)
+    if bmp then lcd.drawBitmap(I(x), I(y), bmp) layer = OTX and "live" or "nobg" end
   end
   -- flight in progress, or the last one until the next arming
   local f = FS.live()
@@ -519,12 +529,13 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
     local tx, ty = x + c * (tw + gap), y + r * (th + gap)
     if it.gauge then
       if not layer then battGauge(tx, ty, tw, th, s, fVal, u.alarmV)
-      elseif layer == "live" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true)
+      elseif layer == "live" or layer == "nobg" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true)
       else battGauge(tx, ty, tw, th, s, fVal, nil, false, true) end   -- export: outline only
     else
       -- HOME: keep the value clear of the arrow (drawn in the left 6 px + up to 30 % of the tile)
       local inset = (i == 1 and s.homeBrg and s.yaw and s.homeDist and s.homeDist > 0) and (tw * 0.3 + 6) or 0
       if not layer then tile(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
+      elseif layer == "nobg" then tile(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset, true)
       elseif layer == "live" then tileLive(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
       else tile(tx, ty, tw, th, it[1], "", nil, fVal, fLbl, it[4] and 0, nil, 0) end   -- export
     end
@@ -763,7 +774,9 @@ local function exportPanel(w, W, H)
   local x, y, pw, ph = rx, bodyY + mapH + 3, rw, bodyH - mapH - 3
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(x, y, pw, ph)
+  exportShapes = not OTX            -- EdgeTX: shapes only, the labels stay live
   tiles(x, y, pw, ph, T.s, units(w), fBig, fSmall, "fixed")
+  exportShapes = false
   return x, y, pw, ph
 end
 

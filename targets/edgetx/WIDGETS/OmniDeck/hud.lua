@@ -426,7 +426,9 @@ local function aircraftSymbol(cx, cy, w)
 end
 
 -- horizon + ladder + roll scale inside (x,y,w,h)
-local function horizon(x, y, w, h, roll, pitch, font, fixedDone)
+-- ov: the fixed-parts bitmap (overlayFor), drawn at (ovx, ovy) where the roll scale was drawn,
+-- so the roll pointer still goes on top of it as before
+local function horizon(x, y, w, h, roll, pitch, font, fixedDone, ov, ovx, ovy)
   local cx, cy = x + w / 2, y + h / 2
   local ppd = h / 50                    -- 50 deg of pitch over the full height
   local r = math.rad(roll)
@@ -494,7 +496,8 @@ local function horizon(x, y, w, h, roll, pitch, font, fixedDone)
 
   -- roll scale (fixed) and pointer (turns with the horizon)
   local R = math.min(w, h) * 0.42
-  if not fixedDone then rollTicks(cx, cy, R) end
+  if ov then lcd.drawBitmap(I(ovx), I(ovy), ov)
+  elseif not fixedDone then rollTicks(cx, cy, R) end
   local pr = math.rad(-roll)
   local tipx, tipy = cx + math.sin(pr) * (R - 1), cy - math.cos(pr) * (R - 1)
   local bxl, byl = cx + math.sin(pr - 0.06) * (R - 11), cy - math.cos(pr - 0.06) * (R - 11)
@@ -553,15 +556,16 @@ function H.armStatus(x, y, w, h, s)
   lcd.drawText(I(bx + 8), I(by + 4), text)
 end
 
--- OpenTX: the HUD's fixed parts (roll scale, aircraft symbol, heading box frame) as one
--- transparent bitmap per HUD size, made by tools/sim_edgetx.py --otx-panels from H.drawFixed;
--- one drawBitmap instead of about ten drawing calls, as Yaapu's hud.png. No file: drawn live.
+-- The HUD's fixed parts (roll scale, aircraft symbol, heading box frame) as one transparent
+-- bitmap per HUD size, made by tools/sim_edgetx.py --etx-panels from H.drawFixed (EdgeTX: in
+-- fixed/; OpenTX: otx/); one drawBitmap instead of about ten drawing calls, as Yaapu's hud.png.
+-- No file for this size (another screen, a layout zone): drawn live as before.
 local overlays = {}
 local function overlayFor(w, h)
   local key = math.floor(w) .. "x" .. math.floor(h)
   local b = overlays[key]
   if b == nil then
-    local ok, bmp = pcall(lcd.loadBitmap, (OD_ROOT or "") .. "otx/hud_" .. key .. ".png")
+    local ok, bmp = pcall(lcd.loadBitmap, (OD_ROOT or "") .. (OTX and "otx/hud_" or "fixed/hud_") .. key .. ".png")
     b = (ok and bmp) or false
     overlays[key] = b
   end
@@ -599,11 +603,10 @@ function H.draw(x, y, w, h, s, u)
     roll, pitch, aspd, gspd, alt = fin(roll), fin(pitch), fin(aspd), fin(gspd), fin(alt)
     vspd, yaw, homeBrg = fin(vspd), fin(yaw), fin(homeBrg)
   end
-  local ov = OTX and overlayFor(w, h) or nil   -- nil (not false) on EdgeTX and Ethos: they draw it all
+  local ov = (OTX or OD_LITE) and overlayFor(w, h) or nil   -- nil (not false): drawn live
 
   local hx, hy, hw, hh = x, y, w, h
-  horizon(hx, hy, hw, hh, roll or 0, pitch or 0, big and FONT_S or (med and FONT_XS or FONT_XXS), ov ~= nil)
-  if ov then lcd.drawBitmap(I(x), I(y), ov) end
+  horizon(hx, hy, hw, hh, roll or 0, pitch or 0, big and FONT_S or (med and FONT_XS or FONT_XXS), ov ~= nil, ov, x, y)
 
   local spd = aspd or gspd
   if spd then
