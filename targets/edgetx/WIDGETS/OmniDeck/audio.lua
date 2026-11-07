@@ -159,6 +159,14 @@ end
 local greeted = false
 -- another model selected: say the welcome again (Yaapu does too), so a switch is heard as a fresh start
 function A.greetAgain() greeted = false end
+-- EdgeTX: the welcome straight away, from the widget's create(), as Yaapu plays its own. EdgeTX
+-- runs create() for every widget at power-on, but updates (and so A.update) only for the screen
+-- on show: from A.update the welcome waited until OmniDeck's screen was opened.
+function A.greetNow()
+  if greeted or not voice then return end
+  greeted = true
+  pcall(system.playFile, DIR .. voice .. "/omniready.wav")
+end
 
 function A.update(s, alive, now)
   -- "Omni Deck telemetry ready" once when the widget starts (as Yaapu does), as soon as the

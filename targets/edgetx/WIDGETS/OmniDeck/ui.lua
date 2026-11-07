@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-etx1"
+local VERSION = "0.2.0-etx2"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -161,7 +161,8 @@ end
 
 -- ---------------------------------------------------------------- widget state
 local function create()
-  T.checkModel()    -- another model selected: clean telemetry state
+  -- another model selected: clean telemetry state, and the welcome again (as Yaapu)
+  if T.checkModel() then AU.greetAgain() end
   return {
     modelName = T.modelName(),   -- top bar; widgets are re-created when another model is picked
     page = 1, level = 4,

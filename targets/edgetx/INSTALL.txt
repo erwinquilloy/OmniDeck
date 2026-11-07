@@ -1,10 +1,16 @@
-OmniDeck 0.2.0-etx1 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.2.0-etx2 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.2.0-etx2
+- "Omni Deck telemetry ready" is said at power-on again, also when OmniDeck is not on the
+  screen the radio starts on (it waited until OmniDeck's screen was opened), and again after
+  switching to another model. It is played as soon as the widget starts, as Yaapu does.
+- Changed since etx1: audio.lua, main.lua, ui.lua.
 
 WHAT'S NEW IN 0.2.0-etx1 (after test 35)
 EdgeTX now has its own copy of OmniDeck: changes made for Ethos or OpenTX no longer reach it.

@@ -62,6 +62,7 @@ local function create(zone, opt)
   local w = UI.create()
   w.zone = zone
   apply(w)
+  UI.AU.greetNow()   -- the welcome now, with the voice just loaded (see audio.lua)
   w.homePage = fixedPage(opt)   -- arming / the summary timeout return here (nil = main)
   w.page = w.homePage or w.startPage or 1
   w.lastRefresh = getTime()

@@ -472,6 +472,10 @@ print('options', opts)
 options = L.table_from(opts)
 FULL = L.table_from({'x': 0, 'y': 0, 'w': W, 'h': H})
 wd = CALL('create', widget_def['create'], FULL, options)
+# the welcome plays from create(), before any update, as Yaapu's: EdgeTX only updates the screen on
+# show, so a widget on another screen at power-on would otherwise stay silent
+if not OTX:
+    assert played == ['/WIDGETS/OmniDeck/audio/Aria/omniready.wav'], 'welcome from create(): %s' % played
 S = None
 worst = {}
 heavy = []
