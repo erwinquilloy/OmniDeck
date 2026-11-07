@@ -1441,6 +1441,15 @@ MODEL_NAME[0] = 'Plane B'
 wt['create']()                    # selecting a model re-creates its widgets
 S_after = getS()
 assert S_after.odMarker is None, 'new model: state cleared'
+if W > 480:
+    # X20 copy (test41b): the welcome is said again after a model switch, as Yaapu does
+    vmod.setVoice('Aria'); del played[:]
+    for _ in range(6): wake_only(0.3)
+    assert 'omniready' in played, 'welcome after a model switch, got %s' % played
+    MODEL_NAME[0] = 'Plane B'; wt['create'](); del played[:]   # same model again: no welcome
+    for _ in range(6): wake_only(0.3)
+    assert 'omniready' not in played, 'no welcome without a switch, got %s' % played
+    vmod.setVoice('off')
 S_before.odMarker2 = 2
 assert getS().odMarker2 == 2, 'the state table is reset in place (the UI holds it)'
 print('model switch OK')

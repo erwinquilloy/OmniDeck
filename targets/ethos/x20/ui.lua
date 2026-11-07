@@ -161,7 +161,10 @@ end
 
 -- ---------------------------------------------------------------- widget state
 local function create()
-  T.checkModel()    -- another model selected: clean telemetry state
+  -- another model selected: clean telemetry state, and the welcome again (as Yaapu). Ethos
+  -- re-creates the widget when a model is picked, so the switch is seen here; the 1 s check in
+  -- wakeup then finds nothing new, which is why test41 stayed silent after a switch
+  if T.checkModel() then AU.greetAgain() end
   return {
     modelName = T.modelName(),   -- top bar; widgets are re-created when another model is picked
     page = 1, level = 4,
