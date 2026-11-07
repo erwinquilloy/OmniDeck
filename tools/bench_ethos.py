@@ -57,6 +57,14 @@ def pop_crsf():
 G.py_pop_crsf = pop_crsf
 G.YAAPU_CRSF = CRSF and WHO == 'yaapu'
 G.SCR_W, G.SCR_H = W, H
+G.py_rgb = lambda r=0, g=0, b=0, a=None: int(r or 0) * 65536 + int(g or 0) * 256 + int(b or 0)
+G.py_size = lambda t=None, *a: (len(str(t if t is not None else '')) * 8, 16)
+G.py_zero = lambda *a: 0
+CAP = {'on': False, 'texts': []}
+def _text(*a):
+    if CAP['on'] and len(a) > 2: CAP['texts'].append(str(a[2]))
+    return 0
+G.py_text = _text
 
 L.execute(r'''
 -- a placeholder for anything not stubbed: callable, indexable, and every method returns another
@@ -72,15 +80,15 @@ os.clock = now
 os.time = function() return 1730000000 + math.floor(now()) end
 
 lcd = setmetatable({
-  RGB = function(r, g, b, a) return (r or 0) * 65536 + (g or 0) * 256 + (b or 0) end,
+  RGB = py_rgb,
   getWindowSize = function() return SCR_W, SCR_H end,
-  getTextSize = function(t) t = tostring(t or "") return #t * 8, 16 end,
+  getTextSize = py_size,
   loadBitmap = function() return setmetatable({ width = function() return 64 end, height = function() return 64 end }, stubMT) end,
   loadMask = function() return stub() end,
   isVisible = function() return true end,
   invalidate = function() INVALIDATED = true end,
-  drawText = function(x, y, t) if TEXTS then TEXTS[#TEXTS + 1] = tostring(t) end end,
-}, { __index = function(t, k) return function() DRAWS = (DRAWS or 0) + 1 end end })
+  drawText = py_text,
+}, { __index = function(t, k) t[k] = py_zero return py_zero end })
 
 local function source()
   return setmetatable({ value = function() return 0 end, name = function() return "src" end,
@@ -217,10 +225,11 @@ while sim_t[0] < t_end:
         paints.append(measured(wt['paint'], widget))
 
 if '--texts' in args:   # what the last paint drew: proof the widget shows flight data
-    G.TEXTS = L.table_from({}); G.DRAWS = 0
+    CAP['on'] = True
     measured(wt['paint'], widget)
-    print('texts in one paint:', ' | '.join(str(G.TEXTS[i]) for i in range(1, len(G.TEXTS) + 1))[:900])
-    print('other draw calls:', G.DRAWS, ' frames still queued:', len(sport_q) + len(crsf_q))
+    CAP['on'] = False
+    print('texts in one paint:', ' | '.join(CAP['texts'])[:900])
+    print('frames still queued:', len(sport_q) + len(crsf_q))
 skip = int(len(wakes) * 0.1)          # the first seconds: start-up work, not the steady state
 pw, ww = paints[int(len(paints) * 0.1):], wakes[skip:]
 dur = SECONDS * 0.9

@@ -140,11 +140,12 @@ local STARVE_PCT = 90
 local drawn, starved = 0, false
 local W, H = LCD_W or 480, LCD_H or 272
 local cx1, cy1, cx2, cy2 = 0, 0, W, H        -- clip box, x2/y2 exclusive
+local full = true                            -- no clipping: the clip box is the whole window
 local min, max = math.min, math.max
 
 
 -- start of a screen update: the window, and other code may have changed the colour slot
-function L.setWindow(w, h) W, H = w, h cx1, cy1, cx2, cy2 = 0, 0, w, h sent = nil drawn, starved = 0, false end
+function L.setWindow(w, h) W, H = w, h cx1, cy1, cx2, cy2 = 0, 0, w, h full = true sent = nil drawn, starved = 0, false end
 function L.starved() return starved end
 function L.getWindowSize() return W, H end
 function L.RGB(r, g, b) return rawlcd.RGB(r, g, b) end
@@ -152,7 +153,7 @@ function L.color(c) col = c end
 function L.font(f) fontFlag = FONTS[f] or 0 end
 function L.invalidate() end
 function L.isVisible() return true end
-function L.setClipping(x, y, w, h) cx1, cy1, cx2, cy2 = x, y, x + w, y + h end
+function L.setClipping(x, y, w, h) cx1, cy1, cx2, cy2 = x, y, x + w, y + h full = x == 0 and y == 0 and w == W and h == H end
 
 function L.getTextSize(text) return rawSize(text, fontFlag) end
 
@@ -162,7 +163,7 @@ function L.drawText(x, y, text, align)
   if drawn >= 8 then drawn = 0 if getUsage and getUsage() >= STARVE_PCT then starved = true end end
   if starved then return end
   -- no clip area: EdgeTX keeps text inside the widget itself and does the alignment
-  if cx1 == 0 and cy1 == 0 and cx2 == W and cy2 == H then
+  if full then
     if col ~= sent then rawSetColor(CUSTOM, col) sent = col end
     rawText(x, y, text, CUSTOM + fontFlag + (ALIGN[align] or 0))
     return
@@ -272,6 +273,7 @@ local function clipSide(src, n, dst, side, v)
   return m
 end
 
+local triKey, triPoly, triN = {}, {}, 0   -- the last clipped triangle (drawFilledTriangle)
 function L.drawFilledTriangle(x1, y1, x2, y2, x3, y3)
   local xl, xh, yl, yh = min(x1, x2, x3), max(x1, x2, x3), min(y1, y2, y3), max(y1, y2, y3)
   if xl >= cx1 and xh < cx2 and yl >= cy1 and yh < cy2 then
@@ -280,16 +282,27 @@ function L.drawFilledTriangle(x1, y1, x2, y2, x3, y3)
     return
   end
   if xh < cx1 or xl >= cx2 or yh < cy1 or yl >= cy2 then return end
-  bufA[1], bufA[2], bufA[3], bufA[4], bufA[5], bufA[6] = x1, y1, x2, y2, x3, y3
-  local n = 6
-  n = clipSide(bufA, n, bufB, 1, cx1) if n < 6 then return end
-  n = clipSide(bufB, n, bufA, 2, cx2 - 1) if n < 6 then return end
-  n = clipSide(bufA, n, bufB, 3, cy1) if n < 6 then return end
-  n = clipSide(bufB, n, bufA, 4, cy2 - 1) if n < 6 then return end
+  -- the same triangle cut by the same clip box as last time (the heading tape's home marker held
+  -- at the tape's edge, every update): the polygon kept from then, not clipped again
+  local k = triKey
+  if k[1] ~= x1 or k[2] ~= y1 or k[3] ~= x2 or k[4] ~= y2 or k[5] ~= x3 or k[6] ~= y3
+     or k[7] ~= cx1 or k[8] ~= cy1 or k[9] ~= cx2 or k[10] ~= cy2 then
+    k[1], k[2], k[3], k[4], k[5], k[6], k[7], k[8], k[9], k[10] = x1, y1, x2, y2, x3, y3, cx1, cy1, cx2, cy2
+    bufA[1], bufA[2], bufA[3], bufA[4], bufA[5], bufA[6] = x1, y1, x2, y2, x3, y3
+    local n = 6
+    n = clipSide(bufA, n, bufB, 1, cx1)
+    if n >= 6 then n = clipSide(bufB, n, bufA, 2, cx2 - 1) end
+    if n >= 6 then n = clipSide(bufA, n, bufB, 3, cy1) end
+    if n >= 6 then n = clipSide(bufB, n, bufA, 4, cy2 - 1) end
+    triN = n
+    for i = 1, n do triPoly[i] = bufA[i] end
+  end
+  local n = triN
+  if n < 6 then return end
   if col ~= sent then rawSetColor(CUSTOM, col) sent = col end
-  local f = CUSTOM
-  local ax, ay = bufA[1], bufA[2]
-  for i = 3, n - 3, 2 do rawTri(ax, ay, bufA[i], bufA[i + 1], bufA[i + 2], bufA[i + 3], f) end
+  local f, p = CUSTOM, triPoly
+  local ax, ay = p[1], p[2]
+  for i = 3, n - 3, 2 do rawTri(ax, ay, p[i], p[i + 1], p[i + 2], p[i + 3], f) end
 end
 
 -- the horizon's ground filled by EdgeTX in C (lcd.drawHudRectangle, the call Yaapu uses):
@@ -490,6 +503,17 @@ function L.drawBitmap(x, y, bmp)
 end
 
 E.lcd = L
+-- EdgeTX's own drawing calls for the hottest loops (the HUD's tapes and scales): the same calls
+-- the functions above end in, without a Lua function in between. A caller applies the clip box
+-- the way they do (clip() gives it). color() also sets the adapter's own colour, so drawing
+-- through the adapter afterwards stays right.
+E.OD_RAW = {
+  text = rawText, size = rawSize, line = rawLine, clipLine = rawClipLine, tri = rawTri, fill = rawFRect,
+  CUSTOM = CUSTOM, LINE = LINE, FONTS = FONTS, ALIGN = ALIGN, NATIVE = nativeAll,
+  color = function(c) col = c if c ~= sent then rawSetColor(CUSTOM, c) sent = c end end,
+  clip = function() return cx1, cy1, cx2, cy2, full end,
+  fontFlag = function() return fontFlag end,
+}
 
 -- ---------------------------------------------------------------- link statistics
 -- For the sensor check page (page 5): what actually reaches the widget, so a tester's photo shows

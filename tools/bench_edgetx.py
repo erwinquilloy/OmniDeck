@@ -92,6 +92,9 @@ G.crossfireTelemetryPop = crsf_pop
 G.sportTelemetryPush = lambda *a: True
 G.crossfireTelemetryPush = lambda *a: True
 G.LCD_W, G.LCD_H = W, H
+ETXV = (args[args.index('--etxver') + 1] if '--etxver' in args else '2.10.5')   # --etxver 2.12.0
+G.ETXVER_S = ETXV
+G.ETXVER_MAJ, G.ETXVER_MIN, G.ETXVER_REV = (int(v) for v in ETXV.split('.'))
 
 
 def lua_open(path, mode='r'):
@@ -102,6 +105,9 @@ def lua_open(path, mode='r'):
 
 
 G.py_open = lua_open
+G.py_rgb = lambda r, g=None, b=None: (r or 0) if g is None else int(r) * 65536 + int(g) * 256 + int(b)
+G.py_size = lambda t, f=0: (len(str(t)) * 8, 16)
+G.py_zero = lambda *a: 0
 G.py_fread = lambda f, n=None: (f.read(int(n)) if n else f.read()) or ''
 G.py_fwrite = lambda f, t: f.write(str(t))
 G.py_fclose = lambda f: f.close()
@@ -128,15 +134,12 @@ local function stub() return setmetatable({}, stubMT) end
 stubMT.__index = function() return function() return stub() end end
 STUB = stub
 
-lcd = setmetatable({
-  RGB = function(r, g, b) if g == nil then return r or 0 end return (r or 0) * 65536 + g * 256 + b end,
-  sizeText = function(t, f) t = tostring(t or "") return #t * 8, 16 end,
-  getLastPos = function() return 0 end, getLastRightPos = function() return 0 end,
-  getLastLeftPos = function() return 0 end,
-}, { __index = function() return function() return 0 end end })
+lcd = setmetatable({ RGB = py_rgb, sizeText = py_size, getLastPos = py_zero, getLastRightPos = py_zero,
+                     getLastLeftPos = py_zero },
+                   { __index = function(t, k) t[k] = py_zero return py_zero end })
 
 Bitmap = { open = function() return {} end, getSize = function() return 64, 64 end, resize = function(b) return b end }
-getVersion = function() return "2.10.5", "tx16s", 2, 10, 5, "EdgeTX" end
+getVersion = function() return ETXVER_S, "tx16s", ETXVER_MAJ, ETXVER_MIN, ETXVER_REV, "EdgeTX" end
 getGeneralSettings = function() return { imperial = 0, battMin = 6.6, battMax = 8.4, language = "en", voice = "en",
                                           gtimer = 0 } end
 getDateTime = function() return { year = 2026, mon = 11, day = 7, hour = 12, min = 0, sec = 0 } end
@@ -230,6 +233,55 @@ st = dict(lat=43.49323, lon=142.88785, hlat=43.49323, hlon=142.88785, mode=5, ar
           hdop=0.8, altmsl=160, volt=15.8, curr=12.3, mah=0, alt=120, vs=0, **{'as': 17.0}, gs=18.5,
           yaw=0, roll=20, pitch=5, wdir=270, wspd=4.2, wpn=0, wpd=0, wpb=0)
 calls = []
+# --prof parts|func|line (OmniDeck): where the refresh goes, sampled every 20 instructions.
+#   parts: the screen part being drawn (the innermost safe(part, fn) on the stack), or
+#          "update <fn>" for the work in UI.wakeup, "other" for the rest
+#   func:  the function running (adapter work in etx.lua shows as its own functions)
+#   line:  the line of OmniDeck code running, adapter work charged to the line that called it
+PROF = args[args.index('--prof') + 1] if '--prof' in args else None
+if PROF:
+    G.PROFMODE = PROF
+    L.execute('''
+      PROFT = {}
+      function measured(fn, ...)
+        COUNT = 0
+        debug.sethook(function()
+          COUNT = COUNT + 20
+          local k
+          if PROFMODE == "parts" then
+            for lv = 2, 40 do
+              local i = debug.getinfo(lv, "Sn")
+              if not i then break end
+              if i.name == "safe" then
+                local nm, v = debug.getlocal(lv, 1)
+                if nm == "part" then k = "draw " .. tostring(v) break end
+              end
+              if i.name == "wakeup" and string.find(i.short_src or "", "ui.lua", 1, true) then
+                local c = debug.getinfo(lv - 1, "Sn")
+                k = "update " .. ((c and c.name) or "?") break
+              end
+            end
+            k = k or "other"
+          elseif PROFMODE == "line" then
+            for lv = 2, 40 do
+              local i = debug.getinfo(lv, "Sl")
+              if not i then break end
+              local f = string.match(i.short_src or "?", "[^/]*$")
+              if f ~= "etx.lua" and f ~= "[C]" then k = f .. ":" .. (i.currentline or 0) break end
+            end
+            k = k or "etx.lua"
+          else
+            local i = debug.getinfo(2, "Sn")
+            k = i and (string.match(i.short_src or "?", "[^/]*$") .. ":" .. (i.linedefined or 0) .. " " .. (i.name or "?")) or "?"
+          end
+          PROFT[k] = (PROFT[k] or 0) + 1
+        end, "", 20)
+        local ok, err = pcall(fn, ...)
+        debug.sethook()
+        if not ok then error(err, 0) end
+        return COUNT
+      end''')
+    measured = G.measured
 # --split (OmniDeck): instructions spent in UI.wakeup (telemetry, voice, summary, alarms) and in
 # UI.paint (drawing), out of each refresh
 SPLIT = {'wake': [], 'paint': []}
@@ -279,11 +331,17 @@ if '--texts' in args:   # what one refresh drew: proof the widget shows flight d
 
 steady = calls[int(len(calls) * 0.1):]
 dur = SECONDS * 0.9
-print('%s EdgeTX 480x272, %.0f s of flight (first 10 %% left out), %s passthrough' % (WHO, SECONDS, 'CRSF' if CRSF else 'S.Port'))
+print('%s EdgeTX %s 480x272, %.0f s of flight (first 10 %% left out), %s passthrough' % (WHO, ETXV, SECONDS, 'CRSF' if CRSF else 'S.Port'))
 print('  refresh: %5.1f per s   worst %7d   median %7d instructions   (%d %% of the 20,000 limit at worst)'
       % (len(steady) / dur, max(steady), statistics.median(steady), round(100 * max(steady) / 20000)))
 print('  Lua instructions per second: %d' % (sum(steady) / dur))
 print('  start-up (worst early refresh): %d' % max(calls[:int(len(calls) * 0.1)] or [0]))
+if PROF:
+    rows = sorted(((int(v), str(k)) for k, v in G.PROFT.items()), reverse=True)
+    tot = sum(c for c, _ in rows) or 1
+    print('profile (%s), share of all refresh work:' % PROF)
+    for c, k in rows[:int(args[args.index('--top') + 1]) if '--top' in args else 25]:
+        print('  %5.1f%%  %7d per refresh  %s' % (100 * c / tot, 20 * c / max(1, len(calls)), k))
 if SPLIT['wake']:
     k = int(len(SPLIT['wake']) * 0.1)
     print('  of which: UI.wakeup median %d, UI.paint median %d (the rest: adapter tick, CRSF catch-up)'

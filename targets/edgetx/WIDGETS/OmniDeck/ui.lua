@@ -311,6 +311,41 @@ local function tile(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inse
   lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
 end
 
+-- EdgeTX (etx.lua OD_RAW): the same tile with EdgeTX's own calls. The blocks are drawn with no
+-- clip box, inside the widget, so each call is what the adapter would end in, without the Lua
+-- function in between (a fill of no width is skipped, as there).
+do
+  local RAWE = (not OD_OTX) and OD_RAW or nil
+  if RAWE then
+    local rfill, rtext, rsize, rcolor, CU, FONTS, ALIGN = RAWE.fill, RAWE.text, RAWE.size, RAWE.color,
+      RAWE.CUSTOM, RAWE.FONTS, RAWE.ALIGN
+    local function fill(x, y, w, h) if w > 0 and h > 0 then rfill(x, y, w, h, CU) end end
+    tile = function(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inset)
+      rcolor(COL.tile)
+      fill(I(x), I(y), I(w), I(h))
+      if bar then
+        h = h - 7
+        rcolor(COL.bar)
+        fill(I(x + 4), I(y + h + 1), I(w - 8), 4)
+        rcolor(COL.dim)
+        fill(I(x + 4), I(y + h + 1), I((w - 8) * bar), 4)
+      end
+      local fl = FONTS[fLbl] or 0
+      local _, lh = rsize("A", fl)
+      rcolor(COL.dim)
+      rtext(I(x + 4), I(y + 2), label, CU + fl)
+      if note and rsize(label, fl) + rsize(note, fl) + 10 <= w then
+        rtext(I(x + w - 4), I(y + 2), note, CU + fl + ALIGN[2])
+      end
+      local fv = FONTS[fVal] or 0
+      local _, vh = rsize("0", fv)
+      rcolor(color or COL.txt)
+      inset = inset or 0
+      rtext(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CU + fv + ALIGN[1])
+    end
+  end
+end
+
 -- OpenTX, over the bitmap of the fixed layer: only what changes (bar fill, note, value). The
 -- full tile() above stays untouched, so EdgeTX and Ethos pay nothing for this.
 -- Font heights and label widths never change, so they are measured once (OpenTX's text sizes

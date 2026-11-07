@@ -152,6 +152,68 @@ local function outlined(x, y, text, flags, color)
   lcd.drawText(x, y, text, flags)
 end
 
+-- EdgeTX (etx.lua OD_RAW): the same two texts with EdgeTX's own call, measured once for both and
+-- placed the way the adapter does: with no clip box EdgeTX aligns the text itself; inside one the
+-- text is aligned here and drawn only when it fits whole. About half the Lua work of the above.
+local RAW = OD_RAW
+local rtext, rsize, rcolor, RCU = nil, nil, nil, nil
+if RAW and not OTX then
+  rtext, rsize, rcolor, RCU = RAW.text, RAW.size, RAW.color, RAW.CUSTOM
+  local clip, fflag, ALIGN = RAW.clip, RAW.fontFlag, RAW.ALIGN
+  outlined = function(x, y, text, flags, color)
+    x, y = I(x), I(y)
+    local f = fflag()
+    local cx1, cy1, cx2, cy2, full = clip()
+    if full then
+      local fl = RCU + f + (ALIGN[flags] or 0)
+      rcolor(C.tape) rtext(x + 1, y + 1, text, fl)
+      rcolor(color) rtext(x, y, text, fl)
+      return
+    end
+    local w, h = rsize(text, f)
+    if flags == 1 then x = x - w / 2 elseif flags == 2 then x = x - w end
+    local fl = RCU + f
+    if x + 1 >= cx1 and x + 1 + w <= cx2 + 1 and y + 1 >= cy1 and y + 1 + h <= cy2 + 1 then
+      rcolor(C.tape) rtext(x + 1, y + 1, text, fl)
+    end
+    if x >= cx1 and x + w <= cx2 + 1 and y >= cy1 and y + h <= cy2 + 1 then
+      rcolor(color) rtext(x, y, text, fl)
+    end
+  end
+end
+
+-- EdgeTX: a horizontal line from x1 to x2 at y with EdgeTX's own calls, as the adapter's drawLine
+-- would draw it inside the current clip box (x1 <= x2, all on screen): EdgeTX's clipped line on
+-- 2.11+, else the plain line when it is inside and the clipped one when it touches an edge
+local function hline(x1, x2, y, cx1, cy1, cx2, cy2)
+  if y < cy1 or y >= cy2 or x2 < cx1 or x1 >= cx2 then return end
+  if RAW.NATIVE or not (x1 >= cx1 and x2 < cx2) then
+    if RAW.clipLine then RAW.clipLine(x1, y, x2, y, cx1, cx2 - 1, cy1, cy2 - 1, RAW.LINE, RCU)
+    else lcd.drawLine(x1, y, x2, y) end
+  else
+    RAW.line(x1, y, x2, y, RAW.LINE, RCU)
+  end
+end
+
+-- EdgeTX: any line, as the adapter's drawLine draws it in the clip box given: EdgeTX's clipped
+-- line on 2.11+, the plain line when inside; one that crosses an edge goes through the adapter
+local function rline(x1, y1, x2, y2, cx1, cy1, cx2, cy2)
+  if RAW.NATIVE then RAW.clipLine(x1, y1, x2, y2, cx1, cx2 - 1, cy1, cy2 - 1, RAW.LINE, RCU) return end
+  if x1 >= cx1 and x2 >= cx1 and x1 < cx2 and x2 < cx2 and y1 >= cy1 and y2 >= cy1 and y1 < cy2 and y2 < cy2 then
+    RAW.line(x1, y1, x2, y2, RAW.LINE, RCU)
+    return
+  end
+  lcd.drawLine(x1, y1, x2, y2)
+end
+-- EdgeTX: one text inside the clip box given, as the adapter's drawText places it
+local function rtextIn(x, y, text, align, cx1, cy1, cx2, cy2, full)
+  local f = RAW.fontFlag()
+  if full then rtext(x, y, text, RCU + f + (RAW.ALIGN[align] or 0)) return end
+  local w, h = rsize(text, f)
+  if align == 1 then x = x - w / 2 elseif align == 2 then x = x - w end
+  if x >= cx1 and x + w <= cx2 + 1 and y >= cy1 and y + h <= cy2 + 1 then rtext(x, y, text, RCU + f) end
+end
+
 -- OpenTX: one draw, no outline (chosen here once, so EdgeTX and Ethos don't test for it per call)
 if OTX then
   outlined = function(x, y, text, flags, color)
@@ -163,6 +225,7 @@ H.outlined = outlined
 
 -- vertical tape: value in display units, step between labels, pixels per unit.
 -- It has no background, so the horizon shows through.
+local TL_T, TL_W, TL_H, TL_Y = {}, {}, {}, {}   -- EdgeTX: a tape's numbers, reused every update
 local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, label)
   lcd.font(FONT_XS)
   local _, lh = lcd.getTextSize("A")
@@ -175,6 +238,42 @@ local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, labe
   local v = first
   -- OpenTX: no moving ladder, only the current value box below (and the label)
   if OTX then v = math.huge end
+  -- EdgeTX: the ticks with EdgeTX's own line call (hline), the clip box read once
+  local kx1, ky1, kx2, ky2 = nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2 = RAW.clip() end
+  -- EdgeTX: all the ticks, then all the numbers' shadows, then the numbers, one colour each
+  -- (they never overlap); each number placed as outlined() would place it in this clip box
+  if kx1 and LEAN then
+    local tick = w * 0.22
+    local x1 = leftSide and x + w - tick or x
+    local ix1, ix2 = I(x1), I(x1 + tick)
+    local itx = I(leftSide and (x + w - tick - 4) or (x + tick + 4))
+    local lim = value + (h / 2) / ppu + step
+    local f = RAW.fontFlag()
+    local n = 0
+    rcolor(C.tapeTxt)
+    while v <= lim do
+      local ty = cy - (v - value) * ppu
+      hline(ix1, ix2, I(ty), kx1, ky1, kx2, ky2)
+      if (v / step) % 2 == 0 then
+        n = n + 1
+        local t = string.format("%d", v)
+        local tw, tth = rsize(t, f)
+        TL_T[n], TL_W[n], TL_H[n], TL_Y[n] = t, tw, tth, I(ty - th / 2)
+      end
+      v = v + step
+    end
+    local fl = RCU + f
+    for o = 1, 0, -1 do
+      rcolor(o == 1 and C.tape or C.tapeTxt)
+      for i = 1, n do
+        local tw, tth = TL_W[i], TL_H[i]
+        local px, py = (leftSide and itx - tw or itx) + o, TL_Y[i] + o
+        if px >= kx1 and px + tw <= kx2 + 1 and py >= ky1 and py + tth <= ky2 + 1 then rtext(px, py, TL_T[i], fl) end
+      end
+    end
+    v = math.huge
+  end
   while v <= value + (h / 2) / ppu + step do
     local ty = cy - (v - value) * ppu
     local tick = w * 0.22
@@ -183,8 +282,13 @@ local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, labe
       lcd.color(C.tape)
       lcd.drawLine(I(x1), I(ty) + 1, I(x1 + tick), I(ty) + 1)
     end
-    lcd.color(C.tapeTxt)
-    lcd.drawLine(I(x1), I(ty), I(x1 + tick), I(ty))
+    if kx1 then
+      rcolor(C.tapeTxt)
+      hline(I(x1), I(x1 + tick), I(ty), kx1, ky1, kx2, ky2)
+    else
+      lcd.color(C.tapeTxt)
+      lcd.drawLine(I(x1), I(ty), I(x1 + tick), I(ty))
+    end
     -- LEAN (EdgeTX): a number on every other tick, to save Lua time (OpenTX skips the loop)
     if LEAN and (v / step) % 2 ~= 0 then
       -- tick only
@@ -245,6 +349,10 @@ local function headingTape(x, y, w, h, hdg, homeBrg, font, boxFont, fixedDone)
   local stepD = LEAN and 15 or 5
   local start = math.floor((hdg - span / 2) / stepD) * stepD
   local stop = OTX and start - 1 or start + span + stepD   -- OpenTX: the loop doesn't run
+  -- EdgeTX: the ticks with EdgeTX's own line call (rline), the clip box read once
+  local kx1, ky1, kx2, ky2 = nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2 = RAW.clip() end
+  local yb = I(y + h - 1)
   for d = start, stop, stepD do
     local tx = cx + (d - hdg) * ppd
     local dd = d % 360
@@ -253,8 +361,14 @@ local function headingTape(x, y, w, h, hdg, homeBrg, font, boxFont, fixedDone)
       lcd.color(C.tape)
       lcd.drawLine(I(tx) + 1, I(y0), I(tx) + 1, I(y + h - 1))
     end
-    lcd.color(C.tapeTxt)
-    lcd.drawLine(I(tx), I(y0), I(tx), I(y + h - 1))
+    if kx1 then
+      rcolor(C.tapeTxt)
+      local itx = I(tx)
+      rline(itx, I(y0), itx, yb, kx1, ky1, kx2, ky2)
+    else
+      lcd.color(C.tapeTxt)
+      lcd.drawLine(I(tx), I(y0), I(tx), I(y + h - 1))
+    end
     if dd % 15 == 0 then
       -- LEAN (EdgeTX): the compass points only; the box below has the exact heading
       local lbl = CARD[dd] or ((dd % 30 == 0 and not LEAN) and tostring(math.floor(dd / 10)) or nil)
@@ -292,11 +406,15 @@ end
 -- both look alike. Colours are set here, so the export needs nothing else.
 local function rollTicks(cx, cy, R)
   lcd.color(C.line)
+  -- EdgeTX: EdgeTX's own line call (rline), the clip box read once
+  local kx1, ky1, kx2, ky2 = nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2 = RAW.clip() rcolor(C.line) end
   for _, t in ipairs(ROLL_TICKS) do
     local sn, cs, len = t[1], t[2], t[3]
     local sx, sy = cx + sn * R, cy - cs * R
     local ex, ey = cx + sn * (R + len), cy - cs * (R + len)
-    lcd.drawLine(I(sx), I(sy), I(ex), I(ey))
+    if kx1 then rline(I(sx), I(sy), I(ex), I(ey), kx1, ky1, kx2, ky2)
+    else lcd.drawLine(I(sx), I(sy), I(ex), I(ey)) end
   end
 end
 local function aircraftSymbol(cx, cy, w)
@@ -350,13 +468,22 @@ local function horizon(x, y, w, h, roll, pitch, font, fixedDone)
   -- pitch ladder every 10 deg (5 deg short marks)
   lcd.font(font)
   local _, th = lcd.getTextSize("0")
+  -- EdgeTX: rungs and their numbers with EdgeTX's own calls (rline, rtextIn), the clip box read once
+  local kx1, ky1, kx2, ky2, kfull = nil, nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2, kfull = RAW.clip() rcolor(C.line) end
   for a = -40, 40, LEAN and 10 or 5 do
     if a ~= 0 and math.abs(a - pitch) <= 22 then
       local half = (a % 10 == 0) and w * 0.14 or w * 0.06
       local lx, ly = px - nx * a * ppx, py - ny * a * ppd
-      lcd.drawLine(I(lx - dx * half), I(ly - dy * half), I(lx + dx * half), I(ly + dy * half))
+      if kx1 then
+        rline(I(lx - dx * half), I(ly - dy * half), I(lx + dx * half), I(ly + dy * half), kx1, ky1, kx2, ky2)
+      else
+        lcd.drawLine(I(lx - dx * half), I(ly - dy * half), I(lx + dx * half), I(ly + dy * half))
+      end
       -- OpenTX: rungs without numbers, as Yaapu's horizon there
-      if a % 10 == 0 and not OTX then
+      if a % 10 == 0 and not OTX and kx1 then
+        rtextIn(I(lx + dx * (half + 16)), I(ly + dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED, kx1, ky1, kx2, ky2, kfull)
+      elseif a % 10 == 0 and not OTX then
         lcd.drawText(I(lx + dx * (half + 16)), I(ly + dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)
         if not LEAN then   -- EdgeTX: one side only, to save Lua time
           lcd.drawText(I(lx - dx * (half + 16)), I(ly - dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)
