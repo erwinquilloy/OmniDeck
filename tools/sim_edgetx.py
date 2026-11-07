@@ -655,6 +655,14 @@ def render(name, page):
 
 for page, name in ((1, 'main'), (2, 'map'), (3, 'msgs')):
     render('etx_%s_%s.png' % (name, tag), page)
+# near wings level the roll pointer meets the heading box: the box must stay on top (as drawn live)
+_r, _p = st['roll'], st['pitch']
+for rl in (0, 3, -3):
+    st['roll'], st['pitch'] = rl, 0
+    step(0.5)
+    render('etx_main_roll%+d_%s.png' % (rl, tag), 1)
+st['roll'], st['pitch'] = _r, _p
+step(0.5)
 
 # OD_GEO=1: the horizon's ground edge must lie on the white horizon line at any attitude. Every
 # sky/ground boundary in a column must have the line within 2 px. Columns left and right of the

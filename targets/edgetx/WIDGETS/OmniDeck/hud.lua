@@ -389,7 +389,9 @@ local function headingTape(x, y, w, h, hdg, homeBrg, font, boxFont, fixedDone)
   lcd.setClipping(0, 0, W, Hh)
   -- heading box (its frame is in the OpenTX overlay bitmap when there is one)
   local txt = string.format("%03d", math.floor(hdg + 0.5) % 360)
-  local tx, ty = headingBox(x, y, w, h, boxFont, not fixedDone)
+  -- EdgeTX: the box frame is always drawn here, after the roll pointer, so near wings level the
+  -- box still covers the pointer (it is not in the fixed/ overlay); OpenTX: in its overlay
+  local tx, ty = headingBox(x, y, w, h, boxFont, not (fixedDone and OTX))
   lcd.color(C.line)
   lcd.drawText(I(tx), I(ty), txt, CENTERED)
 end
@@ -590,7 +592,8 @@ function H.drawFixed(x, y, w, h)
   local cx, cy = x + w / 2, y + h / 2
   rollTicks(cx, cy, math.min(w, h) * 0.42)
   aircraftSymbol(cx, cy, w)
-  headingBox(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, hdgFont, true)
+  -- EdgeTX: the heading box frame stays live (drawn after the roll pointer, see headingTape)
+  if OTX then headingBox(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, hdgFont, true) end
 end
 
 -- u: { spd=fn(m/s)->display, spdLbl=, alt=fn(m)->display, altLbl= }
