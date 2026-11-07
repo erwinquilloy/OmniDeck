@@ -8,11 +8,19 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 WHAT'S NEW IN 0.2.0-etx1 (after test 35)
 EdgeTX now has its own copy of OmniDeck: changes made for Ethos or OpenTX no longer reach it.
+- Lighter on EdgeTX's Lua limit, with the same screens: the clock is read once per screen
+  update, the top bar and data block texts are made again only when their values change,
+  voice, flight summary and alarms take turns (one per update), the trail and mission are
+  drawn with leaner loops, link sensors are read 5 times a second and the home position
+  refined twice a second, S.Port values are taken from the queue directly, and an ArduPilot
+  status text over CRSF is decoded in one go.
+- INAV mission download is now Off for a newly added model (a model you have already set
+  up in OmniDeck Setup keeps its setting). Turn it on in OmniDeck Setup if you use INAV
+  missions.
 - If EdgeTX's "CPU limit" is ever reached, OmniDeck no longer tries to carry on drawing.
 - Nothing is written to the SD card while drawing: error.log is gone (an error stays on the
   screen in red), and the last GPS position is saved once per landing instead of every minute.
-- Page 5 (Sensor check): S.Port lines (frames per reader and per kind), from Ethos tests 37-39.
-- Otherwise the same as test 35 on screen.
+- Page 5 (Sensor check): S.Port lines (frames per reader and per kind).
 - Changed since test 35: every .lua file in WIDGETS/OmniDeck except mission.lua, mspclient.lua
   and summary.lua.
 
