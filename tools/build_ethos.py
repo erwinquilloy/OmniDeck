@@ -77,6 +77,12 @@ def build(out_zip, audio=None, audio_from=None, install=None):
     with zipfile.ZipFile(out_zip) as z:
         assert z.testzip() is None
         names = z.namelist()
+        # every sound must be a real WAV: 23 Aria clips were all zeros (a copy cut short) in every
+        # package up to test41, and the radio just stays silent for them
+        blank = [n for n in names if n.lower().endswith('.wav') and z.read(n)[:4] != b'RIFF']
+    if blank:
+        os.remove(out_zip)
+        sys.exit('not WAV files (%d), package removed: %s' % (len(blank), ', '.join(blank[:8])))
     assert all('\\' not in n for n in names)
     packs = sorted({n.split('/')[3] for n in names if n.startswith(DST + 'audio/') and n.count('/') >= 4})
     print('%s: %d files | x18 %s | x20 %s | voice packs: %s' % (

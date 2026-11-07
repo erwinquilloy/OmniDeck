@@ -2,7 +2,7 @@
 """Assemble the EdgeTX or OpenTX widget for an SD card.
 
     python tools/build_edgetx.py <SD root> [--otx] [--audio <folder with voice packs>]
-    python tools/build_edgetx.py --zip <out.zip> [--otx] [--audio-from <older OmniDeck zip>]
+    python tools/build_edgetx.py --zip <out.zip> [--otx] [--audio <folder> | --audio-from <older zip>]
 
 Copies targets/edgetx (or, with --otx, targets/opentx): WIDGETS/OmniDeck/ and
 SCRIPTS/TOOLS/, plus an empty missions folder and, with --audio, the voice packs.
@@ -42,10 +42,21 @@ def build(sd_root, audio=None, otx=False):
     return dst
 
 
-def build_zip(out_zip, otx=False, audio_from=None):
+EDGETX_PACKS = ('Aria', 'Guy')   # 4 letters at most: EdgeTX's 45-character sound path limit
+
+
+def build_zip(out_zip, otx=False, audio_from=None, audio=None):
     import tempfile, zipfile, re
     with tempfile.TemporaryDirectory() as sd:
-        build(sd, None, otx)
+        if audio:   # a folder of voice packs: only the ones EdgeTX can use
+            only = os.path.join(sd, '_packs')
+            for p in EDGETX_PACKS:
+                if os.path.isdir(os.path.join(audio, p)):
+                    shutil.copytree(os.path.join(audio, p), os.path.join(only, p))
+            build(sd, only, otx)
+            shutil.rmtree(only)
+        else:
+            build(sd, None, otx)
         names = []
         with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as z:
             inst = os.path.join(target_dir(otx), 'INSTALL.txt')
@@ -67,6 +78,11 @@ def build_zip(out_zip, otx=False, audio_from=None):
         with zipfile.ZipFile(out_zip) as z:
             assert z.testzip() is None
             names = z.namelist()
+            # every sound must be a real WAV (23 Aria clips were all zeros up to etx2 / otx-test2)
+            blank = [n for n in names if n.lower().endswith('.wav') and z.read(n)[:4] != b'RIFF']
+    if blank:
+        os.remove(out_zip)
+        sys.exit('not WAV files (%d), package removed: %s' % (len(blank), ', '.join(blank[:8])))
     assert all(chr(92) not in n for n in names)   # no backslashes
     ui = open(os.path.join(target_dir(otx), 'WIDGETS', 'OmniDeck', 'ui.lua'), encoding='utf-8').read()
     ver = re.search(r'local VERSION = "([^"]+)"', ui).group(1)
@@ -81,7 +97,8 @@ if __name__ == '__main__':
         i = args.index('--zip')
         out = args[i + 1]
         old = args[args.index('--audio-from') + 1] if '--audio-from' in args else None
-        build_zip(out, '--otx' in args, old)
+        folder = args[args.index('--audio') + 1] if '--audio' in args else None
+        build_zip(out, '--otx' in args, old, folder)
         sys.exit(0)
     audio = None
     if '--audio' in args:
