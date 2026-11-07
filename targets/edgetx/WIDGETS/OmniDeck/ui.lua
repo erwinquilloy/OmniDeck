@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-etx2"
+local VERSION = "0.2.0-etx3"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -696,6 +696,11 @@ local function loadLogo(file)
   if ok and bmp then
     local okW, bw = pcall(function() return bmp:width() end)
     local okH, bh = pcall(function() return bmp:height() end)
+    -- EdgeTX bitmaps have no width() / height(): Bitmap.getSize(bmp) gives both
+    if not (okW and okH) and Bitmap and Bitmap.getSize then
+      local ok2, a, b2 = pcall(Bitmap.getSize, bmp)
+      if ok2 and a and b2 then okW, bw, okH, bh = true, a, true, b2 end
+    end
     logo.bmp, logo.w, logo.h = bmp, okW and bw or 0, okH and bh or 0
   end
 end
@@ -705,7 +710,8 @@ local function logoPanel(x, y, w, h)
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
   local box = math.min(w, h) - 16
-  local k = math.min(1, box / logo.w, box / logo.h)
+  -- EdgeTX: drawn at its own size, centred (the logos are made to fit the TX16S panel)
+  local k = OD_LITE and 1 or math.min(1, box / logo.w, box / logo.h)
   local dw, dh = I(logo.w * k), I(logo.h * k)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
   if k < 1 then
@@ -715,11 +721,29 @@ local function logoPanel(x, y, w, h)
   end
 end
 
+-- the panel above the data blocks (OmniDeck Setup "Top-right panel"): 0 minimap (as before),
+-- 1 radar (as iNav LuaTelemetry's), 2 OmniDeck logo, 3 Stratos logo
+local function panelMode(w)
+  local p = w.panel or 0
+  if p == 1 then return "radar" end
+  if p == 2 or p == 3 then return "logo" end
+  return "map"
+end
+local radarO = {}
+local function radarOpts(w, u)
+  local f = FS.live()
+  radarO.orient, radarO.distF = ORIENT[w.orient] or "north", u.distF
+  radarO.maxDist = f and f.maxHome or nil
+  return radarO
+end
+
 local function pageMain(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
   local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
   -- map first: on EdgeTX a tile can hang over the map's edge, and what follows covers it
-  if noMinimap(W) then logoPanel(rx, bodyY, rw, mapH)
+  local pm = panelMode(w)
+  if pm == "logo" then logoPanel(rx, bodyY, rw, mapH)
+  elseif pm == "radar" then safe("radar", MAP.radar, rx, bodyY, rw, mapH, s, radarOpts(w, u))
   elseif not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(hudW, bodyY, 3, bodyH)
@@ -1233,6 +1257,8 @@ local function wakeup(w)
   if not OD_LITE then
     if noMinimap(select(1, lcd.getWindowSize())) then loadLogo(w.logoFile) end
     perfNote(false, t0)
+  elseif panelMode(w) == "logo" then
+    loadLogo(w.panel == 3 and "stratos_title.png" or "omnideck.png")   -- a file read: here, once per change
   end
 end
 

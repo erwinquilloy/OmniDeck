@@ -39,8 +39,11 @@ SD = tempfile.mkdtemp(prefix='bench_etx_')
 if WHO == 'omnideck':
     build_edgetx.build(SD)
     MAIN = '/WIDGETS/OmniDeck/main.lua'
-    if CRSF:   # OmniDeck Setup: link CRSF (Auto finds it too; set so both start alike)
-        open(os.path.join(SD, 'WIDGETS', 'OmniDeck', 'Bench.cfg'), 'w').write('linkMode=1\n')
+    # OmniDeck Setup: link CRSF (Auto finds it too; set so both start alike); --panel N: the
+    # main page's top-right panel (0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo)
+    cfg = ('linkMode=1\n' if CRSF else '') + ('panel=%s\n' % args[args.index('--panel') + 1] if '--panel' in args else '')
+    if cfg:
+        open(os.path.join(SD, 'WIDGETS', 'OmniDeck', 'Bench.cfg'), 'w').write(cfg)
 else:
     shutil.copytree(os.path.expanduser('~/yaapu-src/OTX_ETX/c480x272/SD/WIDGETS/yaapu'),
                     os.path.join(SD, 'WIDGETS', 'Yaapu'))

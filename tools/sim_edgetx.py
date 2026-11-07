@@ -47,7 +47,7 @@ for pack in ('Aria', 'Michelle'):                       # voice folders, content
 def sd_path(p): return os.path.join(SD, *[x for x in str(p).split('/') if x])
 # OD_PANEL=1: OpenTX's top-right panel set to the radar in the model's settings file (0 = logo)
 if os.environ.get('OD_PANEL') is not None:
-    with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('panel=%s\n' % os.environ['OD_PANEL'])
+    with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('panel=%s\nvoice=Aria\n' % os.environ['OD_PANEL'])   # with the voice, as a real settings file (none = voice off)
 
 # ------------------------------------------------------------------ drawing
 # approximate EdgeTX colour-screen font heights at 480x272 (pixels)

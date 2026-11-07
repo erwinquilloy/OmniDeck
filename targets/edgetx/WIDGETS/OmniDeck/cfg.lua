@@ -36,11 +36,13 @@ C.ITEMS = {
   { "cells", "Battery cells (0 = auto)", { 0, 14, 1, "", 1 } },
   { "lowAlt", "Low altitude alarm (0 = off)", { 0, 3000, 10, "", 1 } },
   { "inavWp", "INAV mission download", { { 1, "On" }, { 0, "Off" } } },
+  -- the panel at the top right of the main page, above the data blocks (etx3)
+  { "panel", "Top-right panel", { { 0, "Minimap" }, { 1, "Radar" }, { 2, "OmniDeck logo" }, { 3, "Stratos logo" } } },
 }
 
 C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, orient = 0,
                zoomMode = 0, zoomSrc = "", tileSet = "*", trail = 1, startPage = 1, pageSwitch = "", pageSwMode = 0, sumAuto = 1, batCap = 0, lowVolt = 0, critVolt = 0,
-               cells = 0, lowAlt = 0, inavWp = 0 }
+               cells = 0, lowAlt = 0, inavWp = 0, panel = 0 }
 
 -- EdgeTX: io.read(f, n) / io.write(f, s); standard Lua (simulator): f:read / f:write
 local function fread(f)

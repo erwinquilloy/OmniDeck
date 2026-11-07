@@ -1,10 +1,26 @@
-OmniDeck 0.2.0-etx2 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.2.0-etx3 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.2.0-etx3
+- Main page top-right panel: SYS > Tools > OmniDeck Setup > "Top-right panel":
+    Minimap        (default, as before)
+    Radar          home and the aircraft, as in iNav LuaTelemetry's radar: the scale follows
+                   the distance flown, the distance is at the bottom left, W and E show when
+                   the map orientation is north up
+    OmniDeck logo
+    Stratos logo
+  The radar and the logos also take less of EdgeTX's Lua limit than the minimap.
+- About 20 % less Lua work per screen update (the horizon, tapes and data blocks call EdgeTX's
+  own drawing functions directly); the screens look exactly as before. Further from EdgeTX's
+  "CPU limit": the heaviest update went from about 78 % to 66 % of it in the simulator.
+- Aria voice: 23 sounds that were blank in every earlier package (the welcome, telemetry lost /
+  recovered, ready to arm, RTL, takeoff and others) are fixed. Copy the audio folder again.
+- Changed since etx2: cfg.lua, etx.lua, hud.lua, map.lua, ui.lua, new folder logos/, audio/Aria.
 
 WHAT'S NEW IN 0.2.0-etx2
 - "Omni Deck telemetry ready" is said at power-on again, also when OmniDeck is not on the
