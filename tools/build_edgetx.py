@@ -21,6 +21,9 @@ REPO = os.path.join(HERE, '..')
 
 
 def target_dir(otx=False):
+    # OD_TARGET_DIR: build from another copy (experiments, e.g. a probe of a planned change)
+    if os.environ.get('OD_TARGET_DIR'):
+        return os.environ['OD_TARGET_DIR']
     return os.path.join(REPO, 'targets', 'opentx' if otx else 'edgetx')
 
 
