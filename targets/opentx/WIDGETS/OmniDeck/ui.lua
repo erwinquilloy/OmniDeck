@@ -1233,7 +1233,7 @@ local function wakeup(w)
     perfNote(false, t0)
   elseif OTX and w.panel ~= 1 then
     -- OpenTX: the logo panel (a file read, so here and once per change); the file by the setting
-    loadLogo(w.panel == 2 and "stratos.png" or "omnideck.png")
+    loadLogo(w.panel == 2 and "stratos_title.png" or "omnideck.png")
   end
 end
 
