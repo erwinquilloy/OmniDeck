@@ -475,6 +475,7 @@ do_read()
 if NATIVE: widget.batCap = 5000           # INAV and Betaflight send no capacity
 # OD_PANEL=n: the main page's top-right panel setting (X20 copy, test41b: 0 minimap, 1 logo, 2 radar)
 if os.environ.get('OD_PANEL'): widget.panel = int(os.environ['OD_PANEL'])
+if os.environ.get('OD_LOGO'): widget.logoFile = os.environ['OD_LOGO']   # e.g. stratos_title.png
 
 HOME = (43.49323, 142.88785)
 st = dict(lat=HOME[0], lon=HOME[1], hlat=HOME[0], hlon=HOME[1], mode=5, armed=True, thr=55, sats=14, hdop=0.8,

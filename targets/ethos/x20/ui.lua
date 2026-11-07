@@ -685,8 +685,9 @@ local function logoPanel(x, y, w, h)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
-  local box = math.min(w, h) - 16
-  local k = math.min(1, box / logo.w, box / logo.h)
+  -- fitted to the panel's width and height (8 px margin), proportions kept: a wide logo such
+  -- as stratos_title.png (196 x 115) uses the width instead of being sized to the height
+  local k = math.min(1, (w - 16) / logo.w, (h - 16) / logo.h)
   local dw, dh = I(logo.w * k), I(logo.h * k)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
   if k < 1 then
