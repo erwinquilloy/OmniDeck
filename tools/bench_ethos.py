@@ -37,6 +37,8 @@ W, H = map(int, RES.split('x'))
 
 if WHO == 'omnideck':
     ROOT = os.path.normpath(os.path.join(HERE, '..', 'targets', 'ethos'))
+    if '--root' in args:   # another OmniDeck tree, e.g. an older test's scripts/omnideck from git
+        ROOT = os.path.abspath(args[args.index('--root') + 1])
 else:
     ROOT = os.path.expanduser('~/yaapu-src/ETHOS/c%s/SD/scripts/yaaputelemetry' % RES)
 assert os.path.isfile(os.path.join(ROOT, 'main.lua')), ROOT
