@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-test41"
+local VERSION = "0.2.0-otx-test2"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -1232,7 +1232,8 @@ local function wakeup(w)
     if noMinimap(select(1, lcd.getWindowSize())) then loadLogo(w.logoFile) end
     perfNote(false, t0)
   elseif OTX and w.panel ~= 1 then
-    loadLogo(w.logoFile)   -- OpenTX: the logo panel (a file read, so here and once)
+    -- OpenTX: the logo panel (a file read, so here and once per change); the file by the setting
+    loadLogo(w.panel == 2 and "stratos.png" or "omnideck.png")
   end
 end
 

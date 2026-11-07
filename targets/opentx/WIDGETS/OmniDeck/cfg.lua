@@ -43,10 +43,12 @@ C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, eff
                cells = 0, lowAlt = 0, inavWp = 0 }
 
 -- OpenTX only (no lcd.sizeText there, the same test etx.lua uses): the panel above the data
--- blocks on the main page, the logo or a radar (as iNav LuaTelemetry's). EdgeTX's list and files
--- stay as they were.
+-- blocks on the main page, a logo or a radar (as iNav LuaTelemetry's). OpenTX can't list a
+-- folder, so the logos are a fixed choice of the files shipped in logos/. Values: 0 OmniDeck
+-- logo, 1 radar (both as in the first panel build), 2 Stratos logo.
 if lcd and lcd.sizeText == nil then
-  C.ITEMS[#C.ITEMS + 1] = { "panel", "Top-right panel", { { 0, "Logo" }, { 1, "Radar" } } }
+  C.ITEMS[#C.ITEMS + 1] = { "panel", "Top-right panel",
+    { { 0, "OmniDeck logo" }, { 2, "Stratos logo" }, { 1, "Radar" } } }
   C.DEFAULTS.panel = 0
 end
 

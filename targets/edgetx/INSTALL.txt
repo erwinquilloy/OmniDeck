@@ -1,0 +1,262 @@
+OmniDeck 0.2.0-etx1 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+One telemetry display for ArduPilot, INAV and Betaflight.
+Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
+
+
+
+
+
+WHAT'S NEW IN 0.2.0-etx1 (after test 35)
+EdgeTX now has its own copy of OmniDeck: changes made for Ethos or OpenTX no longer reach it.
+- If EdgeTX's "CPU limit" is ever reached, OmniDeck no longer tries to carry on drawing.
+- Nothing is written to the SD card while drawing: error.log is gone (an error stays on the
+  screen in red), and the last GPS position is saved once per landing instead of every minute.
+- Page 5 (Sensor check): S.Port lines (frames per reader and per kind), from Ethos tests 37-39.
+- Otherwise the same as test 35 on screen.
+- Changed since test 35: every .lua file in WIDGETS/OmniDeck except mission.lua, mspclient.lua
+  and summary.lua.
+
+WHAT'S NEW IN TEST 35 (test 34 was withdrawn; its change is included)
+- INAV and Betaflight: ACRO with airmode on now shows (and is spoken) as ACRO.
+  INAV 6.x to 8.0.x and Betaflight send "AIR" for it, which OmniDeck showed as is.
+- Lighter on the radio's CPU: the horizon's ground and lines that run off the edge of the
+  horizon or map are now drawn by EdgeTX itself (the same calls Yaapu uses), so OmniDeck is
+  further from EdgeTX's "CPU limit" (the main page about 7 % lighter on EdgeTX 2.11 / 2.12,
+  about 4 % on 2.9 / 2.10).
+- In steep turns the horizon now moves the way Yaapu's does.
+- Changed since test 33: telem.lua, ui.lua, hud.lua and etx.lua.
+
+WHAT'S NEW IN TEST 33
+- Fixes the "Path too long" popup (and the radio going to EMERGENCY MODE after it) on
+  EdgeTX 2.11 / 2.12. EdgeTX refuses any sound file whose path is longer than 45 characters,
+  and many Christopher and Michelle sounds were longer.
+- Voice packs on EdgeTX are now Aria and Guy (a new US English male voice, the same family
+  as Aria). Christopher and Michelle stay on Ethos only.
+  PLEASE DELETE these folders from the SD card if you have them:
+     WIDGETS/OmniDeck/audio/Christopher
+     WIDGETS/OmniDeck/audio/Michelle
+  then pick Aria or Guy again in SYS > Tools > OmniDeck Setup > Voice.
+- Two sounds have shorter file names: critvolt.wav (was criticalvoltage.wav) and
+  notready.wav (was notreadytoarm.wav). Copy the audio folder from this package; the old
+  two files can be deleted.
+- Your own voice pack (for example a copy of Yaapu's sounds): give its folder a name of
+  4 letters or fewer, or some of its sounds will hit the same 45-character limit.
+
+WHAT'S NEW IN TEST 32
+- INAV missions: all waypoints show. On a slow link (seen with TBS Crossfire) a late reply to
+  a repeated request was taken as the next waypoint, so a 6-WP mission showed only WP1 and
+  WP4. Each reply is now checked against the waypoint asked for.
+- INAV missions uploaded after the radio started now appear: while disarmed, OmniDeck asks
+  for the waypoint count every 10 s and downloads the mission again if it changed.
+- Sensor check page (page 5): a line for the INAV mission download (what INAV reported, how
+  many waypoints arrived, the end marker, and late replies thrown away).
+
+WHAT'S NEW IN TEST 31
+- Main page: a FLIGHT TIME block takes the place of TOTAL DIST. The total distance flown is
+  now the small note in the HOME block ("TOTAL 8.33km"); the max distance from home is in
+  the flight summary.
+- Flight time, on the main page and in the flight summary:
+  ArduPilot: counts only while ArduPilot says it is flying (like Yaapu), so time armed on
+  the ground is left out and it pauses after landing. On the bench it stays at 00:00.
+  INAV / Betaflight: they send no "flying" flag, so it counts from arming (like the iNav
+  OpenTX widget).
+  After disarm the last flight's time stays, dimmed, until the next arming.
+
+WHAT'S NEW IN TEST 30
+- Messages page: the same message repeated in a row shows as one line with a count, like
+  Yaapu ("PreArm: AHRS: waiting for home (x4)"). A repeat updates the line's age and still
+  keeps NOT READY TO ARM up, but adds no line and no second call-out.
+- Flight summary outside full screen: back to the main page after 15 s (was 10 s).
+
+WHAT'S NEW IN TEST 29
+- Main page: the values in the right-hand blocks are centred (HOME keeps clear of its arrow).
+- Arming always brings the main page back, also from the flight summary.
+- Flight summary outside full screen (no touch there): it goes back to the main page by
+  itself after 10 s. Full screen: tap as before.
+- ArduPilot: no false READY TO ARM while PreArm errors repeat. Over F.Port, pieces of
+  messages can go missing (also the "PreArm:" word); every critical message now counts,
+  so NOT READY TO ARM stays up while the errors repeat.
+- S.Port / F.Port / FBUS: telemetry is read through one reader, like Yaapu does. Two were
+  used before, which could repeat or mix up message pieces ("ass Healass Heal").
+
+WHAT'S NEW IN TEST 28
+- ArduPilot over ELRS: the main page keeps up again. A TX16S MK2 updates the widget about
+  8 times a second while ArduPilot sends about 22 telemetry frames a second; the main page
+  read only one per update and showed data about 3 s old. Now the newest value of each kind
+  is kept and decoded once per update, and the decoding uses the radio's fast bit functions.
+
+WHAT'S NEW IN TEST 27
+- ArduPilot: pulling the flight battery (or losing the link) no longer flashes ARMED and opens
+  the flight summary. ArduPilot's own flight mode text carries no "disarmed" mark by default,
+  and it was read as armed once the passthrough telemetry stopped.
+
+WHAT'S NEW IN TEST 26
+- The model name is shown in the middle of the top bar, next to the radio battery
+  ("TX 8.1V"). With little room the radio battery is left out first, then the name is shortened.
+  (Test 25 moved it to the lower right corner; back in the top bar now.)
+
+WHAT'S NEW IN TEST 23
+- INAV / Betaflight over TBS Crossfire with Telemetry link "Auto": NO TELEM is fixed (the link
+  was never detected on EdgeTX; setting the link to CRSF in OmniDeck Setup was the workaround,
+  Auto works again now).
+- The horizon follows the plane smoothly with INAV/Betaflight (attitude read on every update,
+  the other sensors 5 times a second).
+
+WHAT'S NEW IN TEST 22
+- Betaflight / INAV on EdgeTX: pitch, flight mode, armed state, battery voltage, current,
+  used mAh, altitude, speed and satellites show again (since test 10 only roll, heading, LQ
+  and RSSI were read).
+- Lighter on the radio's processor with INAV/Betaflight (sensors read 5 times a second).
+- Switching models starts clean: the flight controller, home and messages of the model
+  before no longer carry over.
+
+WHAT'S NEW IN TEST 21
+- Map tiles setting (OmniDeck Setup): Auto (the first tile set on the card), Off, or one of the
+  sets found, e.g. "GOOGLE Satellite". See MAP TILES below for making tiles.
+
+WHAT'S NEW IN TEST 20
+- One OmniDeck per telemetry screen, each on its own page (like Yaapu's screen option):
+  long-press the widget > Widget settings > Page:
+  0 = the Start page from OmniDeck Setup, 1 = Main, 2 = Map, 3 = Messages,
+  4 = Flight summary, 5 = Sensor check.
+  Example: screen 1 OmniDeck Page 1, screen 2 OmniDeck Page 2; switch screens as usual.
+
+WHAT'S NEW IN TEST 19
+- Map zoom control (OmniDeck Setup): a knob or slider (S1, S2, LS, RS ... whatever the radio
+  has) sets the map zoom, all ranges across its travel. Off = wheel / automatic zoom.
+
+WHAT'S NEW IN TEST 18
+- Page switch (OmniDeck Setup): change pages with a switch, also when the widget is NOT full
+  screen (EdgeTX gives a widget touch and keys only in full screen).
+  "Next page": each flip up, or each press of a momentary switch such as SH.
+  "Position picks page": a 3-position switch, up = Main, middle = Map, down = Messages.
+- OmniDeck Check lists any sounds a voice pack is missing (copy that folder again if it does).
+
+WHAT'S NEW IN TEST 17 (first builds run on a real TX16S MK2, EdgeTX 2.9.4 and 2.12)
+- Settings by name: SYS > Tools > OmniDeck Setup (see SETTINGS below). The widget has no
+  options any more; each model keeps its own settings. Includes the battery and low altitude
+  alarms, units, voice pack, map and flight summary settings.
+- EdgeTX 2.12: status messages no longer fall apart into 3-letter pieces, and the flight mode
+  shows and is spoken again (2.12 handles large numbers less precisely; OmniDeck now avoids them).
+- EdgeTX 2.9: the widget loads and appears in the widget list (2.9 has a Lua loading bug that
+  OmniDeck now works around).
+- Voice packs are found on EdgeTX; telemetry frames are read faster so fewer are lost.
+- Pages change with a quick tap in full screen.
+- Page 5, SENSOR CHECK (tap / ENTER through the pages): link statistics for testers. If telemetry
+  drops out, send a photo of this page.
+- SYS > Tools > OmniDeck Check now names the file and line of any loading error.
+
+WHAT'S NEW IN TEST 7
+- New tool: SYS > Tools > OmniDeck Check. If OmniDeck is missing from the widget list,
+  run it and send a photo: it shows your EdgeTX version, missing files and the exact error.
+  (Copy the SCRIPTS folder from this zip too.)
+- Ethos INAV fixes (TBS and R9) are in the shared files, so EdgeTX gets them as well.
+
+WHAT'S NEW IN TEST 6
+- Battery alarms in the widget settings (volts per cell, 0 = off): Low voltage alarm says
+  "Low voltage" (voltage turns amber), Critical voltage alarm says "Critical voltage" (red).
+  Each needs 5 s below its value. Set Battery cells for Li-ion or part-charged packs.
+- Low altitude alarm (0 = off): says "Terrain, pull up" when the aircraft drops below it,
+  only after it has been above it once, with a red frame round the altitude box.
+  (EdgeTX: these alarms are not available yet.)
+
+WHAT'S NEW IN TEST 5
+- INAV/Betaflight: the artificial horizon now follows roll and pitch the right way.
+
+WHAT'S NEW IN TEST 3
+- mLRS: the GPS position is now right (mLRS sends it encoded wrongly; OmniDeck corrects it).
+- Telemetry lost is also shown when the radio's module is switched off.
+- Map view setting (also the third map button): PLANE = aircraft in the middle, you zoom;
+  HOME = home in the middle, zooms out to keep the aircraft on the map and back in on return.
+- When home is off the map, a small home icon on the edge shows its direction and distance.
+- The compass (heading tape) is transparent; the flight summary opens on any page after disarm.
+- "Omni Deck telemetry ready" plays as soon as the widget starts.
+
+WHAT'S NEW IN TEST 2
+- Settings now stay after a radio restart. Set the widget settings once more after installing.
+- READY TO ARM no longer pops up when the aircraft isn't ready (ArduPilot over CRSF).
+- Lost telemetry: the screen edges flash red and the top bar reads NO TELEMETRY.
+- With no GPS fix the map centres on the last known position, so map tiles still show.
+- The map page shows the aircraft's GPS position along the bottom (Lat, Lon).
+
+
+THIS IS A TEST BUILD. It has run on a TX16S MK2 with EdgeTX 2.9.4 and 2.12 (bench, ArduPilot
+over CRSF), not yet in flight. Do not rely on it, or on its voice call-outs, to fly.
+The MK3 (800x480) is untested on a real radio.
+On EdgeTX 2.12, S.Port (FrSky) passthrough values arrive already rounded from the radio, so
+messages and flight modes over S.Port may be wrong there; CRSF/ELRS/mLRS is not affected.
+
+
+INSTALL
+1. Connect the radio to the PC by USB (SD card mode) or use a card reader.
+2. Copy the WIDGETS and SCRIPTS folders from this folder to the ROOT of the SD card. You should end up with:
+       WIDGETS/OmniDeck/main.lua (and the other .lua files)
+       WIDGETS/OmniDeck/audio/   WIDGETS/OmniDeck/tones/   WIDGETS/OmniDeck/missions/
+       SCRIPTS/TOOLS/OmniDeck Setup.lua   SCRIPTS/TOOLS/OmniDeck Check.lua
+   Updating an earlier test build: delete any .luac files in WIDGETS/OmniDeck/ first (the radio's
+   compiled copies of the old version). If you installed the build called AvMap, delete WIDGETS/AvMap.
+3. Eject the card and restart the radio.
+4. Add a new screen with a ONE-ZONE layout (no top bar, no sliders, no trims), then
+   Setup widgets > pick OmniDeck for the zone.
+5. Long-press the widget and choose "Full screen" to change pages and zoom (EdgeTX passes touch
+   and keys to a widget only in full screen). Long-press RTN to leave full screen.
+   In a one-zone screen without top bar and sliders the full display also shows outside full
+   screen; in a small zone only the minimap.
+6. In full screen: tap the screen or press ENTER to change page (Main, Map, Messages, the
+   flight summary after a flight, and Sensor check).
+7. SYS > Tools > OmniDeck Setup: pick voice, units and the rest (per model). The wheel zooms the map and scrolls the messages.
+
+
+TELEMETRY SETUP
+ArduPilot (FrSky passthrough, the same data Yaapu uses):
+  CRSF/ELRS/TBS Crossfire: set RC_OPTIONS bit 8 (CRSF passthrough). With ELRS keep packet rate x
+              telemetry ratio above about 30 telemetry frames per second.
+  S.Port (R9 etc.): SERIALn_PROTOCOL 10      F.Port: SERIALn_PROTOCOL 23
+  mLRS:       set the Tx module to send CRSF passthrough to the radio.
+INAV / Betaflight: discover the sensors on the radio first
+  (Model > Telemetry > Discover new sensors) with the aircraft powered.
+
+
+SETTINGS: SYS > Tools > OmniDeck Setup
+All settings by name, per model (saved to WIDGETS/OmniDeck/<model name>.cfg). The widget itself
+has one option, Page (see test 20). Wheel: move, ENTER: change (wheel picks, ENTER keeps), or tap a row and
+tap it again for the next value, RTN: leave. The widget reads the new settings when its screen
+comes back.
+- Telemetry link (Auto / CRSF-ELRS-mLRS / S.Port-F.Port-FBUS), Voice (Off or a pack from
+  WIDGETS/OmniDeck/audio/; a copy of Yaapu's English sound folder there also works), Message beep,
+  Speed / Altitude / Efficiency units, Map orientation, Map view, Flight trail, Start page,
+  Flight summary on disarm, Battery mAh (INAV/BF only: ArduPilot sends BATT_CAPACITY),
+  Low / Critical voltage alarm per cell, Battery cells, Low altitude alarm, INAV mission download,
+  Page switch + Page switch action (see test 18 above), Map zoom control (test 19).
+Map zoom: automatic; the wheel on the Map page switches to manual.
+
+
+DIFFERENCES FROM THE ETHOS VERSION
+EdgeTX stops a widget that uses too much processor time in one screen update, so on EdgeTX:
+- the main page's minimap shows home, the aircraft and the next waypoint, but no trail or mission
+  (the Map page shows both; long missions are drawn from just before the active waypoint)
+- tapes label every other step, the pitch ladder is labelled on one side, fewer small ticks
+If an update ever runs out of time it skips the rest of that update's drawing instead of
+stopping, so a page may very rarely flash incomplete. Please report it if you see that.
+
+
+MAP TILES (experimental on EdgeTX, not tested yet)
+Make tiles with https://martinovem.github.io/High-Resolution-Map-Generator/ (Output Target:
+"b14ckyy ETHOS Mapping Widget", zoom 12 to 17 around your field), then put the "maps" folder at
+    IMAGES/ethosmaps/maps/GOOGLE/Satellite/15/...
+(note: IMAGES, not bitmaps as on Ethos). Yaapu's tiles in IMAGES/yaapu/maps/ are also found.
+Pick the set in OmniDeck Setup > Map tiles (Auto = the first set found, Off = vector map).
+You do NOT need the ETHOS Mapping Widget itself (it is an Ethos widget); only its tile layout.
+
+
+WHAT TO REPORT
+Please send: radio model, EdgeTX version, flight controller (ArduPilot/INAV/Betaflight and
+version), the link (ELRS, Crossfire, mLRS, R9...), and a photo or video of the screen.
+Most useful of all on EdgeTX: if the widget shows an error such as "CPU limit" or a script
+error, the exact text and which page was open.
+Also worth checking:
+- Do the flight mode, armed/disarmed and READY TO ARM / NOT READY TO ARM show correctly?
+- Does the horizon move the right way when you roll and pitch the aircraft?
+- Do speeds, altitude, home distance and the home arrow look right?
+- Do the voice call-outs and message beeps play?
+- Do the pages feel smooth, or slow?
