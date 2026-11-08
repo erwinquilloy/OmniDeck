@@ -30,23 +30,31 @@ M.C = C
 -- ---------------------------------------------------------------- trail
 -- breadcrumbs in metres east/north of a fixed local origin (the first fix)
 local trail = { e = {}, n = {}, count = 0, head = 0 }
-local TRAIL_MAX = 300
+-- X18 / X20: the last TRAIL_MAX points taken every TRAIL_DT s (about 20 s), all of them drawn (inside
+-- the 2 x TRAIL_SEGS = 100 segment budget). The old 300 points spaced by zoom and drawn every
+-- Nth turned circles into corners (X20 + mLRS 2026-11-08; X18 since test42). Yaapu keeps 10 dots 0.5 s apart.
+local TRAIL_MAX = 81
+local TRAIL_DT = 0.25
+local trailAt = nil
 local org = nil   -- { lat=, lon=, mlon= }
 
 local function toEN(lat, lon)
   return (lon - org.lon) * org.mlon, (lat - org.lat) * 111320
 end
-function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } end
+function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } trailAt = nil end
 
 function M.addTrail(lat, lon, rangeM)
   if not lat then return end
+  local t = os.clock()
+  if trailAt and t - trailAt < TRAIL_DT then return end
   if org == nil then org = { lat = lat, lon = lon, mlon = 111320 * math.cos(math.rad(lat)) } end
   local e, n = toEN(lat, lon)
   if trail.count > 0 then
+    -- standing still adds nothing, so a parked aircraft keeps the trail it came in on
     local le, ln = trail.e[trail.head], trail.n[trail.head]
-    local minStep = math.max(5, (rangeM or 500) / 60)
-    if (e - le) ^ 2 + (n - ln) ^ 2 < minStep * minStep then return end
+    if (e - le) ^ 2 + (n - ln) ^ 2 < 4 then return end
   end
+  trailAt = t
   trail.head = trail.head % TRAIL_MAX + 1
   trail.e[trail.head], trail.n[trail.head] = e, n
   if trail.count < TRAIL_MAX then trail.count = trail.count + 1 end
@@ -439,6 +447,71 @@ function M.draw(x, y, w, h, s, o)
   local W, H = lcd.getWindowSize()
   lcd.setClipping(0, 0, W, H)
   return btns
+end
+
+-- ---------------------------------------------------------------- radar
+-- The radar of iNav LuaTelemetry's colour-screen view (iNavFlight/LuaTelemetry, src/iNav/horus.lua,
+-- "Radar"), written again here: no map, trail or tiles, only home and the aircraft.
+--  - scale: maxDist = max(min(furthest from home this flight, distance x 6), distRef x 10), distRef
+--    6 m; the aircraft sits distance / maxDist x reach from home, kept between 7 px and reach
+--  - home and the aircraft are centred as a pair (home moved back by half the offset)
+--  - home: an icon from 12 px out, a 3 px dot closer; at home (under 6 m) only the aircraft, centred
+--  - the aircraft: three lines, 8 px, at its heading and +-145 deg, the back one grey
+--  - the distance bottom left; W and E on the sides when north is up (its dir[6] and dir[2])
+-- o: { orient = "north" | "heading", maxDist = furthest from home (m), distF = fn(m) -> text }
+local RADAR_DIST_REF = 6
+local GREY = lcd.RGB(160, 160, 160)
+function M.radar(x, y, w, h, s, o)
+  local sin, cos, rad, floor, min, max = math.sin, math.cos, math.rad, math.floor, math.min, math.max
+  lcd.color(C.bg)
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  local cxp, cyp = x + w / 2, y + h / 2
+  -- LuaTelemetry's sizes are for its 126 px tall panel (480 x 272 screens): on a bigger panel
+  -- (X20, about 190 px; X18 about 120 px) every size is scaled by k, so the radar keeps its proportions
+  local k = max(1, min(w, h) / 126)
+  local reach = min(100 * k, (min(w, h) / 2 - 10) * 2)
+  local north = o.orient ~= "heading"
+  local hdg = s.yaw or 0
+  local rot = north and 0 or hdg
+  local cx, cy = cxp, cyp
+  local dist, brg = s.homeDist, s.homeBrg
+  lcd.font(FONT_S)
+  local _, th = lcd.getTextSize("0")
+  if dist and brg and s.homeLat ~= false then
+    local maxDist = max(min(o.maxDist or dist, dist * 6), RADAR_DIST_REF * 10)
+    local d = dist >= RADAR_DIST_REF and min(max(dist / maxDist * reach, 7 * k), reach) or 1
+    local r = rad(brg + 180 - rot)                  -- homeBrg points to home; this is home -> aircraft
+    local ox, oy = floor(sin(r) * d + 0.5), floor(cos(r) * d + 0.5)
+    local hx, hy = cxp, cyp
+    if d > 9 * k then hx, hy = hx - ox * 0.5, hy + oy * 0.5 end
+    if d >= 12 * k then homeIcon(hx, hy, 7 * k)
+    elseif d > 1 then
+      local dot = I(3 * k)
+      lcd.color(C.home)
+      lcd.drawFilledRectangle(I(hx - dot / 2), I(hy - dot / 2), dot, dot)
+    end
+    if d ~= 1 then cx, cy = hx + ox, hy - oy end
+    if o.distF then
+      lcd.color(C.text)
+      lcd.drawText(I(x + 2), I(y + h - th - 1), o.distF(dist))
+    end
+  end
+  if north then
+    lcd.color(C.text)
+    lcd.drawText(I(x + 2), I(cyp - th / 2), "W")
+    lcd.drawText(I(x + w - 2), I(cyp - th / 2), "E", RIGHT)
+  end
+  local r1 = rad(hdg - rot)
+  local r2, r3 = r1 + 2.5307, r1 - 2.5307             -- 145 deg
+  local a = 8 * k
+  local x1, y1 = cx + sin(r1) * a, cy - cos(r1) * a
+  local x2, y2 = cx + sin(r2) * a, cy - cos(r2) * a
+  local x3, y3 = cx + sin(r3) * a, cy - cos(r3) * a
+  lcd.color(GREY)
+  lcd.drawLine(I(x2), I(y2), I(x3), I(y3))
+  lcd.color(C.own)
+  lcd.drawLine(I(x1), I(y1), I(x2), I(y2))
+  lcd.drawLine(I(x1), I(y1), I(x3), I(y3))
 end
 
 return M

@@ -9,11 +9,13 @@ local _ENV = OD_ENV or _ENV
   Pages (tap the screen or press ENTER to change):
     1 MAIN  - avionics with a minimap
     2 MAP   - full-screen map with zoom buttons
-    3 MSGS  - status messages (ArduPilot); scroll with the wheel or by dragging
-    4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
+    3 MSGS  - status messages; scroll with the wheel or by dragging. In the cycle for ArduPilot
+              (setting "Messages page": Auto = ArduPilot only, On, Off)
+    4 SUMMARY - last flight; opens on disarm. In the cycle only with "Flight stats page" On
+    5 CHECK - sensor check; in the cycle only with "Sensor check page" On
 ]]
 
-local VERSION = "0.2.0-test41"
+local VERSION = "0.2.0-test42"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -161,7 +163,7 @@ end
 
 -- ---------------------------------------------------------------- widget state
 local function create()
-  T.checkModel()    -- another model selected: clean telemetry state
+  if T.checkModel() then AU.greetAgain() end
   return {
     modelName = T.modelName(),   -- top bar; widgets are re-created when another model is picked
     page = 1, level = 4,
@@ -169,7 +171,9 @@ local function create()
     linkMode = T.LINK_AUTO, orient = 0, zoomMode = 0, zoomSource = nil,
     spdUnit = 0, altUnit = 0, startPage = 1, trail = 1,
     tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
-    logoFile = "omnideck.png",   -- main page logo on X18-size screens (test41)
+    logoFile = "omnideck.png",   -- the logo file for top-right panel 4 (test41)
+    topPanel = 3,                -- main page top-right panel: see panelMode() (test42)
+    msgPage = 0, statsPage = 0, checkPage = 0,   -- page cycle (test42): see pageOn()
     lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
@@ -377,31 +381,6 @@ local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline)
     (alarmV == 2 and COL.bad) or (alarmV == 1 and COL.warn) or COL.txt)
 end
 
--- arrow to home relative to the nose (up = home is ahead), in the left part of the HOME block
-local function homeArrow(x, y, w, h, s, fLbl)
-  if not (s.homeBrg and s.yaw and s.homeDist and s.homeDist > 0) then return end
-  lcd.font(fLbl)
-  local _, lh = lcd.getTextSize("A")
-  local r = math.min(h - lh - 6, w * 0.3) / 2
-  if r < 4 then return end
-  local cx, cy = x + 6 + r, y + lh + 3 + (h - lh - 3) / 2
-  local a = math.rad(s.homeBrg - s.yaw)
-  local sa, ca = math.sin(a), math.cos(a)
-  local function pt(fwd, side) return cx + sa * fwd + ca * side, cy - ca * fwd + sa * side end
-  local tx, ty = pt(r, 0)
-  local lx, ly = pt(-r, -r * 0.8)
-  local nx, ny = pt(-r * 0.45, 0)
-  local rx, ry = pt(-r, r * 0.8)
-  lcd.color(COL.home)
-  if OTX then   -- OpenTX: the arrow's outline
-    lcd.drawLine(I(tx), I(ty), I(lx), I(ly)) lcd.drawLine(I(lx), I(ly), I(nx), I(ny))
-    lcd.drawLine(I(nx), I(ny), I(rx), I(ry)) lcd.drawLine(I(rx), I(ry), I(tx), I(ty))
-  else
-    lcd.drawFilledTriangle(I(tx), I(ty), I(lx), I(ly), I(nx), I(ny))
-    lcd.drawFilledTriangle(I(tx), I(ty), I(nx), I(ny), I(rx), I(ry))
-  end
-end
-
 local flightClock = { sec = nil, txt = "--" }   -- FLIGHT TIME text, remade when the second changes
 -- OpenTX: the blocks' fixed layer (backgrounds, labels, bar tracks, battery outline) as one bitmap
 -- per screen size and speed unit, made by tools/sim_edgetx.py --otx-panels from this same code;
@@ -418,9 +397,8 @@ local function panelBitmap(u)
   end
   return b or nil
 end
-local maxLabels = {}                                     -- "MAX AS km/h" etc., per speed unit
 local blockItems = { {}, {}, {}, {}, { gauge = true }, {}, {}, {} }   -- the 8 blocks, refilled each update
--- OpenTX: six blocks, without MAX AS and MAX GS (the flight summary has both): its Lua budget is
+-- OpenTX: six blocks, without ALT and AS / GS (the HUD has both): its Lua budget is
 -- half of EdgeTX's, and the rest get taller blocks (2 x 3)
 local otxBlocks = { blockItems[1], blockItems[2], blockItems[5], blockItems[6], blockItems[7], blockItems[8] }
 -- layer: nil = all, "fixed" / "live" as for tile()
@@ -431,15 +409,7 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
   end
   -- flight in progress, or the last one until the next arming
   local f = FS.live()
-  -- the block list is filled in place each update (no new tables), labels made once per unit
-  local lbl = maxLabels[u.spdLbl]
-  if lbl == nil then lbl = { "MAX AS " .. u.spdLbl, "MAX GS " .. u.spdLbl } maxLabels[u.spdLbl] = lbl end
-  local function maxSpd(it, label, v, now)
-    it[1], it[2], it[3] = label, u.spdF(v), COL.txt
-    it[4] = (v and v > 0 and now) and math.min(1, now / v) or 0   -- bar: speed now against the max
-    it[5] = nil
-    return it
-  end
+  -- the block list is filled in place each update (no new tables)
   -- flight time since arming (white); after the disarm the last flight's time, dimmed, until
   -- the next arming. The text is made once a second, not on every screen update.
   local ft, running = FS.timer(os.clock())
@@ -457,12 +427,21 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
   local items = blockItems
   local it = items[1]   -- HOME carries the total distance flown as its note (max distance from home is in the summary)
   it[1], it[2], it[3], it[4] = "HOME", u.distF(s.homeDist), COL.txt, nil
-  it[5] = (f and f.dist) and ("TOTAL " .. u.distF(f.dist)) or nil
+  it[5] = (f and f.dist) and ("TOT " .. u.distF(f.dist)) or nil
   it = items[2]
   it[1], it[2], it[3], it[4], it[5] = "FLIGHT TIME", fts, (ft and not running) and COL.dim or COL.txt, nil, nil
   if not OTX then
-    maxSpd(items[3], lbl[1], f and f.maxAspd, s.aspd)
-    maxSpd(items[4], lbl[2], f and f.maxGspd, s.gspd)
+    it = items[3]
+    it[1], it[2], it[3], it[4], it[5] = "ALT", s.alt and (string.format("%d", R(u.alt(s.alt))) .. u.altLbl) or "--", COL.txt, nil, nil
+    it = items[4]
+    if s.aspd then
+      it[1] = "AS / GS " .. u.spdLbl
+      it[2] = string.format("%d / %s", R(u.spd(s.aspd)), s.gspd and string.format("%d", R(u.spd(s.gspd))) or "--")
+    else   -- no airspeed (no pitot over mLRS, Betaflight): groundspeed alone
+      it[1] = "GS " .. u.spdLbl
+      it[2] = s.gspd and string.format("%d", R(u.spd(s.gspd))) or "--"
+    end
+    it[3], it[4], it[5] = COL.txt, nil, nil
   end
   it = items[6]
   it[1], it[2] = "USED", s.mah and string.format("%dmAh", R(s.mah)) or "--"
@@ -486,13 +465,11 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
       elseif layer == "live" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true)
       else battGauge(tx, ty, tw, th, s, fVal, nil, false, true) end   -- export: outline only
     else
-      -- HOME: keep the value clear of the arrow (drawn in the left 6 px + up to 30 % of the tile)
-      local inset = (i == 1 and s.homeBrg and s.yaw and s.homeDist and s.homeDist > 0) and (tw * 0.3 + 6) or 0
+      local inset = 0
       if not layer then tile(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
       elseif layer == "live" then tileLive(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
       else tile(tx, ty, tw, th, it[1], "", nil, fVal, fLbl, it[4] and 0, nil, 0) end   -- export
     end
-    if i == 1 and layer ~= "fixed" then homeArrow(tx, ty, tw, th, s, fLbl) end
   end
 end
 
@@ -656,7 +633,6 @@ end
 -- never in paint; a picture bigger than the panel is scaled down by the radio when it is drawn.
 local LOGO_DIR = (OD_ROOT or "/scripts/omnideck/") .. "logos/"
 local logo = { file = nil, bmp = nil, w = 0, h = 0 }
-local function noMinimap(W) return not OD_LITE and W <= 480 end
 local function logoFiles()
   if not (system and system.listFiles) then return {} end
   local ok, entries = pcall(system.listFiles, LOGO_DIR)
@@ -684,8 +660,10 @@ local function logoPanel(x, y, w, h)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
-  local box = math.min(w, h) - 16
-  local k = math.min(1, box / logo.w, box / logo.h)
+  -- fitted to the whole panel (X18: 208 x 123), aspect kept, never enlarged. It was a square of
+  -- the short side minus 16 px (107 x 107), so wide logos came out small with wide margins
+  -- (Marcin, X18, 2026-11-08: 100 x 100 left a margin, 200 x 200 was scaled back down).
+  local k = math.min(1, (w - 4) / logo.w, (h - 4) / logo.h)
   local dw, dh = I(logo.w * k), I(logo.h * k)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
   if k < 1 then
@@ -695,11 +673,54 @@ local function logoPanel(x, y, w, h)
   end
 end
 
+-- the panel above the data blocks (setting "Main page top-right panel", test42): 0 minimap,
+-- 1 home arrow, 2 radar (as iNav LuaTelemetry's), 3 the OmniDeck logo, 4 the logo file picked in
+-- the settings (Stratos, or the pilot's own PNG in /scripts/omnideck/logos/)
+local function panelMode(w, W)
+  local p = w.topPanel or 0
+  if p == 1 then return "arrow" elseif p == 2 then return "radar"
+  elseif p == 3 then return "omni" elseif p == 4 then return "logo" end
+  return "map"
+end
+local radarO = {}
+local function radarOpts(w, u)
+  local f = FS.live()
+  radarO.orient, radarO.distF = ORIENT[w.orient] or "north", u.distF
+  radarO.maxDist = f and f.maxHome or nil
+  return radarO
+end
+
+-- "Home arrow": the arrow of the OmniDeck mark (docs/logo/omnideck-mark.svg: tip 26 ahead of the
+-- centre, wings 24 back and 18 out, notch 13 back), pointing to home relative to the nose (up =
+-- home ahead). Before arming, or with no home yet, the OmniDeck logo itself.
+local ARROW_FILL = lcd.RGB(242, 245, 248)
+local function homePanel(x, y, w, h, s)
+  if not (s.armed and s.homeBrg and s.yaw and s.homeDist and s.homeDist > 0) then
+    logoPanel(x, y, w, h)
+    return
+  end
+  lcd.color(COL.panel)
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  local k = math.min(w, h) * 0.8 / 52            -- the arrow is 50 units long
+  local cx, cy = x + w / 2, y + h / 2
+  local a = math.rad(s.homeBrg - s.yaw)
+  local sa, ca = math.sin(a) * k, math.cos(a) * k
+  -- (forward, side) in the mark's units, centred on the arrow's length (26 ahead, 24 back)
+  local function px(f, sd) return cx + sa * (f - 1) + ca * sd end
+  local function py(f, sd) return cy - ca * (f - 1) + sa * sd end
+  lcd.color(ARROW_FILL)
+  lcd.drawFilledTriangle(I(px(26, 0)), I(py(26, 0)), I(px(-24, -18)), I(py(-24, -18)), I(px(-13, 0)), I(py(-13, 0)))
+  lcd.drawFilledTriangle(I(px(26, 0)), I(py(26, 0)), I(px(-13, 0)), I(py(-13, 0)), I(px(-24, 18)), I(py(-24, 18)))
+end
+
 local function pageMain(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
   local barH, msgH, bodyY, bodyH, hudW, rx, rw, mapH = mainLayout(W, H)
   -- map first: on EdgeTX a tile can hang over the map's edge, and what follows covers it
-  if noMinimap(W) then logoPanel(rx, bodyY, rw, mapH)
+  local pm = panelMode(w, W)
+  if pm == "arrow" then homePanel(rx, bodyY, rw, mapH, s)
+  elseif pm == "logo" or pm == "omni" then logoPanel(rx, bodyY, rw, mapH)
+  elseif pm == "radar" then safe("radar", MAP.radar, rx, bodyY, rw, mapH, s, radarOpts(w, u))
   elseif not OTX then safe("map", MAP.draw, rx, bodyY, rw, mapH, s, mapOpts(w, true)) end
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(hudW, bodyY, 3, bodyH)
@@ -1211,17 +1232,31 @@ local function wakeup(w)
     end
   end
   if not OD_LITE then
-    if noMinimap(select(1, lcd.getWindowSize())) then loadLogo(w.logoFile) end
+    local pm = panelMode(w, (lcd.getWindowSize()))
+    if pm == "logo" then loadLogo(w.logoFile) elseif pm == "omni" or pm == "arrow" then loadLogo("omnideck.png") end
     perfNote(false, t0)
   end
 end
 
--- the summary joins the cycle only once there is a flight to show
+-- which pages a tap cycles through (test42). Main and map always; messages for ArduPilot (INAV
+-- and Betaflight send none) unless set On or Off; the flight stats and the sensor check only
+-- when switched on. The summary still opens by itself on disarm ("Flight summary on disarm").
+local function pageOn(w, p)
+  if p == 3 then
+    local m = w.msgPage or 0
+    if m == 1 then return true elseif m == 2 then return false end
+    return T.s.fc ~= "INAV/BF"
+  end
+  if p == PAGE_SUMMARY then return w.statsPage == 1 and FS.last() ~= nil end
+  if p == PAGE_CHECK then return w.checkPage == 1 end
+  return true
+end
 local function nextPage(w)
-  -- main, map, messages, the summary once there is a flight, then the sensor check
-  local p = w.page + 1
-  if p == PAGE_SUMMARY and not FS.last() then p = PAGE_CHECK end
-  if p > PAGE_CHECK then p = 1 end
+  local p = w.page
+  for _ = 1, PAGE_CHECK do
+    p = p % PAGE_CHECK + 1
+    if pageOn(w, p) then break end
+  end
   w.page = p
   lcd.invalidate()
 end

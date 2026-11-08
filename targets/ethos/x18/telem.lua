@@ -258,7 +258,9 @@ local function pt(appId, lo, hi)
     -- pair with a position no older than 0.3 s, so motion between packets stays small
     -- EdgeTX / OpenTX: at most twice a second (it refines a home estimate; S.Port sends 0x5004
     -- often, and the trig behind it was a tenth of OpenTX's S.Port budget)
-    if s.lat and s.posAt and now() - s.posAt <= 0.3 and (not OD_LITE or now() - homeAt >= 0.5) then
+    local pAt = s.posAt
+    if s.nativePosAt and (pAt == nil or s.nativePosAt > pAt) then pAt = s.nativePosAt end
+    if s.lat and pAt and now() - pAt <= 0.3 and (not OD_LITE or now() - homeAt >= 0.5) then
       homeAt = now()
       apHomeUpdate()
     end
@@ -530,12 +532,17 @@ local NATIVE = {
   aspd  = { crsf = { "Airspeed", "Air speed", "ASpd", { crsfId = 0x0A, subIdStart = 0, subIdEnd = 1 } }, sport = { { appId = 0x0A00 } } },
   -- Betaflight over S.Port sends its mode in T1 (0x0400)
   mode  = { crsf = { "Flight mode" }, sport = { { category = TS, appId = 0x0470, subId = 0 }, { category = TS, appId = 0x0400 } } },
-  -- link sensors. CRSF RSSI is in dBm (negative); FrSky has no LQ, its RSSI (0xF101) is 0-100ish.
+  -- link sensors. CRSF RSSI is in dBm (negative). FrSky RSSI (0xF101) is FrSky's own "dB",
+  -- 0-100ish; FrSky VFR (0xF010) is the % of frames received, its counterpart of CRSF's LQ.
+  -- Ethos uses VFR as LQ and scales RSSI 0-100 (linkFigs below); EdgeTX/OpenTX (OD_LITE) keep
+  -- no FrSky LQ and VFR as a stand-in RSSI, as before.
   -- S.Port RSSI by app ID only, as the dashboard: a sensor merely NAMED "RSSI" read -1 on the
   -- X18 tester's R9 model (2026-11-03) and was taken as a dead link.
-  lq    = { crsf = { "Rx Quality", "RQly" } },
+  lq    = { crsf = { "Rx Quality", "RQly" },
+            sport = (not OD_LITE) and { { appId = 0xF010, subId = 0 } } or nil },
   rssi  = { crsf = { "Rx RSSI1", "1RSS", "Rx RSSI2", "2RSS" },
-            sport = { { appId = 0xF101, subId = 0 }, { appId = 0xF010, subId = 0 } } },
+            sport = (not OD_LITE) and { { appId = 0xF101, subId = 0 } }
+                    or { { appId = 0xF101, subId = 0 }, { appId = 0xF010, subId = 0 } } },
 }
 local srcCache, srcMissAt, srcQuery = {}, {}, {}
 
@@ -658,6 +665,21 @@ local function srcVal(key, kind)
   return v, u or nil
 end
 
+-- Link figures: LQ and RSSI as shown, plus the raw RSSI for the link-lost test.
+-- FrSky links on Ethos only (kind "sport", not OD_LITE): RSSI on the 0-100 scale the flight controller's
+-- own OSD shows for F.Port. INAV and Betaflight scale the receiver's value as 0-100 (rx/fport.c),
+-- ArduPilot as 0-50 (AP_RCProtocol_FPort.cpp, "fport rssi 0-50"), so x2 there, capped at 100.
+-- CRSF / ELRS / mLRS and every EdgeTX/OpenTX link: the sensor values, unchanged.
+-- (test40 change, X20 since test41b, X18 since test42)
+local FRSKY_PCT = not OD_LITE
+local function linkFigs(kind)
+  local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+  if kind ~= "sport" or not FRSKY_PCT or type(rssi) ~= "number" then return lq, rssi, rssi end
+  local pct = (s.fc == "ArduPilot") and rssi * 2 or rssi
+  if pct > 100 then pct = 100 elseif pct < 0 then pct = 0 end
+  return lq, pct, rssi
+end
+
 local function toMS(v, u)
   if v == nil then return nil end
   if u == UNIT_KILOMETER_PER_HOUR then return v / 3.6 end
@@ -706,6 +728,13 @@ local function sportMode(n)
 end
 
 local nativeHomeAlt = nil
+-- Betaflight 4.5 sends CRSF "GPS alt" as GPS altitude above sea level while disarmed and as
+-- height above the arming point once armed (flight/position.c), so the reading taken at the arm
+-- was sea level and every later one came out ~field elevation too low (X18 + BF + TBS, MAX ALT
+-- -278 m, 2026-11-08). A drop of more than 10 m toward 0 within 5 s of arming is that switch:
+-- the value is then used as sent. INAV sends height above the arming point all along (~0 at the
+-- arm), newer Betaflight sea level all along; both still go through the subtraction.
+local homeAltAt, altRelative = nil, false
 -- CRSF flight mode text. Disarmed is shown by a mark after the name: "*" on ArduPilot and
 -- Betaflight, and on Betaflight also "!" (arming disabled) or "?" (GPS rescue disabled).
 -- INAV sends OK, WAIT or !ERR instead. !FS! says nothing about arming, so keep the last state.
@@ -811,7 +840,7 @@ local function readNative(kind)
     mode = (ok and type(sv) == "string" and sv ~= "" and tonumber(sv) == nil) and sv or nil
   end
   local roll = srcVal("roll", kind)
-  local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+  local lq, rssi, rawRssi = linkFigs(kind)
   -- nothing at all from this link: no position, mode, attitude, signal or battery
   if lat == nil and mode == nil and roll == nil and rssi == nil and lq == nil
      and srcVal("volt", kind) == nil then return end
@@ -820,7 +849,7 @@ local function readNative(kind)
   -- value, so nothing here is fresh then: lastRx is left alone and the link shows as lost.
   -- (No "values not changing" test: a craft sitting still reads the same values for minutes.)
   if telemActive() == false
-     or (kind == "crsf" and lq ~= nil and lq <= 0) or (kind == "sport" and rssi ~= nil and rssi == 0) then
+     or (kind == "crsf" and lq ~= nil and lq <= 0) or (kind == "sport" and rawRssi ~= nil and rawRssi == 0) then
     s.lq, s.rssi = lq, rssi
     return
   end
@@ -857,8 +886,7 @@ local function readNative(kind)
   s.volt = srcVal("volt", kind)
   s.curr = srcVal("curr", kind)
   s.mah = srcVal("mah", kind)
-  s.lq = srcVal("lq", kind)
-  s.rssi = srcVal("rssi", kind)
+  s.lq, s.rssi = linkFigs(kind)
 
   local armed
   if mode ~= nil then
@@ -881,6 +909,7 @@ local function readNative(kind)
   if s.lat and s.fix == 3 then
     if (armed and not lastArmed) or (s.homeLat == nil and armed ~= false) then
       s.homeLat, s.homeLon, nativeHomeAlt = s.lat, s.lon, alt
+      homeAltAt, altRelative = now(), false
     end
   end
   lastArmed = armed
@@ -892,7 +921,9 @@ local function readNative(kind)
       local okN, nm = pcall(function() return src:name() end)
       isGpsAlt = okN and nm == "GPS alt"
     end
-    s.alt = (isGpsAlt and nativeHomeAlt) and (alt - nativeHomeAlt) or alt
+    if isGpsAlt and nativeHomeAlt and not altRelative and homeAltAt and now() - homeAltAt < 5
+       and math.abs(alt) < math.abs(nativeHomeAlt) - 10 then altRelative = true end
+    s.alt = (isGpsAlt and nativeHomeAlt and not altRelative) and (alt - nativeHomeAlt) or alt
   end
   if s.lat and s.homeLat then s.homeDist, s.homeBrg = T.distBrg(s.lat, s.lon, s.homeLat, s.homeLon) end
 end
@@ -1028,6 +1059,7 @@ function T.resetModel()
   textViaCrsf, homeBestDist, latPending, rawText, rawStatus = false, nil, nil, nil, nil
   msgBuf, msgLastLo, msgLastHi = "", nil, nil
   nativeHomeAlt, lastArmed = nil, nil
+  homeAltAt, altRelative = nil, false
   linkKind, linkCheckAt = nil, -100
   srcCache, srcMissAt, srcQuery, srcAt = {}, {}, {}, {}
   sensorList, sensorListAt = nil, -100
@@ -1095,9 +1127,22 @@ function T.wakeup(linkMode)
     -- EdgeTX / OpenTX: the link sensors 5 times a second, as the native read above
     if not OD_LITE or now() - linkReadAt >= 0.2 then
       linkReadAt = now()
-      local lq, rssi = srcVal("lq", kind), srcVal("rssi", kind)
+      local lq, rssi = linkFigs(kind)
       if lq then s.lq = lq end
       if rssi then s.rssi = rssi end
+      -- ArduPilot over CRSF leaves 0x0800 out of passthrough (AP_CRSF_Telem disables GPS_LAT/
+      -- GPS_LON) and sends the position only as the native CRSF GPS frame, so without this the
+      -- map kept the saved last position (X20 + ELRS + ArduPilot, 2026-11-08). mLRS builds its
+      -- own passthrough with 0x0800, which is still preferred while it arrives.
+      if kind == "crsf" and (s.posAt == nil or now() - s.posAt > 1.5) and telemActive() ~= false
+         and (lq == nil or lq > 0) then
+        local lat, lon = srcVal("lat", kind), srcVal("lon", kind)
+        if type(lat) == "number" and type(lon) == "number" and lat == lat and lon == lon
+           and math.abs(lat) <= 90 and math.abs(lon) <= 180 and (lat ~= 0 or lon ~= 0) then
+          -- posAt is left alone so the next read still comes here; 0x5004 pairs with nativePosAt
+          s.lat, s.lon, s.nativePosAt = lat, lon, now()
+        end
+      end
     end
     -- ArduPilot sends no "ready to arm" flag. Not ready: a PreArm message in the last 35 s, or
     -- what telemetry shows directly (GPS without a 3D fix, EKF not happy, a failsafe). Ready only

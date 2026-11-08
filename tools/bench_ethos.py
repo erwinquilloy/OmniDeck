@@ -194,6 +194,10 @@ if wt['read']:
         print('read() skipped:', str(e)[:120])
 if WHO == 'omnideck' and PAGE == 'map':
     widget.page = 2
+# --panel N (test42): the main page's top-right panel, 0 minimap, 1 home arrow, 2 radar,
+# 3 OmniDeck logo, 4 logo file (an older tree ignores it)
+if WHO == 'omnideck' and '--panel' in args:
+    widget.topPanel = int(args[args.index('--panel') + 1])
 
 st = dict(lat=43.49323, lon=142.88785, hlat=43.49323, hlon=142.88785, mode=5, armed=True, thr=55, sats=14,
           hdop=0.8, altmsl=160, volt=15.8, curr=12.3, mah=0, alt=120, vs=0, **{'as': 17.0}, gs=18.5,

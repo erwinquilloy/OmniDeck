@@ -30,23 +30,31 @@ M.C = C
 -- ---------------------------------------------------------------- trail
 -- breadcrumbs in metres east/north of a fixed local origin (the first fix)
 local trail = { e = {}, n = {}, count = 0, head = 0 }
-local TRAIL_MAX = 300
+-- X20: the last TRAIL_MAX points taken every TRAIL_DT s (about 20 s), all of them drawn (inside
+-- the 2 x TRAIL_SEGS = 100 segment budget). The old 300 points spaced by zoom and drawn every
+-- Nth turned circles into corners (X20 + mLRS 2026-11-08). Yaapu keeps 10 dots 0.5 s apart.
+local TRAIL_MAX = 81
+local TRAIL_DT = 0.25
+local trailAt = nil
 local org = nil   -- { lat=, lon=, mlon= }
 
 local function toEN(lat, lon)
   return (lon - org.lon) * org.mlon, (lat - org.lat) * 111320
 end
-function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } end
+function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } trailAt = nil end
 
 function M.addTrail(lat, lon, rangeM)
   if not lat then return end
+  local t = os.clock()
+  if trailAt and t - trailAt < TRAIL_DT then return end
   if org == nil then org = { lat = lat, lon = lon, mlon = 111320 * math.cos(math.rad(lat)) } end
   local e, n = toEN(lat, lon)
   if trail.count > 0 then
+    -- standing still adds nothing, so a parked aircraft keeps the trail it came in on
     local le, ln = trail.e[trail.head], trail.n[trail.head]
-    local minStep = math.max(5, (rangeM or 500) / 60)
-    if (e - le) ^ 2 + (n - ln) ^ 2 < minStep * minStep then return end
+    if (e - le) ^ 2 + (n - ln) ^ 2 < 4 then return end
   end
+  trailAt = t
   trail.head = trail.head % TRAIL_MAX + 1
   trail.e[trail.head], trail.n[trail.head] = e, n
   if trail.count < TRAIL_MAX then trail.count = trail.count + 1 end

@@ -113,22 +113,33 @@ local function configure(w)
   line = form.addLine("Start page")
   form.addChoiceField(line, nil, { { "Main", 1 }, { "Map", 2 } },
     function() return w.startPage end, function(v) w.startPage = v end)
-  -- the panel at the top right of the main page, above the data blocks
+  -- the panel at the top right of the main page, above the data blocks (test42)
   line = form.addLine("Main page top-right panel")
-  form.addChoiceField(line, nil, { { "Minimap", 0 }, { "Logo", 1 }, { "Radar", 2 } },
-    function() return w.panel end, function(v) w.panel = v end)
-  -- the logo for that panel: any PNG in /scripts/omnideck/logos/ (square, about 100 x 100 px;
-  -- bigger ones are scaled down)
+  form.addChoiceField(line, nil, { { "Minimap", 0 }, { "Home arrow", 1 }, { "Radar", 2 }, { "OmniDeck logo", 3 },
+    { "Logo file (below)", 4 } },
+    function() return w.topPanel end, function(v) w.topPanel = v end)
+  -- the logo for panel choice "Logo file": any PNG in /scripts/omnideck/logos/ (bigger ones
+  -- are scaled down to the panel, smaller ones are not enlarged)
   local logos = UI.logoFiles()
   local lchoices = { { "None", 0 } }
   for i, n in ipairs(logos) do lchoices[#lchoices + 1] = { n, i } end
-  line = form.addLine("Main page logo")
+  line = form.addLine("Logo file")
   form.addChoiceField(line, nil, lchoices,
     function()
       for i, n in ipairs(logos) do if n == w.logoFile then return i end end
       return 0
     end,
     function(v) w.logoFile = (v > 0 and logos[v]) or "" end)
+  -- the pages a tap cycles through (test42); the flight summary still opens on disarm
+  line = form.addLine("Messages page")
+  form.addChoiceField(line, nil, { { "Auto (ArduPilot only)", 0 }, { "On", 1 }, { "Off", 2 } },
+    function() return w.msgPage end, function(v) w.msgPage = v end)
+  line = form.addLine("Flight stats page")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.statsPage end, function(v) w.statsPage = v end)
+  line = form.addLine("Sensor check page")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.checkPage end, function(v) w.checkPage = v end)
   if form.addTextButton then
     line = form.addLine("Clear trail + learned WPs")
     form.addTextButton(line, nil, "Clear", function() MAP.resetTrail() MI.clearLearned() return true end)
@@ -153,8 +164,11 @@ local SETTINGS = {
   { "lowVolt", "n", 0 }, { "cells", "n", 0 }, { "lowAlt", "n", 0 }, { "critVolt", "n", 0 },
   -- added in 0.2.0-test41, at the end for the same reason
   { "logoFile", "s", "omnideck.png" },
-  -- added in 0.2.0-test41b (X20), at the end for the same reason
+  -- added in 0.2.0-test41b (X20), at the end for the same reason; read only to carry the choice
+  -- over to topPanel below
   { "panel", "n", 0 },
+  -- added in 0.2.0-test42, at the end: -1 = not saved yet (taken from the older settings)
+  { "topPanel", "n", -1 }, { "msgPage", "n", 0 }, { "statsPage", "n", 0 }, { "checkPage", "n", 0 },
 }
 
 local function isSource(v) return type(v) == "userdata" end
@@ -169,6 +183,13 @@ local function read(w)
     w[f[1]] = v
   end
   if w.tz == 0 then w.tz = nil end
+  -- test42: the top-right panel's choices changed; a model saved before keeps what it showed
+  -- (test41b: 0 minimap, 1 logo, 2 radar)
+  if w.topPanel < 0 then
+    if w.panel == 2 then w.topPanel = 2
+    elseif w.panel == 1 then w.topPanel = (w.logoFile == "omnideck.png") and 3 or 4
+    else w.topPanel = 0 end
+  end
   MI.loadFile(w.missionFile)
   AU.setBeep(w.beep)
   -- voice: on until the pilot picks something else, if a pack is on the card

@@ -347,7 +347,9 @@ def get_source(q):
     if not NATIVE:
         if isinstance(q, str):
             if SPORT or q not in LINK_SENSORS: return None
-        elif not (SPORT and 'appId' in q and int(q['appId']) in (0xF101, 0xF010)):
+        elif not (SPORT and 'appId' in q and int(q['appId']) in (0xF101, 0xF010)) \
+                and not (not SPORT and 'name' in q and q['name'] == 'GPS' and 'GPS1' in native_vals):
+            # (ArduPilot over CRSF: the native GPS frame does exist; a test sets GPS1/GPS2 for it)
             return None
     if not isinstance(q, str) and 'crsfId' in q:      # CRSF link statistics only exist on CRSF
         if int(q['crsfId']) != 0x14: return None
@@ -473,8 +475,9 @@ wt = registered['w']
 widget = wt['create']()
 do_read()
 if NATIVE: widget.batCap = 5000           # INAV and Betaflight send no capacity
-# OD_PANEL=n: the main page's top-right panel setting (X20 copy, test41b: 0 minimap, 1 logo, 2 radar)
-if os.environ.get('OD_PANEL'): widget.panel = int(os.environ['OD_PANEL'])
+# OD_PANEL=n: the main page's top-right panel setting (test42: 0 minimap, 1 home arrow, 2 radar,
+# 3 OmniDeck logo, 4 logo file)
+if os.environ.get('OD_PANEL'): widget.topPanel = int(os.environ['OD_PANEL'])
 if os.environ.get('OD_LOGO'): widget.logoFile = os.environ['OD_LOGO']   # e.g. stratos_title.png
 
 HOME = (43.49323, 142.88785)
@@ -733,15 +736,30 @@ wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.auto.x + 5, b.au
 assert widget.zoomMode == 0, 'view button -> aircraft-centred'
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
 assert widget.level == lvl0 - 1, 'rotary'
+# test42 page cycle: main, map, messages for ArduPilot only (INAV/BF send none); the flight stats
+# and sensor check pages only when switched on (both off by default)
+ENTER = lambda: wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+assert widget.msgPage == 0 and widget.statsPage == 0 and widget.checkPage == 0, 'page settings default'
 wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_START'], 200, 200)
 wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], 200, 200)
-assert widget.page == 3, 'tap changes page'
-wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 5, 'enter goes on to the sensor check (no flight yet)'
+assert widget.page == (1 if NATIVE else 3), 'tap changes page (messages for ArduPilot only): %s' % widget.page
+if not NATIVE:
+    ENTER()
+    assert widget.page == 1, 'stats and sensor check are off by default: %s' % widget.page
+widget.checkPage = 1; widget.page = 2
+ENTER()
+if not NATIVE:
+    assert widget.page == 3, 'messages before the sensor check'
+    ENTER()
+assert widget.page == 5, 'sensor check page switched on: %s' % widget.page
 cv = Canvas(); drawn.clear(); wt['paint'](widget); cv.img.save(os.path.join(OUT, 'check_%s.png' % tag))
 assert any('SENSOR CHECK' in t for t, c, x in drawn), 'sensor check page draws'
-wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+ENTER()
 assert widget.page == 1, 'enter wraps to page 1'
+widget.msgPage = 1 if NATIVE else 2; widget.page = 2      # messages forced On (INAV) / Off (ArduPilot)
+ENTER()
+assert widget.page == (3 if NATIVE else 5), 'messages page setting On/Off: %s' % widget.page
+widget.msgPage, widget.checkPage, widget.page = 0, 0, 1
 os.remove(os.path.join(OUT, '_tmp.png'))
 MAPmod = L.execute(open(os.path.join('x18' if W <= 480 else 'x20', 'map.lua'), encoding='utf8').read())   # the copy the loader picked
 print('input checks OK')
@@ -768,13 +786,10 @@ f = FS.last()
 print('summary: time %.0f dist %.0f home %s alt %s gspd %s as %s used %s volt %s curr %s lq %s rssi %s lost %s' % (
     f.time, f.dist, f.maxHome, f.maxAlt, f.maxGspd, f.maxAspd, f.used, f.minVolt, f.maxCurr, f.minLq, f.minRssi, f.lost))
 if SPORT:
-    if W > 480:
-        # X20 copy (test40 change, test41b): LQ = VFR (0xF010), RSSI as the FC's own F.Port %
-        # (INAV/BF 0-100, ArduPilot 0-50 so x2, max 100)
-        want = (100,) if S.fc == 'ArduPilot' else (87, 88)
-        assert S.rssi in want and S.lq == 98, 'S.Port: LQ from VFR, RSSI %% (%s %s %s)' % (S.rssi, S.lq, S.fc)
-    else:
-        assert S.rssi in (87, 88) and S.lq is None, 'S.Port has RSSI, no LQ (%s %s)' % (S.rssi, S.lq)
+    # both Ethos copies (test40 change; X20 since test41b, X18 since test42): LQ = VFR (0xF010),
+    # RSSI as the FC's own F.Port % (INAV/BF 0-100, ArduPilot 0-50 so x2, max 100)
+    want = (100,) if S.fc == 'ArduPilot' else (87, 88)
+    assert S.rssi in want and S.lq == 98, 'S.Port: LQ from VFR, RSSI %% (%s %s %s)' % (S.rssi, S.lq, S.fc)
 elif not INAV:
     assert S.lq == 96 and S.rssi in (-72, -73), 'CRSF has LQ and RSSI (%s %s)' % (S.lq, S.rssi)
 assert f.time > 100 and f.dist > 3000 and abs(f.maxAlt - 120) < 1 and f.lost == 0, 'summary values'
@@ -784,12 +799,15 @@ first_time = f.time
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_LEFT'], 0, 0)
 assert widget.page == 4, 'rotary stays on the summary'
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 5, 'enter leaves the summary (on to the sensor check)'
+assert widget.page == 1, 'enter leaves the summary (sensor check off by default: back to page 1)'
+widget.page = 3 if not NATIVE else 2
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 1, 'then back to page 1'
-widget.page = 3
+assert widget.page == 1, 'the summary is not in the cycle with "Flight stats page" Off: %s' % widget.page
+widget.statsPage = 1                       # test42: switched on, it joins the cycle after a flight
+widget.page = 3 if not NATIVE else 2
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 4, 'summary joins the cycle'
+assert widget.page == 4, 'summary joins the cycle with "Flight stats page" On'
+widget.statsPage = 0
 
 st['armed'] = True                        # arming closes it, back to the main page
 for _ in range(5): step(0.2)
@@ -915,24 +933,35 @@ if NATIVE:
 
 ops = main_drawn()
 txt = [t for t, c, x in ops]
-assert 'ALT' not in txt and not any(t.startswith('GSPD') for t in txt), 'ALT and GSPD tiles are gone'
-assert any(t.startswith('ALT ') for t in txt), 'altitude tape stays'
+# test42: the tapes are labelled with the unit alone; the blocks' second row is ALT | AS / GS
+assert 'km/h' in txt and 'm' in txt and not any(t.startswith('ALT ') or t.startswith('AS km') for t in txt), 'unit-only tape labels'
+assert not any(t.startswith('GSPD') for t in txt), 'no GSPD block'
+assert 'ALT' in txt and '%dm' % round(S.alt) in txt, 'ALT block %s' % txt
 f = FS.live()
 def dist_txt(m): return '%dm' % int(m + 0.5) if m < 999.5 else '%.2fkm' % (m / 1000)
 assert dist_txt(999.4) == '999m' and dist_txt(999.6) == '1.00km' and dist_txt(3293.79) == '3.29km'
 NOTES = H >= 320            # the small notes are left out only on the narrowest screens
-assert 'HOME' in txt and (not NOTES or 'TOTAL ' + dist_txt(f.dist) in txt), 'total distance in the home block %s' % txt
+assert 'HOME' in txt and (not NOTES or 'TOT ' + dist_txt(f.dist) in txt), 'total distance in the home block %s' % txt
 assert 'TOTAL DIST' not in txt, 'TOTAL DIST block gave its place to FLIGHT TIME %s' % txt
 import re
 assert 'FLIGHT TIME' in txt and any(re.fullmatch(r'\d\d:\d\d', t) for t in txt), 'flight time block %s' % txt
-assert 'MAX GS km/h' in txt and '%.1f' % (f.maxGspd * 3.6) in txt, 'max GS %s' % txt
-assert 'MAX AS km/h' in txt, 'max AS block %s' % txt
+assert 'MAX GS km/h' not in txt and 'MAX AS km/h' not in txt, 'max speeds are on the summary only %s' % txt
+if S.aspd is not None:
+    assert 'AS / GS km/h' in txt and '%d / %d' % (round(S.aspd * 3.6), round(S.gspd * 3.6)) in txt, 'AS / GS block %s' % txt
+else:
+    assert 'GS km/h' in txt and str(round(S.gspd * 3.6)) in txt, 'GS block %s' % txt
 assert f.maxCurr is None or not NOTES or 'MAX %.1fA' % f.maxCurr in txt, 'max current in the current block %s' % txt
 assert cv.img.getpixel((3, H // 3)) != (20, 20, 20), 'horizon shows through the speed tape'
+# test42: the vario strip has no background, the horizon shows through it (top of the strip,
+# away from the bar, which grows from the middle)
+_bodyY = round(H * 0.09); _bodyH = H - _bodyY - round(H * 0.075)
+_vy = _bodyY + max(18, math.floor(_bodyH * 0.08)) + 16 + 3
+assert cv.img.getpixel((round(W * 0.56) - 3, _vy)) != (20, 20, 20), 'horizon shows through the vario strip'
 if NATIVE:
-    assert f.maxAspd is None and not any(c == GS_COL for t, c, x in ops), 'no second box when the tape already shows ground speed'
+    # no airspeed: the tape's own value box is in the GS green, and no second GS box
+    gs = [t for t, c, x in ops if c == GS_COL]
+    assert f.maxAspd is None and gs == [str(round(S.gspd * 3.6))], 'tape shows ground speed in green, no GS box %s' % gs
 else:
-    assert '%.1f' % (f.maxAspd * 3.6) in txt, 'max AS %s' % txt
     gs = [t for t, c, x in ops if c == GS_COL]
     assert gs == [str(round(S.gspd * 3.6)), 'GS'] and float(gs[0]) != round(S.aspd * 3.6), 'GS box %s' % gs
     st['nogs'] = True
@@ -1122,6 +1151,54 @@ for la, lo in (() if NATIVE else ((14.1749166, 121.2435277), (-33.86, 151.21), (
 for _ in range(6): step(0.2)          # back to the simulated aircraft
 print('mLRS coordinates OK')
 
+# ArduPilot over CRSF (ELRS) sends no 0x0800 in passthrough, only the native CRSF GPS frame:
+# the position must follow the native sensor (X20 + ELRS, 2026-11-08: map kept the saved position).
+# X20 and X18 (both copies have the fix since test42).
+if not NATIVE and not SPORT:
+    keep_pos = (st['lat'], st['lon'])
+    def step_no800(dt=0.2):
+        sim_time[0] += dt
+        feed([(a, v) for a, v in packets(st) if a != 0x0800])
+        native_vals.update({'GPS1': st['lat'], 'GPS2': st['lon']})
+        for _ in range(4): wt['wakeup'](widget)
+    for k in range(20):
+        st['lat'], st['lon'] = project(keep_pos[0], keep_pos[1], 30 * (k + 1), 70)
+        step_no800(0.2)
+    assert S.fc == 'ArduPilot', 'still passthrough: %s' % S.fc
+    assert abs(S.lat - st['lat']) < 1e-6 and abs(S.lon - st['lon']) < 1e-6, \
+        'native CRSF position followed (%s, %s) vs (%s, %s)' % (S.lat, S.lon, st['lat'], st['lon'])
+    native_vals.pop('GPS1', None); native_vals.pop('GPS2', None)
+    st['lat'], st['lon'] = keep_pos
+    for _ in range(12): step(0.2)
+    assert abs(S.lat - st['lat']) < 1e-5, '0x0800 back in charge'
+    print('ArduPilot CRSF native position OK')
+
+# Betaflight 4.5: CRSF "GPS alt" is the GPS's sea-level altitude while disarmed and the height
+# above the arming point once armed (flight/position.c). The reading at the arm edge was sea
+# level, so everything after it came out a field elevation too low (X18 + BF + TBS, MAX ALT -278 m,
+# 2026-11-08). Newer Betaflight sends sea level all along, which must still be subtracted.
+if NATIVE and not SPORT and not INAV:
+    FIELD = 300.0
+    def gstep(v, n=1):
+        for _ in range(n):
+            native_vals['GPS alt'] = v
+            step(0.2)
+    st['armed'] = False
+    gstep(FIELD, 35)                    # 7 s: "GPS alt" is found (sources are looked up again every 5 s)
+    st['armed'] = True
+    gstep(FIELD, 2)                     # armed in the mode text before the GPS frame jumps
+    gstep(0.0, 3); gstep(25.0, 5)
+    assert abs(S.alt - 25) < 1, 'BF 4.5: height above the arming point, not %s' % S.alt
+    st['armed'] = False
+    gstep(FIELD, 10)
+    st['armed'] = True
+    gstep(FIELD, 5); gstep(FIELD + 40, 5)
+    assert abs(S.alt - 40) < 1, 'sea level all along: height above home, not %s' % S.alt
+    st['armed'] = False
+    native_vals.pop('GPS alt', None)
+    for _ in range(30): step(0.2)
+    print('Betaflight GPS altitude OK')
+
 # home-centred view: armed -> closest step; flying out only zooms out, keeping the aircraft
 # inside the map; flying back does not zoom in again
 if not TILES:
@@ -1179,33 +1256,55 @@ if not TILES:
     import shutil; shutil.rmtree(os.path.join(SD, 'bitmaps', 'ethosmaps', 'maps', 'Google'))
     print('tile folders: capitals ignored OK')
 
-# home arrow in the HOME block: points to home relative to the nose
+# home direction (test42): the top-right "Home arrow" panel - the OmniDeck mark's arrow, two
+# triangles sharing the tip and the notch - and the HUD's H (only while home is within 45 degrees)
+ARROW_FILL = (242, 245, 248)
 def arrow_deg():
     main_drawn()
     tiles_y = round(H * 0.09) + min(W - round(W * 0.56) - 3, round((H - round(H * 0.09) - round(H * 0.075)) * 0.46))
-    pts = [p for c, p in tris if c == (80, 200, 255) and min(p[1], p[3], p[5]) > tiles_y and p[0] > W * 0.56]
+    pts = [p for c, p in tris if c == ARROW_FILL and max(p[1], p[3], p[5]) <= tiles_y + 1 and p[0] > W * 0.56]
     if not pts: return None
-    assert len(pts) == 2 and pts[0][:2] == pts[1][:2], 'arrow is two triangles sharing the tip %s' % pts
-    tx, ty = pts[0][0], pts[0][1]
-    cx = sum(p[i] for p in pts for i in (2, 4)) / 4      # the tail points sit around the centre line
-    cy = sum(p[i] for p in pts for i in (3, 5)) / 4
-    return math.degrees(math.atan2(tx - cx, cy - ty)) % 360
+    assert len(pts) == 2 and pts[0][:2] == pts[1][:2] and pts[0][4:6] == pts[1][2:4], 'arrow: tip and notch shared %s' % pts
+    tx, ty, nx, ny = pts[0][0], pts[0][1], pts[0][4], pts[0][5]
+    return math.degrees(math.atan2(tx - nx, ny - ty)) % 360
+HUD_W = round(W * 0.56)
+HUD_TAPE = max(46, math.floor(HUD_W * 0.17))
+HUD_CX = HUD_TAPE + 4 + (HUD_W - 2 * HUD_TAPE - (8 if (H - round(H * 0.09) - round(H * 0.075)) >= 240 else 6) - 8) / 2
+def h_x():
+    xs = [x for t, c, x in main_drawn() if t == 'H']
+    return xs[0] if xs else None
+keep_panel = widget.topPanel
+widget.topPanel = 1
 lat0 = st['lat']
-st['lat'] = lat0 + 0.006                  # ~670 m north of where it stands, so home is not underfoot
+st['lat'] = lat0 + 0.006                  # ~670 m north of where it stands: home ~670 m south
 st['armed'] = False
 step(0.2); step(0.2)
-assert arrow_deg() is not None or S.homeDist is None or S.homeDist == 0, 'arrow away from home'
-for yaw in (0, 90, 200, 315):
+assert arrow_deg() is None, 'Home arrow panel shows the logo before arming'
+# arm where it stood (INAV/BF set home where they arm), then fly the 670 m north again
+st['lat'] = lat0
+st['armed'] = True
+step(0.2); step(0.2)
+st['lat'] = lat0 + 0.006
+step(0.2); step(0.2)
+for yaw in (0, 20, 340, 90, 200, 160):   # home is south (bearing ~180)
     st['yaw'] = yaw
     step(0.2); step(0.2)
     got = arrow_deg()
     want = (S.homeBrg - S.yaw) % 360
     assert got is not None and abs((got - want + 180) % 360 - 180) < 8, 'yaw %d: arrow %s, want %.0f' % (yaw, got, want)
+    rel = (want + 180) % 360 - 180
+    hx = h_x()
+    if abs(rel) <= 44:
+        assert hx is not None, 'yaw %d: H shown for home %.0f deg off the nose' % (yaw, rel)
+        assert abs(rel) < 10 or (hx > HUD_CX) == (rel > 0), 'yaw %d: H on the side of home (%.0f, x %s)' % (yaw, rel, hx)
+    elif abs(rel) >= 46:
+        assert hx is None, 'yaw %d: no H for home %.0f deg off the nose' % (yaw, rel)
+    if yaw == 160: render('main_homearrow_%s.png' % tag, 1)   # home 20 deg right: H and the panel arrow
 st['lat'] = lat0
 st['yaw'] = 0
+st['armed'] = False
+widget.topPanel = keep_panel
 step(0.2); step(0.2)
-if S.homeDist is not None and S.homeDist < 1:
-    assert arrow_deg() is None, 'no arrow when at home'
 print('home arrow OK')
 render('main_arrow_%s.png' % tag, 1)
 tris.clear()
@@ -1441,8 +1540,8 @@ MODEL_NAME[0] = 'Plane B'
 wt['create']()                    # selecting a model re-creates its widgets
 S_after = getS()
 assert S_after.odMarker is None, 'new model: state cleared'
-if W > 480:
-    # X20 copy (test41b): the welcome is said again after a model switch, as Yaapu does
+if True:
+    # the welcome is said again after a model switch, as Yaapu does (X20 since test41b, X18 since test42)
     vmod.setVoice('Aria'); del played[:]
     for _ in range(6): wake_only(0.3)
     assert 'omniready' in played, 'welcome after a model switch, got %s' % played

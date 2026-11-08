@@ -258,7 +258,9 @@ local function pt(appId, lo, hi)
     -- pair with a position no older than 0.3 s, so motion between packets stays small
     -- EdgeTX / OpenTX: at most twice a second (it refines a home estimate; S.Port sends 0x5004
     -- often, and the trig behind it was a tenth of OpenTX's S.Port budget)
-    if s.lat and s.posAt and now() - s.posAt <= 0.3 and (not OD_LITE or now() - homeAt >= 0.5) then
+    local pAt = s.posAt
+    if s.nativePosAt and (pAt == nil or s.nativePosAt > pAt) then pAt = s.nativePosAt end
+    if s.lat and pAt and now() - pAt <= 0.3 and (not OD_LITE or now() - homeAt >= 0.5) then
       homeAt = now()
       apHomeUpdate()
     end
@@ -725,6 +727,13 @@ local function sportMode(n)
 end
 
 local nativeHomeAlt = nil
+-- Betaflight 4.5 sends CRSF "GPS alt" as GPS altitude above sea level while disarmed and as
+-- height above the arming point once armed (flight/position.c), so the reading taken at the arm
+-- was sea level and every later one came out ~field elevation too low (X18 + BF + TBS, MAX ALT
+-- -278 m, 2026-11-08). A drop of more than 10 m toward 0 within 5 s of arming is that switch:
+-- the value is then used as sent. INAV sends height above the arming point all along (~0 at the
+-- arm), newer Betaflight sea level all along; both still go through the subtraction.
+local homeAltAt, altRelative = nil, false
 -- CRSF flight mode text. Disarmed is shown by a mark after the name: "*" on ArduPilot and
 -- Betaflight, and on Betaflight also "!" (arming disabled) or "?" (GPS rescue disabled).
 -- INAV sends OK, WAIT or !ERR instead. !FS! says nothing about arming, so keep the last state.
@@ -899,6 +908,7 @@ local function readNative(kind)
   if s.lat and s.fix == 3 then
     if (armed and not lastArmed) or (s.homeLat == nil and armed ~= false) then
       s.homeLat, s.homeLon, nativeHomeAlt = s.lat, s.lon, alt
+      homeAltAt, altRelative = now(), false
     end
   end
   lastArmed = armed
@@ -910,7 +920,9 @@ local function readNative(kind)
       local okN, nm = pcall(function() return src:name() end)
       isGpsAlt = okN and nm == "GPS alt"
     end
-    s.alt = (isGpsAlt and nativeHomeAlt) and (alt - nativeHomeAlt) or alt
+    if isGpsAlt and nativeHomeAlt and not altRelative and homeAltAt and now() - homeAltAt < 5
+       and math.abs(alt) < math.abs(nativeHomeAlt) - 10 then altRelative = true end
+    s.alt = (isGpsAlt and nativeHomeAlt and not altRelative) and (alt - nativeHomeAlt) or alt
   end
   if s.lat and s.homeLat then s.homeDist, s.homeBrg = T.distBrg(s.lat, s.lon, s.homeLat, s.homeLon) end
 end
@@ -1046,6 +1058,7 @@ function T.resetModel()
   textViaCrsf, homeBestDist, latPending, rawText, rawStatus = false, nil, nil, nil, nil
   msgBuf, msgLastLo, msgLastHi = "", nil, nil
   nativeHomeAlt, lastArmed = nil, nil
+  homeAltAt, altRelative = nil, false
   linkKind, linkCheckAt = nil, -100
   srcCache, srcMissAt, srcQuery, srcAt = {}, {}, {}, {}
   sensorList, sensorListAt = nil, -100
@@ -1116,6 +1129,19 @@ function T.wakeup(linkMode)
       local lq, rssi = linkFigs(kind)
       if lq then s.lq = lq end
       if rssi then s.rssi = rssi end
+      -- ArduPilot over CRSF leaves 0x0800 out of passthrough (AP_CRSF_Telem disables GPS_LAT/
+      -- GPS_LON) and sends the position only as the native CRSF GPS frame, so without this the
+      -- map kept the saved last position (X20 + ELRS + ArduPilot, 2026-11-08). mLRS builds its
+      -- own passthrough with 0x0800, which is still preferred while it arrives.
+      if kind == "crsf" and (s.posAt == nil or now() - s.posAt > 1.5) and telemActive() ~= false
+         and (lq == nil or lq > 0) then
+        local lat, lon = srcVal("lat", kind), srcVal("lon", kind)
+        if type(lat) == "number" and type(lon) == "number" and lat == lat and lon == lon
+           and math.abs(lat) <= 90 and math.abs(lon) <= 180 and (lat ~= 0 or lon ~= 0) then
+          -- posAt is left alone so the next read still comes here; 0x5004 pairs with nativePosAt
+          s.lat, s.lon, s.nativePosAt = lat, lon, now()
+        end
+      end
     end
     -- ArduPilot sends no "ready to arm" flag. Not ready: a PreArm message in the last 35 s, or
     -- what telemetry shows directly (GPS without a 3D fix, EKF not happy, a failsafe). Ready only
