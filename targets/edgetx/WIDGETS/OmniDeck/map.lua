@@ -30,23 +30,32 @@ M.C = C
 -- ---------------------------------------------------------------- trail
 -- breadcrumbs in metres east/north of a fixed local origin (the first fix)
 local trail = { e = {}, n = {}, count = 0, head = 0 }
-local TRAIL_MAX = 300
+-- EdgeTX: a short trail, the last TRAIL_MAX points taken every TRAIL_DT s (about 10 s), all of
+-- them drawn on the map page (2 x OD_TRAIL_SEGS segments, the same Lua cost as before). The old
+-- 300-point trail drawn every ~8th point turned circles into criss-crossing lines and stayed on
+-- screen for the whole flight (TX16S + Crossfire + INAV, 2026-11-08).
+local TRAIL_MAX = 2 * (OD_TRAIL_SEGS or 20) + 1
+local TRAIL_DT = 0.25
+local trailAt = nil
 local org = nil   -- { lat=, lon=, mlon= }
 
 local function toEN(lat, lon)
   return (lon - org.lon) * org.mlon, (lat - org.lat) * 111320
 end
-function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } end
+function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } trailAt = nil end
 
 function M.addTrail(lat, lon, rangeM)
   if not lat then return end
+  local t = os.clock()
+  if trailAt and t - trailAt < TRAIL_DT then return end
   if org == nil then org = { lat = lat, lon = lon, mlon = 111320 * math.cos(math.rad(lat)) } end
   local e, n = toEN(lat, lon)
   if trail.count > 0 then
+    -- standing still adds nothing, so a parked aircraft keeps the trail it came in on
     local le, ln = trail.e[trail.head], trail.n[trail.head]
-    local minStep = math.max(5, (rangeM or 500) / 60)
-    if (e - le) ^ 2 + (n - ln) ^ 2 < minStep * minStep then return end
+    if (e - le) ^ 2 + (n - ln) ^ 2 < 4 then return end
   end
+  trailAt = t
   trail.head = trail.head % TRAIL_MAX + 1
   trail.e[trail.head], trail.n[trail.head] = e, n
   if trail.count < TRAIL_MAX then trail.count = trail.count + 1 end

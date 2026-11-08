@@ -33,6 +33,10 @@ args = sys.argv[1:]
 WHO = args[0] if args else 'omnideck'
 SECONDS = float(args[args.index('--seconds') + 1]) if '--seconds' in args else 60.0
 CRSF = '--crsf' in args
+# --elrs: ArduPilot over ELRS/Crossfire - no 0x0800 in passthrough, the position only as the
+# native CRSF "GPS" sensor (getValue returns { lat=, lon= }), as AP_CRSF_Telem sends it
+ELRS = '--elrs' in args
+if ELRS: CRSF = True
 W, H = 480, 272
 
 SD = tempfile.mkdtemp(prefix='bench_etx_')
@@ -42,6 +46,8 @@ if WHO == 'omnideck':
     # OmniDeck Setup: link CRSF (Auto finds it too; set so both start alike); --panel N: the
     # main page's top-right panel (0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo)
     cfg = ('linkMode=1\n' if CRSF else '') + ('panel=%s\n' % args[args.index('--panel') + 1] if '--panel' in args else '')
+    # --page 2: start on the map page (the trail is drawn there, not on the main page)
+    cfg += ('startPage=%s\n' % args[args.index('--page') + 1]) if '--page' in args else ''
     if cfg:
         open(os.path.join(SD, 'WIDGETS', 'OmniDeck', 'Bench.cfg'), 'w').write(cfg)
 else:
@@ -147,7 +153,7 @@ getGeneralSettings = function() return { imperial = 0, battMin = 6.6, battMax = 
                                           gtimer = 0 } end
 getDateTime = function() return { year = 2026, mon = 11, day = 7, hour = 12, min = 0, sec = 0 } end
 getRSSI = function() return 99, 40, 30 end
-getValue = function() return 0 end
+getValue = function(n) if py_val then local v = py_val(n) if v ~= nil then return v end end return 0 end
 getFieldInfo = function(n) return { id = 1, name = tostring(n), desc = tostring(n), unit = 0 } end
 getSourceValue = function() return 0 end
 getSwitchValue = function() return false end
@@ -227,6 +233,8 @@ zone = L.table_from({'x': 0, 'y': 0, 'w': W, 'h': H})
 holder = {}
 def make(): holder['w'] = wdef.create(zone, options)
 G.py_make = make
+# (--elrs: link quality 100, as a live ELRS link reports; the GPS gate skips LQ 0)
+if ELRS: G.py_val = lambda n: L.table_from({'lat': st['lat'], 'lon': st['lon']}) if n == 'GPS' else (100 if n == 'RQly' else None)
 L.execute('py_make()')
 widget = holder['w']
 refresh = wdef.refresh
@@ -311,6 +319,7 @@ while sim_t[0] < SECONDS:
         st['lat'], st['lon'] = project(st['lat'], st['lon'], st['gs'] * FEED, st['yaw'])
         st['mah'] += 1
         pk = packets(st)
+        if ELRS: pk = [(a, v) for a, v in pk if a != 0x0800]
         if CRSF:
             for i in range(0, len(pk), 9):
                 grp = pk[i:i + 9]

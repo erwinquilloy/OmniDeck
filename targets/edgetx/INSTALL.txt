@@ -1,10 +1,19 @@
-OmniDeck 0.2.0-etx3_test41 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.2.0-etx3_test41c for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.2.0-etx3_test41c
+- Map page trail: a smooth line of the last 10 seconds (a point every 0.25 s, every point drawn).
+  It was up to 300 points drawn every 8th or so, which turned circles into criss-crossing lines,
+  and it stayed for the whole flight. Same Lua cost as before.
+- ArduPilot over ELRS or TBS Crossfire: the map now follows the aircraft. ArduPilot sends its
+  position over CRSF only as the standard GPS sensor, not in passthrough, so the map stayed on the
+  last saved position. mLRS, R9 / F.Port and INAV / Betaflight were not affected.
+- Changed since etx3_test41: map.lua, telem.lua, ui.lua (version).
 
 WHAT'S NEW IN 0.2.0-etx3_test41
 - About 10 % less Lua work again on the main page, the screen unchanged: the parts that never

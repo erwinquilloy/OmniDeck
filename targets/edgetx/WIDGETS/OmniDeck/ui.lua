@@ -13,7 +13,7 @@ local _ENV = OD_ENV or _ENV
     4 SUMMARY - last flight; opens on disarm, and joins the page cycle once a flight has ended
 ]]
 
-local VERSION = "0.2.0-etx3_test41"
+local VERSION = "0.2.0-etx3_test41c"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")

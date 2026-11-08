@@ -770,6 +770,28 @@ if not NATIVE and not SPORT:
     st['armed'] = True
     step(0.2, 15)
 
+# ArduPilot over ELRS sends no 0x0800 in passthrough, only the native CRSF GPS frame: the
+# position must follow the "GPS" sensor (X20 + ELRS 2026-11-08: map kept the saved position)
+if not NATIVE and not SPORT:
+    real_packets = packets
+    keep_pos = (st['lat'], st['lon'])
+    def packets(s, _p=real_packets): return [(a, v) for a, v in _p(s) if a != 0x0800]
+    if 'GPS' not in sensor_list: sensor_list.append('GPS')
+    for k in range(30):
+        st['lat'], st['lon'] = project(keep_pos[0], keep_pos[1], 30 * (k + 1), 70)
+        native['GPS'] = {'lat': st['lat'], 'lon': st['lon']}
+        step(0.2)
+    S = UIm.T.s
+    assert S.fc == 'ArduPilot', 'still passthrough: %s' % S.fc
+    assert abs(S.lat - st['lat']) < 1e-4 and abs(S.lon - st['lon']) < 1e-4, \
+        'native CRSF position followed (%s, %s) vs (%s, %s)' % (S.lat, S.lon, st['lat'], st['lon'])
+    packets = real_packets
+    native.pop('GPS', None); sensor_list.remove('GPS')
+    st['lat'], st['lon'] = keep_pos
+    step(0.2, 15)
+    assert abs(UIm.T.s.lat - st['lat']) < 1e-4, '0x0800 back in charge'
+    print('AP CRSF native position OK')
+
 # telemetry stops: EdgeTX keeps old values, OmniDeck must see the link as lost
 streaming[0] = False
 crsf_q.clear(); sport_q.clear()
