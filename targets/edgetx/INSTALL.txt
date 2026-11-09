@@ -1,10 +1,45 @@
-OmniDeck 0.2.0-etx3_test41c for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.2.0-etx3_test42 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.2.0-etx3_test42 (the same main page and settings as Ethos test 42)
+Main page
+- Data blocks: HOME (with TOT, the distance flown, as its note) | FLIGHT TIME, then ALT | AS / GS
+  (current values; the maximums are on the flight summary), Battery | USED, CURR | THR. With no
+  airspeed (no pitot over mLRS, Betaflight) the AS / GS block shows GS alone.
+- The HOME block's small arrow is gone. Home direction is now:
+  - on the HUD: a white H in a black box under the heading box, at home's bearing on the compass
+    strip's scale, shown while home is within 45 degrees of the nose (hidden further round);
+  - in the top-right panel, with "Home arrow" chosen (below).
+- HUD tapes: labelled with the unit alone (km/h, m), one font size bigger than before.
+- With no airspeed, the speed tape's value box is green (as the GS box).
+- Vario bar: no dark background any more; the climb / sink bar sits on the sky and ground.
+- OmniDeck Setup "Top-right panel": Minimap, Home arrow, Radar, OmniDeck logo, Stratos logo.
+  Home arrow: the OmniDeck logo before arming, then the logo's own arrow pointing home (up = home
+  straight ahead). A model set up before keeps what it showed.
+Pages (tap, ENTER or the page switch)
+- ArduPilot: Main, Map, Messages. INAV / Betaflight: Main, Map (they send no messages).
+  OmniDeck Setup "Messages page": Auto (ArduPilot only), On, Off.
+- "Flight stats page" (Off by default): On puts the last flight's summary in the cycle. The
+  summary still opens by itself on disarm ("Flight summary on disarm").
+- "Sensor check page" (Off by default): On puts the sensor check page in the cycle.
+Fixes
+- Betaflight with airmode on (permanently or by switch): the mode shows AIR and is spoken "Air
+  mode"; with airmode off it shows ACRO. It used to show ACRO for both. (Over S.Port Betaflight
+  sends no airmode flag, and current INAV always sends ACRO.)
+- ArduPilot over ELRS or TBS Crossfire: the map now also follows the aircraft while ArduPilot
+  pauses its passthrough (at low link rates it sends it only every 3 s on TBS), when etx3_test41c
+  froze it. Tester's TX16S: the map did not move with ELRS / TBS + ArduPilot.
+- Betaflight 4.5 over CRSF: altitude was about the field's height above sea level too low (MAX ALT
+  -278 m). Betaflight sends the GPS's sea-level altitude while disarmed and the height above the
+  arming point once armed; the altitude taken at arming was the sea-level one.
+- Lua work: the main page is about 300 instructions lighter than etx3_test41c (worst 63 % of
+  EdgeTX's limit in the simulator, ELRS on 2.10.5; Home arrow / logos lower still).
+- Changed since etx3_test41c: cfg.lua, hud.lua, telem.lua, ui.lua, fixed/panel_*.png.
 
 WHAT'S NEW IN 0.2.0-etx3_test41c
 - Map page trail: a smooth line of the last 10 seconds (a point every 0.25 s, every point drawn).

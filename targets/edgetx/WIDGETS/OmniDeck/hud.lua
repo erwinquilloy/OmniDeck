@@ -102,7 +102,8 @@ local function strip(x, y, w, h)
 end
 
 -- value box with a pointer on one side
-local function readout(x, y, w, h, text, pointRight, font)
+-- col: frame and number colour (default white; the GS green when the tape shows groundspeed)
+local function readout(x, y, w, h, text, pointRight, font, col)
   lcd.color(C.box)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
   local tip = h / 2
@@ -113,7 +114,7 @@ local function readout(x, y, w, h, text, pointRight, font)
   else
     lcd.drawFilledTriangle(I(x), I(y), I(x - tip), I(y + h / 2), I(x), I(y + h))
   end
-  lcd.color(C.line)
+  lcd.color(col or C.line)
   lcd.drawRectangle(I(x), I(y), I(w), I(h))
   lcd.font(font)
   local _, th = lcd.getTextSize(text)
@@ -226,8 +227,9 @@ H.outlined = outlined
 -- vertical tape: value in display units, step between labels, pixels per unit.
 -- It has no background, so the horizon shows through.
 local TL_T, TL_W, TL_H, TL_Y = {}, {}, {}, {}   -- EdgeTX: a tape's numbers, reused every update
-local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, label)
-  lcd.font(FONT_XS)
+local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, label, valCol)
+  -- the unit's font (one size above the ladder, see the label below) sets the strip kept clear
+  lcd.font((font == FONT_STD and FONT_L) or (font == FONT_S and FONT_STD) or (font == FONT_XS and FONT_S) or font)
   local _, lh = lcd.getTextSize("A")
   -- the ladder stops below the label, so a number scrolling past never runs into it
   lcd.setClipping(I(x), I(y + lh + 3), I(w), I(h - lh - 3))
@@ -308,10 +310,13 @@ local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, labe
   local bh = bth + 6
   local bw = math.max(w - bh / 2 - 2, tw + 10)
   local bx = leftSide and x + 1 or x + w - bw - 1
-  readout(bx, cy - bh / 2, bw, bh, text, leftSide, boxFont)
+  readout(bx, cy - bh / 2, bw, bh, text, leftSide, boxFont, valCol)
   if label then
-    lcd.font(FONT_XS)
-    if lcd.getTextSize(label) > w - 2 then lcd.font(FONT_XXS) end   -- narrow tape (480x272)
+    -- the unit alone, a font size above the ladder numbers (it was "AS km/h" in the smallest
+    -- font); the ladder's own size if that does not fit the tape
+    local uf = (font == FONT_STD and FONT_L) or (font == FONT_S and FONT_STD) or (font == FONT_XS and FONT_S) or font
+    lcd.font(uf)
+    if lcd.getTextSize(label) > w - 2 then lcd.font(font) end
     outlined(x + w / 2, y + 2, label, CENTERED, C.tapeTxt)
   end
   return bx, cy + bh / 2, bw, bh
@@ -525,8 +530,8 @@ local function vario(x, y, w, h, vs)
   local cy = y + h / 2
   local full = 5                         -- m/s at the end of the bar
   local len = math.max(-1, math.min(1, vs / full)) * (h / 2 - 2)
-  lcd.color(lcd.RGB(20, 20, 20))
-  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  -- no background of its own (test42): the bar and the zero line over the horizon, as Marcin
+  -- asked (a dark strip down the HUD's right edge looked odd over the sky and ground)
   lcd.color(vs >= 0 and C.climb or C.sink)
   if len >= 0 then lcd.drawFilledRectangle(I(x + 1), I(cy - len), I(w - 2), I(len) + 1)
   else lcd.drawFilledRectangle(I(x + 1), I(cy), I(w - 2), I(-len) + 1) end
@@ -614,14 +619,14 @@ function H.draw(x, y, w, h, s, u)
   local spd = aspd or gspd
   if spd then
     local bx, by, bw = vtape(x, y + headH + 16, tapeW, h - headH - 22, u.spd(spd), u.spdStep, u.spdPpu(h), true, font, boxFont,
-      (aspd and "AS " or "GS ") .. u.spdLbl)
+      u.spdLbl, (not aspd) and C.gs or nil)
     if aspd and gspd then
       subReadout(bx, by + 3, bw, string.format("%d", R(u.spd(gspd))), hdgFont)
     end
   end
   if alt then
     local ax, ay, aw, ah = vtape(x + w - tapeW - varW, y + headH + 16, tapeW, h - headH - 22, u.alt(alt), u.altStep, u.altPpu(h), false, font, boxFont,
-      "ALT " .. u.altLbl)
+      u.altLbl)
     if u.alarmA then   -- below the low altitude alarm: red frame round the altitude box
       lcd.color(C.bad)
       lcd.drawRectangle(I(ax - 2), I(ay - ah - 2), I(aw + 4), I(ah + 4))
@@ -631,7 +636,31 @@ function H.draw(x, y, w, h, s, u)
   -- OpenTX: no vertical-speed bar (Lua budget); its strip keeps the layout, so the overlay fits
   if not OTX then vario(x + w - varW, y + headH + 16, varW, h - headH - 22, vspd) end
   if yaw then
-    headingTape(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, yaw, homeBrg, font, hdgFont, ov ~= nil)
+    headingTape(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, yaw, nil, font, hdgFont, ov ~= nil)
+  end
+  -- home marker: a white H in a black box with a home-blue frame, on a row under the heading box,
+  -- at home's bearing on the compass strip's own scale (90 degrees across); only while home is in
+  -- that window. Drawn last and kept between the speed and altitude tapes, so nothing covers it.
+  if yaw and homeBrg then
+    local tx, tw = x + tapeW + 4, w - 2 * tapeW - varW - 8
+    local rel = (homeBrg - yaw + 540) % 360 - 180
+    if rel >= -45 and rel <= 45 then
+      lcd.font(hdgFont)
+      local _, hbh = lcd.getTextSize("000")
+      lcd.font(boxFont)
+      local cw, ch = lcd.getTextSize("H")
+      local bw, bh = cw + 10, ch + 4
+      local hx = tx + tw / 2 + rel * tw / 90
+      hx = math.max(tx + bw / 2, math.min(tx + tw - bw / 2, hx))
+      local by = y + headH + hbh + 2 + 4         -- under the heading box, which hangs below the strip
+      lcd.color(C.box)
+      lcd.drawFilledRectangle(I(hx - bw / 2), I(by), I(bw), I(bh))
+      lcd.color(C.home)
+      lcd.drawRectangle(I(hx - bw / 2), I(by), I(bw), I(bh))
+      lcd.drawRectangle(I(hx - bw / 2 + 1), I(by + 1), I(bw - 2), I(bh - 2))
+      lcd.color(lcd.RGB(255, 255, 255))
+      lcd.drawText(I(hx), I(by + 2), "H", CENTERED)
+    end
   end
 end
 

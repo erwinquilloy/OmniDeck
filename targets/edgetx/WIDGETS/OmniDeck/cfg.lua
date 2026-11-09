@@ -36,13 +36,20 @@ C.ITEMS = {
   { "cells", "Battery cells (0 = auto)", { 0, 14, 1, "", 1 } },
   { "lowAlt", "Low altitude alarm (0 = off)", { 0, 3000, 10, "", 1 } },
   { "inavWp", "INAV mission download", { { 1, "On" }, { 0, "Off" } } },
-  -- the panel at the top right of the main page, above the data blocks (etx3)
-  { "panel", "Top-right panel", { { 0, "Minimap" }, { 1, "Radar" }, { 2, "OmniDeck logo" }, { 3, "Stratos logo" } } },
+  -- the panel at the top right of the main page, above the data blocks (test42; etx3 had
+  -- "panel": 0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo, carried over in C.read)
+  { "topPanel", "Top-right panel", { { 0, "Minimap" }, { 1, "Home arrow" }, { 2, "Radar" }, { 3, "OmniDeck logo" },
+    { 4, "Stratos logo" } } },
+  -- the pages a tap cycles through (test42); the flight summary still opens on disarm
+  { "msgPage", "Messages page", { { 0, "Auto (ArduPilot only)" }, { 1, "On" }, { 2, "Off" } } },
+  { "statsPage", "Flight stats page", { { 0, "Off" }, { 1, "On" } } },
+  { "checkPage", "Sensor check page", { { 0, "Off" }, { 1, "On" } } },
 }
 
 C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, orient = 0,
                zoomMode = 0, zoomSrc = "", tileSet = "*", trail = 1, startPage = 1, pageSwitch = "", pageSwMode = 0, sumAuto = 1, batCap = 0, lowVolt = 0, critVolt = 0,
-               cells = 0, lowAlt = 0, inavWp = 0, panel = 0 }
+               cells = 0, lowAlt = 0, inavWp = 0, panel = -1, topPanel = -1, msgPage = 0, statsPage = 0,
+               checkPage = 0 }
 
 -- EdgeTX: io.read(f, n) / io.write(f, s); standard Lua (simulator): f:read / f:write
 local function fread(f)
@@ -76,7 +83,7 @@ function C.read()
   for k, v in pairs(C.DEFAULTS) do out[k] = v end
   local f = io.open(C.path(), "r")
   -- no file yet: voice on, with the first pack on the card (a first save must not turn it off)
-  if not f then out.voice = C.packs()[1] or "" return out, false end
+  if not f then out.voice = C.packs()[1] or "" out.topPanel = 0 return out, false end
   local text = fread(f)
   io.close(f)
   for line in string.gmatch(text, "[^\r\n]+") do
@@ -84,6 +91,11 @@ function C.read()
     if k and C.DEFAULTS[k] ~= nil then
       if type(C.DEFAULTS[k]) == "number" then out[k] = tonumber(v) or C.DEFAULTS[k] else out[k] = v end
     end
+  end
+  -- test42: the top-right panel's choices changed; a file written before keeps what it showed
+  if out.topPanel < 0 then
+    local old = { [1] = 2, [2] = 3, [3] = 4 }
+    out.topPanel = old[out.panel] or 0
   end
   return out, true
 end

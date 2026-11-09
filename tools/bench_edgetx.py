@@ -46,6 +46,9 @@ if WHO == 'omnideck':
     # OmniDeck Setup: link CRSF (Auto finds it too; set so both start alike); --panel N: the
     # main page's top-right panel (0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo)
     cfg = ('linkMode=1\n' if CRSF else '') + ('panel=%s\n' % args[args.index('--panel') + 1] if '--panel' in args else '')
+    # --top N (test42): the top-right panel, 0 minimap, 1 home arrow, 2 radar, 3 OmniDeck logo,
+    # 4 Stratos logo (an older tree ignores it; there --panel N is the setting)
+    cfg += ('topPanel=%s\n' % args[args.index('--top') + 1]) if '--top' in args else ''
     # --page 2: start on the map page (the trail is drawn there, not on the main page)
     cfg += ('startPage=%s\n' % args[args.index('--page') + 1]) if '--page' in args else ''
     if cfg:

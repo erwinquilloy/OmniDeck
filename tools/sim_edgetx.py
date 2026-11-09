@@ -708,6 +708,23 @@ if os.environ.get('OD_GEO'):
     assert all(b == 0 for _, _, _, b in geo_bad), 'ground edge off the horizon line: %s' % geo_bad
     assert DRAWS['negative clipline'] == 0 and DRAWS['negative hudrect'] == 0, 'negative coordinates on %s' % (ETXVER,)
 
+# test42 main page: blocks HOME (TOT note) | FLIGHT TIME, ALT | AS / GS (GS alone without
+# airspeed), no MAX AS / MAX GS; the tapes are labelled with the unit alone
+wd.page = 1
+del TEXTS[:]
+frame()
+txt = list(TEXTS)
+S = UIm.T.s
+assert 'HOME' in txt and 'FLIGHT TIME' in txt and 'ALT' in txt, 'blocks %s' % txt
+assert not any(t.startswith('MAX AS') or t.startswith('MAX GS') for t in txt), 'no max-speed blocks %s' % txt
+if S.aspd is not None:
+    assert any(t.startswith('AS / GS ') for t in txt), 'AS / GS block %s' % txt
+else:
+    assert any(t.startswith('GS ') for t in txt), 'GS block %s' % txt
+assert 'km/h' in txt and 'm' in txt and not any(t.startswith('ALT ') for t in txt), 'unit-only tape labels %s' % txt
+assert not any(t.startswith('TOTAL ') for t in txt), 'TOT, not TOTAL %s' % txt
+print('test42 main page OK')
+
 # flight summary on disarm
 st['armed'] = False
 step(0.2, 12)
@@ -720,7 +737,28 @@ frame(G.EVT_TOUCH_FIRST, {'x': 100, 'y': 100})
 frame(G.EVT_TOUCH_BREAK, {'x': 101, 'y': 101})
 assert wd.page == 2, 'tap -> map, page %s' % wd.page
 frame(G.EVT_VIRTUAL_ENTER)
-assert wd.page == 3, 'enter -> messages, page %s' % wd.page
+# test42: messages for ArduPilot only (INAV / Betaflight send none); flight stats and sensor
+# check only when switched on (both off by default)
+assert wd.msgPage == 0 and wd.statsPage == 0 and wd.checkPage == 0, 'page settings default'
+assert wd.page == (1 if NATIVE else 3), 'enter -> messages for ArduPilot only, page %s' % wd.page
+if not NATIVE:
+    frame(G.EVT_VIRTUAL_ENTER)
+    assert wd.page == 1, 'stats and sensor check off by default, page %s' % wd.page
+wd.statsPage, wd.checkPage = 1, 1
+wd.page = 3 if not NATIVE else 2
+frame(G.EVT_VIRTUAL_ENTER)
+assert wd.page == 4, 'flight stats page switched on (a flight to show), page %s' % wd.page
+frame(G.EVT_VIRTUAL_ENTER)
+assert wd.page == 5, 'sensor check page switched on, page %s' % wd.page
+frame(G.EVT_VIRTUAL_ENTER)
+assert wd.page == 1, 'then back to page 1, page %s' % wd.page
+wd.msgPage = 1 if NATIVE else 2
+wd.statsPage, wd.checkPage = 0, 0
+wd.page = 2
+frame(G.EVT_VIRTUAL_ENTER)
+assert wd.page == (3 if NATIVE else 1), 'messages page On (INAV) / Off (ArduPilot), page %s' % wd.page
+wd.msgPage = 0
+print('test42 page cycle OK')
 wd.page = 2
 lv = wd.level
 frame(G.EVT_VIRTUAL_NEXT)
@@ -785,12 +823,49 @@ if not NATIVE and not SPORT:
     assert S.fc == 'ArduPilot', 'still passthrough: %s' % S.fc
     assert abs(S.lat - st['lat']) < 1e-4 and abs(S.lon - st['lon']) < 1e-4, \
         'native CRSF position followed (%s, %s) vs (%s, %s)' % (S.lat, S.lon, st['lat'], st['lon'])
+    # passthrough pausing past 3 s with the link up (ArduPilot slows it to every 3 s on TBS at low
+    # rates, AP_CRSF_Telem): the GPS sensor keeps the position moving (test42)
+    def packets(s, _p=real_packets): return []
+    keep2 = (st['lat'], st['lon'])
+    for k in range(30):                  # 6 s with no passthrough at all
+        st['lat'], st['lon'] = project(keep2[0], keep2[1], 30 * (k + 1), 160)
+        native['GPS'] = {'lat': st['lat'], 'lon': st['lon']}
+        step(0.2)
+    S = UIm.T.s
+    assert S.fc == 'ArduPilot' and abs(S.lat - st['lat']) < 1e-4, 'passthrough gap: position followed (%s vs %s, %s)' % (S.lat, st['lat'], S.fc)
+    print('AP CRSF passthrough gap OK')
     packets = real_packets
     native.pop('GPS', None); sensor_list.remove('GPS')
     st['lat'], st['lon'] = keep_pos
     step(0.2, 15)
     assert abs(UIm.T.s.lat - st['lat']) < 1e-4, '0x0800 back in charge'
     print('AP CRSF native position OK')
+
+# Betaflight 4.5: CRSF "GPS alt" is sea level while disarmed and the height above the arming point
+# once armed; the reading at the arm edge was sea level (X18 + BF + TBS: MAX ALT -278 m, 2026-11-08).
+# Newer Betaflight sends sea level all along, which must still be subtracted.
+if NATIVE and not SPORT:
+    FIELD = 300.0
+    if 'GAlt' not in sensor_list: sensor_list.append('GAlt')
+    def gstep(v, n=1):
+        for _ in range(n):
+            native['GAlt'] = v
+            step(0.2)
+    st['armed'] = False
+    gstep(FIELD, 35)                    # 7 s: "GPS alt" is found (sources looked up again every 5 s)
+    st['armed'] = True
+    gstep(FIELD, 2)                     # armed in the mode text before the GPS frame jumps
+    gstep(0.0, 3); gstep(25.0, 5)
+    assert abs(UIm.T.s.alt - 25) < 1, 'BF 4.5: height above the arming point, not %s' % UIm.T.s.alt
+    st['armed'] = False
+    gstep(FIELD, 10)
+    st['armed'] = True
+    gstep(FIELD, 5); gstep(FIELD + 40, 5)
+    assert abs(UIm.T.s.alt - 40) < 1, 'sea level all along: height above home, not %s' % UIm.T.s.alt
+    st['armed'] = False
+    native.pop('GAlt', None); sensor_list.remove('GAlt')
+    step(0.2, 30)
+    print('Betaflight GPS altitude OK')
 
 # telemetry stops: EdgeTX keeps old values, OmniDeck must see the link as lost
 streaming[0] = False
@@ -905,7 +980,8 @@ if os.path.isfile(sd_path('/SCRIPTS/TOOLS/OmniDeck Setup.lua')):
     SW['sh'] = 1024; frame(None, zone=(W, H))
     assert p0 == 1 and wd.page == 2, 'SH press outside full screen: next page (%s -> %s)' % (p0, wd.page)
     SW['sh'] = -1024; frame(None, zone=(W, H)); SW['sh'] = 1024; frame(None, zone=(W, H))
-    assert wd.page == 3, 'second press: page 3, got %s' % wd.page
+    # test42: the next page skips Messages for INAV / Betaflight
+    assert wd.page == (1 if NATIVE else 3), 'second press: next page, got %s' % wd.page
     open(cfgp, 'a').write('pageSwitch=sc\npageSwMode=1\n')
     CALL('update', widget_def['update'], wd, options)
     SW['sc'] = 0; frame(None, zone=(W, H)); assert wd.page == 2, 'SC middle = Map, got %s' % wd.page

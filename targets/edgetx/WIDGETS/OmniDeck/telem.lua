@@ -723,9 +723,9 @@ local function crsfMode(raw)
   if raw == "!FS!" then return "FAILSAFE", s.armed end
   if raw == "OK" or raw == "WAIT" or raw == "!ERR" then return raw, false end
   local name, mark = string.match(raw, "^(.-)([%*!%?]?)$")
-  -- "AIR" is acro with airmode active: INAV 6.x-8.0.x and Betaflight send it in place of
-  -- "ACRO" (INAV master no longer does). The pilot selected ACRO, so show and speak ACRO.
-  if name == "AIR" then name = "ACRO" end
+  -- "AIR" (acro with airmode active, as INAV 6.x-8.0.x and Betaflight send it, also with airmode
+  -- on permanently) is shown and spoken as AIR ("airmode"): showing ACRO hid that airmode was on
+  -- (Betaflight, X20S and TX16S 2026-11-09). Over S.Port Betaflight has no airmode flag: ACRO.
   return name, mark == ""
 end
 
@@ -841,6 +841,13 @@ local function readNative(kind)
   -- battery pulled on the bench, 2026-11-03). Link figures only; nothing marks it alive.
   if s.fc == "ArduPilot" then
     s.lq, s.rssi = lq, rssi
+    -- the link is up (checked above) but passthrough paused: at low CRSF rates ArduPilot sends it
+    -- only every 3 s (TBS) or 0.5 s (ELRS) (AP_CRSF_Telem), so gaps past the 3 s above happen.
+    -- Its position over CRSF is only ever this GPS sensor anyway, so it is kept moving (test42).
+    if kind == "crsf" and type(lat) == "number" and type(lon) == "number" and lat == lat and lon == lon
+       and math.abs(lat) <= 90 and math.abs(lon) <= 180 and (lat ~= 0 or lon ~= 0) then
+      s.lat, s.lon, s.nativePosAt = lat, lon, t
+    end
     return
   end
   s.fc = "INAV/BF"
