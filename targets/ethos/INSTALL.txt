@@ -33,6 +33,9 @@ Pages (tap or ENTER)
   summary still opens by itself on disarm ("Flight summary on disarm").
 - "Sensor check page" (Off by default): On puts the sensor check page in the cycle.
 Fixes
+- Betaflight with airmode on (permanently or by switch): the mode shows AIR and is spoken "Air
+  mode"; with airmode off it shows ACRO. It used to show ACRO for both. (Over S.Port Betaflight
+  sends no airmode flag, and current INAV always sends ACRO.)
 - ArduPilot over ELRS or TBS Crossfire: the map now follows the aircraft. ArduPilot sends its
   position over CRSF only as the standard GPS sensor, not in passthrough, so the map stayed on the
   last saved position. mLRS, R9 / F.Port and INAV / Betaflight were not affected.

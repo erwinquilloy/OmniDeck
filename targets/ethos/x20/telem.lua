@@ -742,9 +742,9 @@ local function crsfMode(raw)
   if raw == "!FS!" then return "FAILSAFE", s.armed end
   if raw == "OK" or raw == "WAIT" or raw == "!ERR" then return raw, false end
   local name, mark = string.match(raw, "^(.-)([%*!%?]?)$")
-  -- "AIR" is acro with airmode active: INAV 6.x-8.0.x and Betaflight send it in place of
-  -- "ACRO" (INAV master no longer does). The pilot selected ACRO, so show and speak ACRO.
-  if name == "AIR" then name = "ACRO" end
+  -- "AIR" (acro with airmode active, as INAV 6.x-8.0.x and Betaflight send it, also with airmode
+  -- on permanently) is shown and spoken as AIR ("airmode"): showing ACRO hid that airmode was on
+  -- (Betaflight, X20S and TX16S 2026-11-09). Over S.Port Betaflight has no airmode flag: ACRO.
   return name, mark == ""
 end
 

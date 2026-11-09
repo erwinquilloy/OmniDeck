@@ -1415,13 +1415,22 @@ if NATIVE and not SPORT:
              'ANGH': 'anglehold', 'TURT': 'turtle', 'GEO': 'geozone', 'LAND': 'land', 'ACRO': 'acro',
              'WRTH': 'rtl', 'PASS': 'passthrough', 'POSH': 'poshold', 'PHFL': 'posholdfail',
              'ALTH': 'althold', 'CHIR': 'chirp',
-             'AIR': 'acro'}   # acro with airmode on: shown and spoken as ACRO since test35
+             'AIR': 'airmode'}   # acro with airmode on: shown as AIR, spoken "airmode" (test35-42 said ACRO)
     clips = {l.split('|')[0] for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'phrases.psv'), encoding='utf8') if '|' in l and l[0] != '#'}
     for m, clip in MODES.items():
         st['fm'] = m
         assert hear() == [clip], '%s -> %s' % (m, played)
         assert clip in clips, 'no phrase for ' + clip
         assert S.armed is True, m + ' reads as armed'
+        if m == 'AIR': assert S.mode == 'AIR', 'AIR shown as AIR, not %s' % S.mode
+        if m == 'ACRO': assert S.mode == 'ACRO', 'ACRO shown as ACRO, not %s' % S.mode
+    # Betaflight disarmed: airmode on (permanent or by switch) "AIR*", airmode off "ACRO*"
+    for raw, want in (('AIR*', 'AIR'), ('ACRO*', 'ACRO')):
+        st['fm'] = raw
+        hear()
+        assert S.mode == want and S.armed is False, '%s -> %s armed %s' % (raw, S.mode, S.armed)
+    st['fm'] = 'ACRO'                         # armed again for the checks below
+    hear()
     st['fm'] = 'HRST'
     assert hear() == [], 'HRST silent, got %s' % played
     st['fm'] = '!FS!'
