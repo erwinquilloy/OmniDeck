@@ -503,11 +503,11 @@ local function activeTileSet(w)
   return nil
 end
 
--- last good GPS position, kept on the SD card: with no fix (bench, start-up) the map centres
--- there, so the tile set still shows
-local POS_FILE = (OD_ROOT or "/scripts/omnideck/") .. "lastpos.txt"
-local POS_SAVE_S = 60
-local lastPos, lastPosRead, lastPosSaved = nil, false, -1000
+-- last good GPS position, in memory only (test43): with no fix (GPS or link lost, the aircraft
+-- switched off after landing) the map centres there and shows it as LAST, so the tile set still
+-- shows. A model switch clears it (freshStart) and a radio restart starts without one: each boot
+-- is a fresh script. test42 and earlier kept it in lastpos.txt, which is no longer read or written.
+local lastPos = nil
 
 -- whole file, a line at a time: Ethos rejects read("a") ("invalid format", X18 tester
 -- 2026-11-03); "*l" is what b14ckyy's mapping widget uses on Ethos
@@ -521,39 +521,13 @@ local function readAll(f)
   return table.concat(lines, "\n")
 end
 
-local function readLastPos()
-  lastPosRead = true
-  local ok, f = pcall(io.open, POS_FILE, "r")
-  if not ok or not f then return end
-  local text = readAll(f)
-  f:close()
-  local la, lo = string.match(text, "([%-%d%.]+)%s*,%s*([%-%d%.]+)")
-  la, lo = tonumber(la), tonumber(lo)
-  if la and lo and (la ~= 0 or lo ~= 0) then lastPos = { la, lo } end
-end
-
--- Ethos: written once per landing (the first fix after a disarm), not every minute while there
--- is a fix: no SD writes while sitting on the bench or flying (see safe() below)
-local posArmed = false
-local function rememberPos(s, now)
-  if not (s.lat and (s.fix or 0) >= 3) then return end
-  lastPos = { s.lat, s.lon }
-  if not OD_LITE then
-    local landed = posArmed and s.armed == false
-    if s.armed ~= nil then posArmed = s.armed == true end
-    if not landed then return end
-  elseif now - lastPosSaved < POS_SAVE_S then return end
-  lastPosSaved = now
-  pcall(function()
-    local f = io.open(POS_FILE, "w")
-    if f then f:write(string.format("%.7f,%.7f\n", s.lat, s.lon)) f:close() end
-  end)
+local function rememberPos(s)
+  if s.lat and (s.fix or 0) >= 3 then lastPos = { s.lat, s.lon } end
 end
 
 local function mapCenter()
   local s = T.s
   if s.lat then return nil end
-  if not lastPosRead then readLastPos() end
   if lastPos then return lastPos end
   if s.homeLat then return { s.homeLat, s.homeLon } end
   return nil
@@ -1124,9 +1098,8 @@ local alarm = { lowSince = nil, critSince = nil, voltStage = 0, voltSaid = -100,
 
 -- A model switch is a fresh start (test43): T.checkModel() has cleared the telemetry, messages
 -- included; this clears the rest - the trail, the flight in progress and the last flight's
--- summary, the flight time, the mission (learned waypoints, INAV download), the alarms - so
--- nothing of the old model stays on any page. A power-on starts fresh anyway; only lastpos.txt
--- is kept (with no fix the map centres there and shows it as LAST, to find a lost model).
+-- summary, the flight time, the mission (learned waypoints, INAV download), the alarms and the
+-- last position - so nothing of the old model stays on any page. A power-on starts fresh anyway.
 freshStart = function(w)
   MAP.reset()
   FS.reset()
@@ -1136,7 +1109,7 @@ freshStart = function(w)
   alarm.lowSince, alarm.critSince, alarm.voltStage, alarm.voltSaid = nil, nil, 0, -100
   alarm.altArmed, alarm.altSaid, alarm.cells = false, -100, 0
   flightClock.sec, flightClock.txt = nil, "--"
-  posArmed = false
+  lastPos = nil
   if w then
     w.inavWpN, w.linkUpAt = nil, nil
     if w.page == PAGE_SUMMARY then w.page = w.homePage or 1 end
@@ -1317,8 +1290,8 @@ local function wakeup(w)
       end
     end
   end
-  -- tiles load here, never in paint(): ~14 ms each on an X20S, so two per wakeup
-  if ts then TL.process(2) end
+  -- tiles load here, never in paint(): a load is a handle (decoded at its first draw), so a time budget
+  if ts then TL.process() end   -- test43: ~25 ms or 10 tiles per wakeup (TL.process)
   MI.update(s)
   -- INAV mission download: only on a native (non-passthrough) link, after the
   -- link has been up for a few seconds; the client stops by itself if the FC is not INAV
@@ -1334,7 +1307,7 @@ local function wakeup(w)
     w.linkUpAt = nil
   end
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
-  rememberPos(s, nowc)
+  rememberPos(s)
   if runAL then checkAlarms(w, s, nowc) end
   -- no folder listing (OpenTX): look for a tile set by its files at the map's position
   if NO_LIST and (w.tileSet == nil or w.tileSet == "") then

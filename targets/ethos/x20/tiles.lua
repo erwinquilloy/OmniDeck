@@ -15,11 +15,20 @@ local _ENV = OD_ENV or _ENV
 
   Tiles are 100x100 px Web Mercator; formats tried in order jpg, bmp, png.
 
-  Loading follows that widget's measurements on an X20S: lcd.loadBitmap()
-  costs ~14 ms per tile (decode, not SD I/O), so tiles are loaded from wakeup()
-  a couple at a time, centre first, never inside paint(). Evicted bitmaps are
-  only freed by the GC, so a full collect runs before the next load after any
-  eviction - otherwise old and new bitmaps coexist and Ethos kills the widget.
+  Loading (test43) follows that widget's tileloader as it is now:
+  - lcd.loadBitmap() returns a handle at once; the file is decoded at its first
+    draw. A missing file gives a handle of width 0 that draws nothing - not nil
+    and no error (its ETHOS-API-QUIRKS notes). So the tile format is found once
+    with io.open; after that tiles load without a check, and each one on screen
+    is checked when the loader is idle (width() 0 = missing: the other formats
+    and the Yaapu folder are tried, else it stays background).
+  - paint() only says which tiles it shows (TL.want) and reads the cache
+    (TL.get). wakeup() (TL.process) rebuilds the queue when that window changes
+    - visible tiles nearest the centre first, then a ring of one tile - and loads
+    until a time budget or a count is used up, instead of 2 per wakeup.
+  - Evicted bitmaps are only freed by the GC, so a full collect runs before the
+    next load after any eviction - otherwise old and new bitmaps coexist and
+    Ethos kills the widget.
 ]]
 
 local TL = {}
@@ -167,12 +176,22 @@ function TL.mpp(lat, z)
 end
 
 -- ---------------------------------------------------------------- cache + queue
+-- One zoom is held at a time: cache[x][y] = bitmap, or false when there is no such tile. Numbers,
+-- not "z/x/y" strings: building a key per tile cost more Lua than anything else here.
 local set = nil            -- active tile set (from scan)
-local cache = {}           -- key "z/x/y" -> bitmap, or false when the file is missing
+local cz = nil             -- the zoom the cache holds
+local cache = {}
 local count = 0
-local queue, queued = {}, {}
+local qx, qy, qHead, qN = {}, {}, 1, 0   -- the load queue (tile x, y at zoom cz)
 local needGC = false
-local fmtExt = nil         -- extension that worked last; tried first
+local fmt = nil            -- { ext = ".jpg", yaapu = bool }: the format found on the card
+local UK = 2097152         -- unverified key = x * UK + y (2^21 > tiles across at zoom 20)
+local unverified, unverN = {}, 0   -- loaded without a check, not yet looked at
+local want = { z = nil }   -- the window paint() shows: z, x0, y0, x1, y1, cx, cy
+local built = {}           -- the window the queue was built for
+local verifyAt = -1
+local VERIFY_S = 0.3       -- an idle loader checks one tile on screen this often
+local BUDGET_S, MAX_PER_CALL = 0.025, 10
 
 function TL.setSet(s)
   if s ~= set then TL.clear() end
@@ -182,8 +201,14 @@ function TL.active() return set end
 
 function TL.clear()
   -- nil each entry so the GC sees the dropped references before new loads
-  for k in pairs(cache) do cache[k] = nil end
-  cache, count, queue, queued, fmtExt = {}, 0, {}, {}, nil
+  for x, col in pairs(cache) do
+    for y in pairs(col) do col[y] = nil end
+    cache[x] = nil
+  end
+  cache, cz, count, fmt = {}, nil, 0, nil
+  qHead, qN = 1, 0
+  unverified, unverN = {}, 0
+  built = {}
   needGC = true
 end
 
@@ -193,89 +218,181 @@ local function tryLoad(path)
   return nil
 end
 
-local EXTS = { ".jpg", ".bmp", ".png" }
-local function loadTile(z, x, y)
-  local p, t = set.provider, set.type
-  local dp, dt = set.dirP or p, set.dirT or t
-  local base
-  if p == "ESRI" then base = string.format("%s%s/%s/%d/%d/%d", ROOT, dp, dt, z, y, x)
-  else base = string.format("%s%s/%s/%d/%d/%d", ROOT, dp, dt, z, x, y) end
-  if fmtExt then
-    local b = tryLoad(base .. fmtExt)
-    if b then return b end
-  end
+local function exists(path)
+  local ok, f = pcall(io.open, path, "r")
+  if ok and f then f:close() return true end
+  return false
+end
+
+local function basePath(z, x, y)
+  local p = set.provider
+  local dp, dt = set.dirP or p, set.dirT or set.type
+  if p == "ESRI" then return string.format("%s%s/%s/%d/%d/%d", ROOT, dp, dt, z, y, x) end
+  return string.format("%s%s/%s/%d/%d/%d", ROOT, dp, dt, z, x, y)
+end
+local function yaapuPath(z, x, y)
+  return string.format("%s%s/%d/%d/s_%d", YAAPU, set.dirY or YAAPU_GOOGLE[set.type], z, y, x)
+end
+
+-- every candidate looked for on the card (jpg, bmp, png, then Yaapu's Google folder); the
+-- first one there is loaded, and the first format found is used for the fast path after
+local EXTS, YEXTS = { ".jpg", ".bmp", ".png" }, { ".jpg", ".png" }
+local function probeLoad(z, x, y)
+  local base = basePath(z, x, y)
   for _, e in ipairs(EXTS) do
-    if e ~= fmtExt then
+    if exists(base .. e) then
       local b = tryLoad(base .. e)
-      if b then fmtExt = e return b end
+      if b then fmt = fmt or { ext = e } return b end
     end
   end
-  if p == "GOOGLE" and YAAPU_GOOGLE[t] then
-    local yb = string.format("%s%s/%d/%d/s_%d", YAAPU, set.dirY or YAAPU_GOOGLE[t], z, y, x)
-    for _, e in ipairs({ ".jpg", ".png" }) do
-      local b = tryLoad(yb .. e)
-      if b then return b end
+  if set.provider == "GOOGLE" and YAAPU_GOOGLE[set.type] then
+    local yb = yaapuPath(z, x, y)
+    for _, e in ipairs(YEXTS) do
+      if exists(yb .. e) then
+        local b = tryLoad(yb .. e)
+        if b then fmt = fmt or { ext = e, yaapu = true } return b end
+      end
     end
   end
   return false
 end
 
--- returns the bitmap, false (no such tile on the card) or nil (not loaded yet)
-function TL.get(z, x, y)
-  local v = cache[z .. "/" .. x .. "/" .. y]
-  if v == nil then
-    local k = z .. "/" .. x .. "/" .. y
-    if not queued[k] then queued[k] = true queue[#queue + 1] = { z, x, y, k } end
-  end
-  return v
-end
-
--- called by the map each frame with the visible tile range; drops everything else
--- and re-orders the queue so tiles nearest the aircraft load first
-function TL.view(z, x0, y0, x1, y1, cxT, cyT)
-  local removed = 0
-  for k in pairs(cache) do
-    local kz, kx, ky = string.match(k, "^(%d+)/(%-?%d+)/(%-?%d+)$")
-    kz, kx, ky = tonumber(kz), tonumber(kx), tonumber(ky)
-    if kz ~= z or kx < x0 - 1 or kx > x1 + 1 or ky < y0 - 1 or ky > y1 + 1 then
-      cache[k] = nil
-      removed = removed + 1
+local function loadTile(z, x, y)
+  if fmt then   -- fast path: no file check (checked later, when on screen)
+    local b = tryLoad((fmt.yaapu and yaapuPath(z, x, y) or basePath(z, x, y)) .. fmt.ext)
+    if b then
+      local uk = x * UK + y
+      if not unverified[uk] then unverified[uk] = true unverN = unverN + 1 end
+      return b
     end
   end
-  if removed > 0 then count = count - removed needGC = true end
-  local q = {}
-  for _, e in ipairs(queue) do
-    if e[1] == z and e[2] >= x0 - 1 and e[2] <= x1 + 1 and e[3] >= y0 - 1 and e[3] <= y1 + 1 then q[#q + 1] = e
-    else queued[e[4]] = nil end
-  end
-  table.sort(q, function(a, b)
-    return (a[2] - cxT) ^ 2 + (a[3] - cyT) ^ 2 < (b[2] - cxT) ^ 2 + (b[3] - cyT) ^ 2
-  end)
-  queue = q
+  return probeLoad(z, x, y)
 end
 
--- wakeup(): load at most n tiles (2-3 per wakeup measured best on the X20S)
-function TL.process(n)
-  if set == nil or #queue == 0 then return 0 end
+-- returns the bitmap, false (no such tile on the card) or nil (not loaded yet). Cache only:
+-- paint() never touches the card or the queue.
+function TL.get(z, x, y)
+  if z ~= cz then return nil end
+  local col = cache[x]
+  if col then return col[y] end
+  return nil
+end
+
+-- paint(): the tile window on screen and the centre tile. Only stored; wakeup acts on it.
+function TL.want(z, x0, y0, x1, y1, cx, cy)
+  local w = want
+  w.z, w.x0, w.y0, w.x1, w.y1, w.cx, w.cy = z, x0, y0, x1, y1, cx, cy
+end
+
+-- drop what left the window (plus its ring of one tile), or everything at another zoom; queue
+-- the window again: the visible tiles in square rings outward from the centre tile, then the
+-- ring. Cached ones are skipped when their turn comes.
+local function rebuild()
+  local w = want
+  built.z, built.x0, built.y0, built.x1, built.y1 = w.z, w.x0, w.y0, w.x1, w.y1
+  local z, vx0, vy0, vx1, vy1, cx, cy = w.z, w.x0, w.y0, w.x1, w.y1, w.cx, w.cy
+  local x0, y0, x1, y1 = vx0 - 1, vy0 - 1, vx1 + 1, vy1 + 1
+  local removed = 0
+  for x, col in pairs(cache) do
+    local all = z ~= cz or x < x0 or x > x1
+    for y in pairs(col) do
+      if all or y < y0 or y > y1 then
+        col[y] = nil
+        removed = removed + 1
+        local uk = x * UK + y
+        if unverified[uk] then unverified[uk] = nil unverN = unverN - 1 end
+      end
+    end
+    if all then cache[x] = nil end
+  end
+  cz = z
+  if removed > 0 then count = count - removed needGC = true end
+  local n = 1
+  cx, cy = max(vx0, min(vx1, cx)), max(vy0, min(vy1, cy))
+  qx[1], qy[1] = cx, cy
+  local R = max(cx - vx0, vx1 - cx, cy - vy0, vy1 - cy)
+  for r = 1, R do
+    local ya, yb, xa, xb = cy - r, cy + r, cx - r, cx + r
+    for tx = max(vx0, xa), min(vx1, xb) do
+      if ya >= vy0 then n = n + 1 qx[n], qy[n] = tx, ya end
+      if yb <= vy1 then n = n + 1 qx[n], qy[n] = tx, yb end
+    end
+    for ty = max(vy0, ya + 1), min(vy1, yb - 1) do
+      if xa >= vx0 then n = n + 1 qx[n], qy[n] = xa, ty end
+      if xb <= vx1 then n = n + 1 qx[n], qy[n] = xb, ty end
+    end
+  end
+  for tx = x0, x1 do
+    n = n + 1 qx[n], qy[n] = tx, y0
+    n = n + 1 qx[n], qy[n] = tx, y1
+  end
+  for ty = vy0, vy1 do
+    n = n + 1 qx[n], qy[n] = x0, ty
+    n = n + 1 qx[n], qy[n] = x1, ty
+  end
+  for i = n + 1, #qx do qx[i], qy[i] = nil, nil end
+  qHead, qN = 1, n
+end
+
+-- idle: one loaded-unchecked tile on screen gets its check. It has been drawn, so width() costs
+-- nothing more; 0 means the fast path found no file - look again in every format.
+local function verifyOne(now)
+  if unverN == 0 or now - verifyAt < VERIFY_S then return end
+  verifyAt = now
+  local w = want
+  for uk in pairs(unverified) do
+    local x = math.floor(uk / UK)
+    local y = uk - x * UK
+    if x >= w.x0 and x <= w.x1 and y >= w.y0 and y <= w.y1 then
+      unverified[uk] = nil
+      unverN = unverN - 1
+      local col = cache[x]
+      local b = col and col[y]
+      if b then
+        local ok, wd = pcall(function() return b:width() end)
+        if ok and wd == 0 then col[y] = probeLoad(cz, x, y) end
+      end
+      return
+    end
+  end
+end
+
+-- wakeup(): rebuild the queue if the window moved, then load until BUDGET_S seconds or
+-- MAX_PER_CALL tiles are used (a load is a handle, well under a millisecond on Ethos; the decode
+-- comes at the tile's first draw). Idle: check a tile on screen.
+function TL.process(budget, maxN)
+  local w = want
+  if set == nil or w.z == nil then return 0 end
+  if w.z ~= built.z or w.x0 ~= built.x0 or w.y0 ~= built.y0 or w.x1 ~= built.x1 or w.y1 ~= built.y1 then
+    rebuild()
+  end
+  local now = os.clock()
+  if qHead > qN then verifyOne(now) return 0 end
   if needGC then
     collectgarbage()
     collectgarbage()   -- second pass frees userdata with finalisers
     needGC = false
   end
+  budget, maxN = budget or BUDGET_S, maxN or MAX_PER_CALL
   local done = 0
-  while done < (n or 2) and #queue > 0 do
-    local e = table.remove(queue, 1)
-    queued[e[4]] = nil
-    if cache[e[4]] == nil then
-      cache[e[4]] = loadTile(e[1], e[2], e[3])
+  while qHead <= qN and done < maxN do
+    local tx, ty = qx[qHead], qy[qHead]
+    qHead = qHead + 1
+    local col = cache[tx]
+    if col == nil then col = {} cache[tx] = col end
+    if col[ty] == nil then
+      col[ty] = loadTile(cz, tx, ty)
       count = count + 1
       done = done + 1
+      if os.clock() - now >= budget then break end
     end
   end
+  if qHead > qN then qHead, qN = 1, 0 end
   return done
 end
 
-function TL.pending() return #queue end
+function TL.pending() return qN - qHead + 1 end
 function TL.cached() return count end
+function TL.unverified() return unverN end
 
 return TL

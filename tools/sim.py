@@ -90,9 +90,11 @@ def text_size(t):
     b = cv.font.getbbox(str(t))
     return b[2] - b[0], cv.font.size + 2
 drawn = []        # (text or 'rect', colour, x), cleared by the checks that read it
+texts_xy = []     # (text, x, y) of every text drawn, cleared by the checks that read it
 def draw_text(x, y, t, flags=0):
     t = str(t); tw, _ = text_size(t)
     drawn.append((t, cv.col, x))
+    texts_xy.append((t, x, y))
     flags = int(flags or 0)
     if flags == 1: x = x - tw / 2
     elif flags == 2: x = x - tw
@@ -129,12 +131,17 @@ bitmaps = {}
 def sd_path(p): return os.path.join(SD, *[x for x in str(p).split('/') if x])
 def load_bitmap(p):
     fp = sd_path(p)
-    if not os.path.isfile(fp): raise Exception('no file ' + str(p))
+    # Ethos (b14ckyy's ETHOS-API-QUIRKS, simulator 1.6.4-26.1.2): a missing file is no error and no nil,
+    # but a handle of width 0 that draws nothing
+    if not os.path.isfile(fp):
+        stats['loads'] += 1
+        return L.table_from({'_id': None, 'width': lambda self=None: 0, 'height': lambda self=None: 0})
     img = Image.open(fp).convert('RGB')
     bitmaps[id(img)] = img
     stats['loads'] += 1
     return L.table_from({'_id': id(img), 'width': lambda self=None: img.width, 'height': lambda self=None: img.height})
 def draw_bitmap(x, y, bmp, w=None, h=None):
+    if bmp['_id'] is None: return             # a missing file's handle draws nothing
     img = bitmaps[bmp['_id']]
     if w is not None and h is not None:   # Ethos scales the picture to w x h
         img = img.resize((int(w), int(h)))
@@ -663,14 +670,26 @@ if TILES:
     for _ in range(40): step(0.2)      # let the queue fill the view
     tag = ('tiles_native_' if NATIVE else 'tiles_') + RES
     print('  tile zoom', widget.tz, 'loads', stats['loads'])
+    # test43: the map page asks for a bigger window than the minimap; the loader fills it (and
+    # its ring of one tile) within a few wakeups - the render shows the result, not the first frame
+    getTL = L.execute('''return function(W) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup, i)
+        if n == nil then break end if n == "TL" then return v end end end''')
+    TLm = getTL(wt)
+    widget.page = 2
+    for _ in range(3): step(0.2)
+    assert TLm.pending() == 0 and TLm.cached() >= 20, 'map window loaded in 3 steps: pending %s cached %s' % (TLm.pending(), TLm.cached())
+    print('  map page window: %d tiles cached after 3 steps' % TLm.cached())
     render('map_learned_%s.png' % tag, 2)
     widget.missionFile = 'test.waypoints'
     do_write(); do_read()
     for _ in range(40): step(0.2)
     render('main_%s.png' % tag, 1)
     for _ in range(40): step(0.2)
+    widget.page = 2
+    for _ in range(3): step(0.2)
     render('map_%s.png' % tag, 2)
     for _ in range(3): wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
+    widget.page = 2
     for _ in range(40): step(0.2)
     render('map_zoomed_%s.png' % tag, 2)
     print('  manual zoom ->', widget.tz, 'view', widget.zoomMode)
@@ -1121,10 +1140,10 @@ widget.page = 1
 
 # no GPS fix: ArduPilot sends 0,0, which is no position; the map centres on the last good one
 if not NATIVE and not TILES:
+    # test43: kept in memory only (a reboot or a model switch clears it); no lastpos.txt
     posf = os.path.join(SD, 'scripts', 'omnideck', 'lastpos.txt')
-    assert os.path.isfile(posf), 'last position saved'
-    la, lo = map(float, open(posf).read().split(','))
-    assert abs(la - st['lat']) < 0.05 and abs(lo - st['lon']) < 0.05, 'saved position near the aircraft'
+    assert not os.path.isfile(posf), 'lastpos.txt is no longer written'
+    la, lo = S.lat, S.lon
     keep_pos = (st['lat'], st['lon'], st.get('fix', 3))
     st['lat'], st['lon'], st['fix'] = 0.0, 0.0, 1
     for _ in range(6): step(0.2)
@@ -1218,13 +1237,14 @@ if not TILES:
     widget.zoomMode = 0; widget.page = 2; widget.level = 1
     st['lat'], st['lon'] = project(HOME[0], HOME[1], 600, 30)     # well away from home
     for _ in range(10): step(0.2)
-    cv = Canvas(); tris.clear(); wt['paint'](widget)
+    cv = Canvas(); tris.clear(); texts_xy.clear(); wt['paint'](widget)
     rx, ry, rw_, rh_ = 0, round(H * 0.09), W, H - round(H * 0.09)
-    homes = [p for c, p in tris if c == (80, 200, 255)]
-    assert homes, 'home marker drawn'
-    hx, hy = homes[-1][2], homes[-1][3]          # the roof's apex
-    # test43: the icon sits in a framed box (with the distance) kept inside the map, so a little further in
-    assert hx < 40 or hx > W - 40 or hy < ry + 40 or hy > H - 60, 'home icon on the edge (%s, %s)' % (hx, hy)
+    # test43: home is the HUD's white H in a framed box (with the distance) kept inside the map
+    homes = [(x, y) for tt, x, y in texts_xy if tt == 'H']
+    assert len(homes) == 1, 'one home H on the map %s' % homes
+    hx, hy = homes[0]
+    assert hx < 60 or hx > W - 60 or hy < ry + 40 or hy > H - 70, 'home H on the edge (%s, %s)' % (hx, hy)
+    assert not [p for c, p in tris if c == (80, 200, 255)], 'no house icon any more'
     cv.img.save(os.path.join(OUT, 'map_homeedge_%s.png' % tag))
     widget.zoomMode = 1; widget.page = 2
     st['armed'] = False; st['lat'], st['lon'] = HOME
@@ -1576,6 +1596,11 @@ S_after = getS()
 assert S_after.odMarker is None, 'new model: state cleared'
 # test43: a fresh start - no last flight or flight time from the old model
 assert FS.last() is None and FS.live() is None, 'new model: flight summary cleared'
+# nor the old model's last position: with no fix yet the map has no LAST position
+_pg = widget.page; widget.page = 2
+cv = Canvas(); drawn.clear(); wt['paint'](widget)
+assert 'LAST' not in [t for t, c, x in drawn], 'new model: no last position on the map'
+widget.page = _pg
 if True:
     # the welcome is said again after a model switch, as Yaapu does (X20 since test41b, X18 since test42)
     vmod.setVoice('Aria'); del played[:]
@@ -1592,9 +1617,15 @@ for _ in range(60): step(0.2)
 st['armed'] = False
 for _ in range(10): step(0.2)
 assert FS.last() is not None and widget.page == 4, 'flight on Plane B'
+# X18: Ethos builds the new model's widget ~2 s before model.name() changes, so the switch is
+# seen by this check, not create(): the welcome must come from here too
+vmod.setVoice('Aria'); del played[:]
 MODEL_NAME[0] = 'Plane C'
 for _ in range(3): wake_only(0.4)
 assert FS.last() is None and widget.page != 4, 'wakeup model check: fresh start, page %s' % widget.page
+for _ in range(6): wake_only(0.3)
+assert 'omniready' in played, 'welcome after a switch seen by the wakeup check, got %s' % played
+vmod.setVoice('off')
 S_before.odMarker2 = 2
 assert getS().odMarker2 == 2, 'the state table is reset in place (the UI holds it)'
 print('model switch OK')

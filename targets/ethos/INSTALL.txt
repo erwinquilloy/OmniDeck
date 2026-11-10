@@ -16,10 +16,15 @@ WHAT'S NEW IN TEST 43 (X20 family and X18-size screens)
   The map view (aircraft or home in the middle) is still the "Map view" setting.
 - Home on the map and minimap: the home icon now sits in a black box with a blue frame. Off the
   map, the box on the edge also holds the distance to home (on the minimap too).
-- Fresh start on a model switch: besides the telemetry, the trail, the flight time, the last
-  flight's summary, the mission and the alarms are cleared, and the summary page closes. At
-  power-on everything starts empty anyway; only the last GPS position (lastpos.txt) is kept, so
-  with no fix the map still opens where the model last was.
+- Fresh start on a model switch and at power-on: the telemetry, the trail, the flight time, the
+  last flight's summary, the mission, the alarms and the last GPS position are cleared, the
+  summary page closes, and the welcome is said again. The last position (shown as LAST on the map
+  when the fix is lost) is kept only while the same model stays selected and the radio stays on;
+  lastpos.txt is no longer used (you can delete it from /scripts/omnideck/).
+- Map tiles load much faster (the way the ETHOS Mapping Widget does it): a whole screen is
+  queued in a few updates instead of 2 tiles per update, nearest the aircraft first. Tile sets in
+  PNG, and Yaapu's Google folders, now show too (Ethos gives no error for a missing file, so the
+  first format tried was taken for every tile).
 - Flight logs: each flight that opens the flight summary (10 s or more armed) is saved as its own
   file in /scripts/omnideck/logs/, named like the radio's telemetry logs:
   <model>-<YYYY-MM-DD>-<HHMMSS>.txt (e.g. "Talon Pro-2026-11-10-144336.txt"). It holds the date

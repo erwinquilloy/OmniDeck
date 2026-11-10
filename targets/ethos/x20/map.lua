@@ -149,20 +149,27 @@ local function homeIcon(x, y, sz)
   lcd.drawFilledRectangle(I(x - sz * 0.65), I(y - sz * 0.1), I(sz * 1.3), I(sz * 0.9))
 end
 
--- home on the map and minimap (test43): the icon in a black box with a double home-blue frame,
--- like the HUD's H, so it stands out on tiles and the trail (the bare icon was hard to see, X18
--- 2026-11-10). With a text (the distance, home off the map) the box grows to hold it, on the side
--- facing into the map. The icon stays on (px, py) unless the box would leave the map: then the
--- box is pushed back inside. Font: the caller's.
-local function homeBadge(px, py, sz, txt, x, y, w, h)
-  local pad = math.max(2, I(sz * 0.35))
+-- home on the map and minimap (test43): a black box with a double home-blue frame, so it stands
+-- out on tiles and the trail (the bare icon was hard to see, X18 2026-11-10). In it a white H, the
+-- HUD's home marker, so all three read the same (letter = true; without it the home icon).
+-- With a text (the distance, home off the map) the box grows to hold it, on the side facing into
+-- the map. The marker stays on (px, py) unless the box would leave the map: then the box is pushed
+-- back inside. Font: the caller's (the H and the distance both use it).
+local function homeBadge(px, py, sz, txt, x, y, w, h, letter)
+  local pad, padY = math.max(2, I(sz * 0.35)), nil
   local tw, th = 0, 0
   if txt then tw, th = lcd.getTextSize(txt) end
-  local iw = 2 * sz
+  local iw, ih = 2 * sz, 2 * sz
+  if letter then
+    iw, ih = lcd.getTextSize("H")
+    pad, padY = 5, 2                            -- as the HUD's H box: text + 10 wide, + 4 high
+  end
+  padY = padY or pad
+  local half = iw / 2
   local bw = iw + 2 * pad + (txt and tw + pad or 0)
-  local bh = math.max(2 * sz, th) + 2 * pad
-  local left = txt and px > x + w / 2           -- right half of the map: the distance left of the icon
-  local bx = left and (px + sz + pad - bw) or (px - sz - pad)
+  local bh = math.max(ih, th) + 2 * padY
+  local left = txt and px > x + w / 2           -- right half of the map: the distance left of the marker
+  local bx = left and (px + half + pad - bw) or (px - half - pad)
   local by = py - bh / 2
   bx = math.max(x + 1, math.min(x + w - bw - 1, bx))
   by = math.max(y + 1, math.min(y + h - bh - 1, by))
@@ -171,8 +178,13 @@ local function homeBadge(px, py, sz, txt, x, y, w, h)
   lcd.color(C.home)
   lcd.drawRectangle(I(bx), I(by), I(bw), I(bh))
   lcd.drawRectangle(I(bx + 1), I(by + 1), I(bw - 2), I(bh - 2))
-  local icx = left and (bx + bw - pad - sz) or (bx + pad + sz)
-  homeIcon(icx, by + bh / 2 + sz * 0.1, sz)     -- the icon spans y - sz .. y + 0.8 sz
+  local icx = left and (bx + bw - pad - half) or (bx + pad + half)
+  if letter then
+    lcd.color(C.own)
+    lcd.drawText(I(icx), I(by + (bh - ih) / 2), "H", CENTERED)
+  else
+    homeIcon(icx, by + bh / 2 + sz * 0.1, sz)   -- the icon spans y - sz .. y + 0.8 sz
+  end
   if txt then
     lcd.color(C.own)
     local tx = left and (bx + pad) or (bx + pad + iw + pad)
@@ -302,7 +314,7 @@ function M.draw(x, y, w, h, s, o)
     local gx, gy = TL.toPixel(lat, lon, z)
     local x0, x1 = math.floor((gx - w / 2) / T), math.floor((gx + w / 2) / T)
     local y0, y1 = math.floor((gy - h / 2) / T), math.floor((gy + h / 2) / T)
-    TL.view(z, x0, y0, x1, y1, math.floor(gx / T), math.floor(gy / T))
+    TL.want(z, x0, y0, x1, y1, math.floor(gx / T), math.floor(gy / T))   -- wakeup loads them
     for ty = y0, y1 do
       for tx = x0, x1 do
         local bmp = TL.get(z, tx, ty)
@@ -455,21 +467,22 @@ function M.draw(x, y, w, h, s, o)
   -- home: on the map, or a marker on the edge pointing at it (distance and bearing are from
   -- the aircraft, so not while the map is centred on a stand-in position). Both in a framed black
   -- box (homeBadge); the edge marker's box also holds the distance, on the minimap too (test43).
+  -- the H (and the distance) in this font: minimap small; full map about the HUD's H box
+  lcd.font(o.mini and FONT_S or (h >= 350 and FONT_L or FONT_STD))
   if o.home then
-    homeBadge(cx, cy, o.mini and 6 or 9, nil, x, y, w, h)
+    homeBadge(cx, cy, o.mini and 6 or 9, nil, x, y, w, h, true)
   elseif s.homeDist and s.homeBrg and not fallback then
     local b = math.rad(s.homeBrg)
     local hx, hy = scr(math.sin(b) * s.homeDist, math.cos(b) * s.homeDist)
     local m = o.mini and 6 or 10
     if hx >= x + m and hx <= x + w - m and hy >= y + m and hy <= y + h - m then
-      homeBadge(hx, hy, o.mini and 6 or 9, nil, x, y, w, h)
+      homeBadge(hx, hy, o.mini and 6 or 9, nil, x, y, w, h, true)
     else
       local dx, dy = hx - cx, hy - cy
       local k = math.min((w / 2 - m) / math.max(math.abs(dx), 1e-6), (h / 2 - m) / math.max(math.abs(dy), 1e-6))
       local ex, ey = cx + dx * k, cy + dy * k
       -- home off the map: the box on the edge, in home's direction, with the distance
-      lcd.font(o.mini and FONT_XS or FONT_S)
-      homeBadge(ex, ey, o.mini and 5 or 8, fmtDist(s.homeDist), x, y, w, h)
+      homeBadge(ex, ey, o.mini and 5 or 8, fmtDist(s.homeDist), x, y, w, h, true)
     end
   end
 
