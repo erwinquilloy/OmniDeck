@@ -132,6 +132,9 @@ end
 
 function F.last() return last end
 
+-- a fresh start (model switch): no flight in progress, no last flight
+function F.reset() cur, last = nil, nil end
+
 -- the flight in progress, or the last one until the next arming
 function F.live() return cur or last end
 

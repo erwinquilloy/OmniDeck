@@ -729,11 +729,10 @@ wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.plus.x + 5, b.pl
 assert widget.level == lvl0 - 1, 'plus button'
 wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.minus.x + 5, b.minus.y + 5)
 assert widget.level == lvl0, 'minus button'
-assert widget.zoomMode == 0 and b.auto.label == 'PLANE', 'aircraft-centred by default'
-wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.auto.x + 5, b.auto.y + 5)
-assert widget.zoomMode == 1, 'view button -> home-centred'
-wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.auto.x + 5, b.auto.y + 5)
-assert widget.zoomMode == 0, 'view button -> aircraft-centred'
+# test43: no PLANE / HOME view button (the "Map view" setting stays); + and - square, >= 48 px
+assert widget.zoomMode == 0 and b.auto is None, 'aircraft-centred by default, no view button'
+assert b.plus.w == b.plus.h and b.plus.w >= 48 and b.minus.w == b.plus.w, 'big square zoom buttons %s' % b.plus.w
+assert b.minus.y > b.plus.y + b.plus.h, 'minus under plus'
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
 assert widget.level == lvl0 - 1, 'rotary'
 # test42 page cycle: main, map, messages for ArduPilot only (INAV/BF send none); the flight stats
@@ -782,6 +781,14 @@ assert widget.page == 2 and FS.last() is None, 'disarm flicker ended the flight'
 st['armed'] = False
 for _ in range(10): step(0.2)
 assert widget.page == 4, 'disarm opens the summary, page %s' % widget.page
+# test43: the flight is also added to flights.txt (one entry per summary)
+LOGF = os.path.join(SD, 'scripts', 'omnideck', 'flights.txt')
+def log_entries():
+    return open(LOGF, encoding='utf8').read().count('=== ') if os.path.isfile(LOGF) else 0
+log_txt = open(LOGF, encoding='utf8').read()
+last_entry = log_txt[log_txt.rfind('=== '):]
+assert SIM_MODEL in last_entry and 'Flight time' in last_entry and 'Last position' in last_entry, 'flight log entry %s' % last_entry
+log_n = log_entries()
 f = FS.last()
 print('summary: time %.0f dist %.0f home %s alt %s gspd %s as %s used %s volt %s curr %s lq %s rssi %s lost %s' % (
     f.time, f.dist, f.maxHome, f.maxAlt, f.maxGspd, f.maxAspd, f.used, f.minVolt, f.maxCurr, f.minLq, f.minRssi, f.lost))
@@ -816,6 +823,7 @@ for _ in range(15): step(0.2)             # 3 s on the bench: too short to count
 st['armed'] = False
 for _ in range(10): step(0.2)
 assert widget.page == 1 and FS.last().time == first_time, 'short arm shows nothing'
+assert log_entries() == log_n, 'short arm adds nothing to flights.txt'
 
 st['armed'] = True                        # link lost mid-flight, then found disarmed
 for _ in range(100): step(0.2)
@@ -1103,9 +1111,8 @@ if NATIVE:
 # nothing on the main page or the map spills out of its box at this size
 widget.page = 2
 cv = Canvas(); wt['paint'](widget)
-auto = widget.btns.auto
-cv.font = font_of(consts['FONT_STD'])
-assert text_size('AUTO')[0] + 4 <= auto.w, 'AUTO fits its button (%d px in %d)' % (text_size('AUTO')[0], auto.w)
+mb = widget.btns.minus
+assert mb.x + mb.w <= W and mb.y + mb.h <= H, 'zoom buttons on the screen'
 widget.page = 1
 
 # no GPS fix: ArduPilot sends 0,0, which is no position; the map centres on the last good one
@@ -1212,7 +1219,8 @@ if not TILES:
     homes = [p for c, p in tris if c == (80, 200, 255)]
     assert homes, 'home marker drawn'
     hx, hy = homes[-1][2], homes[-1][3]          # the roof's apex
-    assert hx < 25 or hx > W - 25 or hy < ry + 30 or hy > H - 45, 'home icon on the edge (%s, %s)' % (hx, hy)
+    # test43: the icon sits in a framed box (with the distance) kept inside the map, so a little further in
+    assert hx < 40 or hx > W - 40 or hy < ry + 40 or hy > H - 60, 'home icon on the edge (%s, %s)' % (hx, hy)
     cv.img.save(os.path.join(OUT, 'map_homeedge_%s.png' % tag))
     widget.zoomMode = 1; widget.page = 2
     st['armed'] = False; st['lat'], st['lon'] = HOME
@@ -1294,10 +1302,17 @@ for yaw in (0, 20, 340, 90, 200, 160):   # home is south (bearing ~180)
     assert got is not None and abs((got - want + 180) % 360 - 180) < 8, 'yaw %d: arrow %s, want %.0f' % (yaw, got, want)
     rel = (want + 180) % 360 - 180
     hx = h_x()
-    if abs(rel) <= 44:
+    # test43: the strip's width is +-90 deg for the H; past 90 it parks on home's end, and it goes
+    # only with home within 5 deg of the tail
+    tw_h = 2 * (HUD_CX - HUD_TAPE - 4)
+    if abs(rel) <= 174:
         assert hx is not None, 'yaw %d: H shown for home %.0f deg off the nose' % (yaw, rel)
         assert abs(rel) < 10 or (hx > HUD_CX) == (rel > 0), 'yaw %d: H on the side of home (%.0f, x %s)' % (yaw, rel, hx)
-    elif abs(rel) >= 46:
+        want_x = HUD_CX + max(-90, min(90, rel)) * tw_h / 180
+        assert abs(hx - want_x) <= 24, 'yaw %d: H at %s, want ~%.0f (rel %.0f)' % (yaw, hx, want_x, rel)
+        if abs(rel) >= 90:
+            assert abs(abs(hx - HUD_CX) - tw_h / 2) <= 24, 'yaw %d: H parked on the end' % yaw
+    elif abs(rel) >= 176:
         assert hx is None, 'yaw %d: no H for home %.0f deg off the nose' % (yaw, rel)
     if yaw == 160: render('main_homearrow_%s.png' % tag, 1)   # home 20 deg right: H and the panel arrow
 st['lat'] = lat0
@@ -1545,10 +1560,18 @@ S_before = getS()
 S_before.odMarker = 1
 wt['create']()                    # another widget on the same model
 assert getS().odMarker == 1, 'same model: state kept'
+assert FS.last() is None, 'Talon Pro -> Plane A: the earlier flights are gone'
+st['armed'] = True
+for _ in range(60): step(0.2)
+st['armed'] = False
+for _ in range(10): step(0.2)
+assert FS.last() is not None and widget.page == 4, 'a flight on Plane A before the switch'
 MODEL_NAME[0] = 'Plane B'
 wt['create']()                    # selecting a model re-creates its widgets
 S_after = getS()
 assert S_after.odMarker is None, 'new model: state cleared'
+# test43: a fresh start - no last flight or flight time from the old model
+assert FS.last() is None and FS.live() is None, 'new model: flight summary cleared'
 if True:
     # the welcome is said again after a model switch, as Yaapu does (X20 since test41b, X18 since test42)
     vmod.setVoice('Aria'); del played[:]
@@ -1558,6 +1581,16 @@ if True:
     for _ in range(6): wake_only(0.3)
     assert 'omniready' not in played, 'no welcome without a switch, got %s' % played
     vmod.setVoice('off')
+# the 1 s check in wakeup (Ethos re-creates the widget before model.name() changes) also clears
+# the flight and leaves the summary page
+st['armed'] = True
+for _ in range(60): step(0.2)
+st['armed'] = False
+for _ in range(10): step(0.2)
+assert FS.last() is not None and widget.page == 4, 'flight on Plane B'
+MODEL_NAME[0] = 'Plane C'
+for _ in range(3): wake_only(0.4)
+assert FS.last() is None and widget.page != 4, 'wakeup model check: fresh start, page %s' % widget.page
 S_before.odMarker2 = 2
 assert getS().odMarker2 == 2, 'the state table is reset in place (the UI holds it)'
 print('model switch OK')

@@ -42,6 +42,8 @@ local function toEN(lat, lon)
   return (lon - org.lon) * org.mlon, (lat - org.lat) * 111320
 end
 function M.resetTrail() trail = { e = {}, n = {}, count = 0, head = 0 } trailAt = nil end
+-- a fresh start (model switch): the trail and its origin
+function M.reset() M.resetTrail() org = nil end
 
 function M.addTrail(lat, lon, rangeM)
   if not lat then return end
@@ -145,6 +147,37 @@ local function homeIcon(x, y, sz)
     lcd.drawFilledTriangle(I(x - sz), I(y - sz * 0.1), I(x), I(y - sz), I(x + sz), I(y - sz * 0.1))
   end
   lcd.drawFilledRectangle(I(x - sz * 0.65), I(y - sz * 0.1), I(sz * 1.3), I(sz * 0.9))
+end
+
+-- home on the map and minimap (test43): the icon in a black box with a double home-blue frame,
+-- like the HUD's H, so it stands out on tiles and the trail (the bare icon was hard to see, X18
+-- 2026-11-10). With a text (the distance, home off the map) the box grows to hold it, on the side
+-- facing into the map. The icon stays on (px, py) unless the box would leave the map: then the
+-- box is pushed back inside. Font: the caller's.
+local function homeBadge(px, py, sz, txt, x, y, w, h)
+  local pad = math.max(2, I(sz * 0.35))
+  local tw, th = 0, 0
+  if txt then tw, th = lcd.getTextSize(txt) end
+  local iw = 2 * sz
+  local bw = iw + 2 * pad + (txt and tw + pad or 0)
+  local bh = math.max(2 * sz, th) + 2 * pad
+  local left = txt and px > x + w / 2           -- right half of the map: the distance left of the icon
+  local bx = left and (px + sz + pad - bw) or (px - sz - pad)
+  local by = py - bh / 2
+  bx = math.max(x + 1, math.min(x + w - bw - 1, bx))
+  by = math.max(y + 1, math.min(y + h - bh - 1, by))
+  lcd.color(C.ownEdge)
+  lcd.drawFilledRectangle(I(bx), I(by), I(bw), I(bh))
+  lcd.color(C.home)
+  lcd.drawRectangle(I(bx), I(by), I(bw), I(bh))
+  lcd.drawRectangle(I(bx + 1), I(by + 1), I(bw - 2), I(bh - 2))
+  local icx = left and (bx + bw - pad - sz) or (bx + pad + sz)
+  homeIcon(icx, by + bh / 2 + sz * 0.1, sz)     -- the icon spans y - sz .. y + 0.8 sz
+  if txt then
+    lcd.color(C.own)
+    local tx = left and (bx + pad) or (bx + pad + iw + pad)
+    lcd.drawText(I(tx), I(by + (bh - th) / 2), txt)
+  end
 end
 
 -- ---------------------------------------------------------------- main draw
@@ -355,26 +388,23 @@ function M.draw(x, y, w, h, s, o)
   end
 
   -- home: on the map, or a marker on the edge pointing at it (distance and bearing are from
-  -- the aircraft, so not while the map is centred on a stand-in position)
+  -- the aircraft, so not while the map is centred on a stand-in position). Both in a framed black
+  -- box (homeBadge); the edge marker's box also holds the distance, on the minimap too (test43).
   if o.home then
-    homeIcon(cx, cy, o.mini and 5 or 8)
+    homeBadge(cx, cy, o.mini and 6 or 9, nil, x, y, w, h)
   elseif s.homeDist and s.homeBrg and not fallback then
     local b = math.rad(s.homeBrg)
     local hx, hy = scr(math.sin(b) * s.homeDist, math.cos(b) * s.homeDist)
     local m = o.mini and 6 or 10
     if hx >= x + m and hx <= x + w - m and hy >= y + m and hy <= y + h - m then
-      homeIcon(hx, hy, o.mini and 5 or 8)
+      homeBadge(hx, hy, o.mini and 6 or 9, nil, x, y, w, h)
     else
       local dx, dy = hx - cx, hy - cy
       local k = math.min((w / 2 - m) / math.max(math.abs(dx), 1e-6), (h / 2 - m) / math.max(math.abs(dy), 1e-6))
       local ex, ey = cx + dx * k, cy + dy * k
-      -- home off the map: a small home icon on the edge, in home's direction
-      homeIcon(ex, ey + (o.mini and 2 or 4), o.mini and 4 or 7)
-      if not o.mini then
-        lcd.color(C.home)
-        local tx = ex < cx and ex + 12 or ex - 12
-        lcd.drawText(I(tx), I(ey - 6), fmtDist(s.homeDist), ex < cx and LEFT or RIGHT)
-      end
+      -- home off the map: the box on the edge, in home's direction, with the distance
+      lcd.font(o.mini and FONT_XS or FONT_S)
+      homeBadge(ex, ey, o.mini and 5 or 8, fmtDist(s.homeDist), x, y, w, h)
     end
   end
 
@@ -422,25 +452,25 @@ function M.draw(x, y, w, h, s, o)
     lcd.drawText(I(cx), I(cy + (o.mini and 10 or 18)), "NO GPS", CENTERED)
   end
 
-  -- zoom controls (full map)
+  -- zoom controls (full map): + and - only, square and big enough for a thumb (test43; the PLANE /
+  -- HOME view button went, the view is the "Map view" setting). The signs are bars, not text, so
+  -- they are as big as the button on any screen: about 49 px on an X18, 73 px on an X20.
   local btns = nil
   if not o.mini then
-    lcd.font(FONT_STD)
-    -- wide enough for "PLANE" on any screen, and still a decent touch target
-    local bw, bh = math.max(40, I(w * 0.08), lcd.getTextSize("PLANE") + 10), math.max(32, I(h * 0.1))
-    local bx, by = x + w - bw - 6, y + h - 3 * (bh + 6)
+    local bs = math.max(48, I(math.min(w, h) * 0.17))
+    local gap = I(bs * 0.15)
+    local bx, by = x + w - bs - 6, y + h - 2 * bs - gap - 6
     btns = {
-      plus  = { x = bx, y = by, w = bw, h = bh, label = "+" },
-      minus = { x = bx, y = by + bh + 6, w = bw, h = bh, label = "-" },
-      -- the view: HOME (centred on home) or PLANE (centred on the aircraft); a tap switches
-      auto  = { x = bx, y = by + 2 * (bh + 6), w = bw, h = bh, label = o.homeView and "HOME" or "PLANE" },
+      plus  = { x = bx, y = by, w = bs, h = bs, plus = true },
+      minus = { x = bx, y = by + bs + gap, w = bs, h = bs },
     }
-    lcd.font(FONT_STD)
+    local len, t = I(bs * 0.46), math.max(3, I(bs * 0.09))
     for _, b in pairs(btns) do
       lcd.color(C.btn); lcd.drawFilledRectangle(b.x, b.y, b.w, b.h)
       lcd.color(C.btnTxt); lcd.drawRectangle(b.x, b.y, b.w, b.h)
-      local _, th = lcd.getTextSize(b.label)
-      lcd.drawText(I(b.x + b.w / 2), I(b.y + (b.h - th) / 2), b.label, CENTERED)
+      local mx, my = b.x + b.w / 2, b.y + b.h / 2
+      lcd.drawFilledRectangle(I(mx - len / 2), I(my - t / 2), len, t)
+      if b.plus then lcd.drawFilledRectangle(I(mx - t / 2), I(my - len / 2), t, len) end
     end
   end
 

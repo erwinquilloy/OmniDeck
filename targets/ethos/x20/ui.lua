@@ -15,7 +15,7 @@ local _ENV = OD_ENV or _ENV
     5 CHECK - sensor check; in the cycle only with "Sensor check page" On
 ]]
 
-local VERSION = "0.2.0-test42"
+local VERSION = "0.2.0-test43"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -162,11 +162,12 @@ local function fontFor(h)
 end
 
 -- ---------------------------------------------------------------- widget state
+local freshStart   -- defined with the alarms below
 local function create()
   -- another model selected: clean telemetry state, and the welcome again (as Yaapu). Ethos
   -- re-creates the widget when a model is picked, so the switch is seen here; the 1 s check in
   -- wakeup then finds nothing new, which is why test41 stayed silent after a switch
-  if T.checkModel() then AU.greetAgain() end
+  if T.checkModel() then freshStart(nil) AU.greetAgain() end
   return {
     modelName = T.modelName(),   -- top bar; widgets are re-created when another model is picked
     page = 1, level = 4,
@@ -1020,6 +1021,60 @@ local function pageSummary(w, W, H, s, u)
   end
 end
 
+-- ---------------------------------------------------------------- flight log
+-- Each flight long enough for the summary is also added to flights.txt next to the scripts: the
+-- summary's figures, home, the last position (to find the model) and the last messages. One write
+-- per landing, from wakeup, like lastpos.txt: no SD writes from paint (see safe() above).
+local LOG_FILE = (OD_ROOT or "/scripts/omnideck/") .. "flights.txt"
+local LOG_MSGS = 10
+local function logFlight(w, s, f)
+  if not f then return end
+  local u = units(w)
+  local okD, when = pcall(os.date, "%Y-%m-%d %H:%M:%S")
+  if not okD or type(when) ~= "string" then when = "date unknown" end
+  local function pos(la, lo)
+    if la and lo then return string.format("%.6f, %.6f", la, lo) end
+    return "--"
+  end
+  local function num(fmt, v) return v and string.format(fmt, v) or "--" end
+  local perKm = (f.used and f.dist > 100) and f.used / (f.dist / 1000) or nil
+  local L = {
+    string.format("=== %s | %s | OmniDeck %s", when, T.modelName() or "?", VERSION),
+    string.format("FC %s, link %s", tostring(s.fc or "?"), tostring(s.link or "?")),
+    "Flight time    " .. fmtTime(f.time),
+    "Distance       " .. u.distF(f.dist),
+    "Max home       " .. u.distF(f.maxHome),
+    "Max alt        " .. u.altF(f.maxAlt),
+    "Max GSPD       " .. u.spdF(f.maxGspd) .. " " .. u.spdLbl,
+    "Max AS         " .. u.spdF(f.maxAspd) .. " " .. u.spdLbl,
+    "Used           " .. num("%dmAh", f.used and R(f.used)),
+    "Efficiency     " .. u.effVal(perKm, f.voltN and f.voltSum / f.voltN) .. " " .. u.effLbl,
+    "Min volt       " .. num("%.2fV", f.minVolt),
+    "Avg volt       " .. num("%.2fV", f.voltN and f.voltSum / f.voltN),
+    "Max curr       " .. num("%.1fA", f.maxCurr),
+    (f.minLq and "Min LQ         " or "Min RSSI       ") .. num("%d", (f.minLq or f.minRssi) and R(f.minLq or f.minRssi)),
+    "Link lost      " .. (f.lost > 0 and fmtTime(f.lost) or "none"),
+    "Home           " .. pos(s.homeLat, s.homeLon),
+    "Last position  " .. pos(s.lat or f.lat, s.lon or f.lon),
+  }
+  local m = s.msgs
+  if m and #m > 0 then
+    L[#L + 1] = "Messages (last " .. math.min(#m, LOG_MSGS) .. "):"
+    for i = math.max(1, #m - LOG_MSGS + 1), #m do L[#L + 1] = "  " .. tostring(m[i].text) end
+  end
+  local text = table.concat(L, "\n") .. "\n\n"
+  pcall(function()
+    local okA, fh = pcall(io.open, LOG_FILE, "a")
+    if okA and fh then fh:write(text) fh:close() return end
+    -- no append mode: the old file read back and written whole
+    local old = ""
+    local okR, fr = pcall(io.open, LOG_FILE, "r")
+    if okR and fr then old = readAll(fr) fr:close() if old ~= "" then old = old .. "\n" end end
+    local fw = io.open(LOG_FILE, "w")
+    if fw then fw:write(old .. text) fw:close() end
+  end)
+end
+
 -- ---------------------------------------------------------------- alarms
 -- Voltage, per cell, in two stages: low ("Low voltage", again every VOLT_REPEAT_S) and
 -- critical ("Critical voltage", every CRIT_REPEAT_S). Each needs VOLT_HOLD_S below its
@@ -1028,6 +1083,28 @@ end
 -- the landing approach from below don't count; again every ALT_REPEAT_S while low.
 local VOLT_HOLD_S, VOLT_REPEAT_S, CRIT_REPEAT_S, ALT_REPEAT_S = 5, 30, 15, 15
 local alarm = { lowSince = nil, critSince = nil, voltStage = 0, voltSaid = -100, altArmed = false, altSaid = -100, cells = 0 }
+
+-- A model switch is a fresh start (test43): T.checkModel() has cleared the telemetry, messages
+-- included; this clears the rest - the trail, the flight in progress and the last flight's
+-- summary, the flight time, the mission (learned waypoints, INAV download), the alarms - so
+-- nothing of the old model stays on any page. A power-on starts fresh anyway; only lastpos.txt
+-- is kept (with no fix the map centres there and shows it as LAST, to find a lost model).
+freshStart = function(w)
+  MAP.reset()
+  FS.reset()
+  MI.clearLearned()
+  MI.setInav(nil)
+  MSPC.restart()
+  alarm.lowSince, alarm.critSince, alarm.voltStage, alarm.voltSaid = nil, nil, 0, -100
+  alarm.altArmed, alarm.altSaid, alarm.cells = false, -100, 0
+  flightClock.sec, flightClock.txt = nil, "--"
+  posArmed = false
+  if w then
+    w.inavWpN, w.linkUpAt = nil, nil
+    if w.page == PAGE_SUMMARY then w.page = w.homePage or 1 end
+    lcd.invalidate()
+  end
+end
 
 local function checkAlarms(w, s, now)
   -- cell count: the setting, else the most cells the highest voltage seen could be (4.35 V max)
@@ -1126,7 +1203,7 @@ local function wakeup(w)
   -- 2 s on an X18), so the old model's state was kept. A switch is a fresh start, welcome included.
   if not OD_LITE and os.clock() - (w.modelAt or -10) >= 1 then
     w.modelAt = os.clock()
-    if T.checkModel() then AU.greetAgain() end
+    if T.checkModel() then freshStart(w) AU.greetAgain() end
     local n = T.modelName()
     if n ~= w.modelName then w.modelName = n end
   end
@@ -1148,6 +1225,7 @@ local function wakeup(w)
   local flight = nil
   if runAU then AU.update(s, T.alive(), nowc) end
   if runFS then flight = FS.update(s, T.alive(), nowc, T.distBrg) end
+  if flight == "done" then logFlight(w, s, FS.last()) end
   if flight == "armed" and w.page == PAGE_SUMMARY then
     -- arming always brings the main page back (an EdgeTX instance with a fixed Page: that page)
     w.page = w.homePage or 1
@@ -1306,7 +1384,6 @@ local function event(w, category, value, x, y)
     if w.page == 2 and w.btns then
       if inBox(w.btns.plus, x, y) then zoomStep(w, -1) lcd.invalidate() return true end
       if inBox(w.btns.minus, x, y) then zoomStep(w, 1) lcd.invalidate() return true end
-      if inBox(w.btns.auto, x, y) then w.zoomMode = (w.zoomMode == 1) and 0 or 1 lcd.invalidate() return true end
     end
     if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
       w.msgScroll = 0 lcd.invalidate() return true

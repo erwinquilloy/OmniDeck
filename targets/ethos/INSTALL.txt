@@ -1,10 +1,30 @@
-OmniDeck 0.2.0-test41 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 0.2.0-test43 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN TEST 43 (X20 family and X18-size screens)
+- HUD home marker (the H under the heading box): it now uses the whole width of the heading strip
+  for +-90 degrees, so it shows up as soon as home is anywhere ahead, not only within 45 degrees
+  of the nose. With home further round than 90 degrees it stays parked at the end of the strip on
+  home's side (turn that way); it goes only with home right behind (within 5 degrees of the tail).
+  Its place no longer matches the compass letters above it (those still span 90 degrees).
+- Map page: the PLANE / HOME button is gone; + and - are bigger square buttons, easier to hit.
+  The map view (aircraft or home in the middle) is still the "Map view" setting.
+- Home on the map and minimap: the home icon now sits in a black box with a blue frame. Off the
+  map, the box on the edge also holds the distance to home (on the minimap too).
+- Fresh start on a model switch: besides the telemetry, the trail, the flight time, the last
+  flight's summary, the mission and the alarms are cleared, and the summary page closes. At
+  power-on everything starts empty anyway; only the last GPS position (lastpos.txt) is kept, so
+  with no fix the map still opens where the model last was.
+- Flight log: each flight that opens the flight summary (10 s or more armed) is added to
+  /scripts/omnideck/flights.txt on the SD card: date and time, model, FC and link, the summary's
+  figures, home, the last position and the last 10 messages. Written once at each landing.
+- Betaflight airmode: AIR is shown and spoken "Air mode", ACRO stays ACRO (the test 42 fix; a copy
+  of test 42 sent before it was added still showed ACRO for both).
 
 WHAT'S NEW IN TEST 42 (X20 family and X18-size screens)
 Main page
@@ -238,7 +258,7 @@ WHAT'S NEW IN TEST 5
 WHAT'S NEW IN TEST 3
 - mLRS: the GPS position is now right (mLRS sends it encoded wrongly; OmniDeck corrects it).
 - Telemetry lost is also shown when the radio's module is switched off.
-- Map view setting (also the third map button): PLANE = aircraft in the middle, you zoom;
+- Map view setting (test 3-42 also the third map button): PLANE = aircraft in the middle, you zoom;
   HOME = home in the middle, zooms out to keep the aircraft on the map and back in on return.
 - When home is off the map, a small home icon on the edge shows its direction and distance.
 - The compass (heading tape) is transparent; the flight summary opens on any page after disarm.
