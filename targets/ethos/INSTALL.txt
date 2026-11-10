@@ -25,6 +25,10 @@ WHAT'S NEW IN TEST 43 (X20 family and X18-size screens)
   queued in a few updates instead of 2 tiles per update, nearest the aircraft first. Tile sets in
   PNG, and Yaapu's Google folders, now show too (Ethos gives no error for a missing file, so the
   first format tried was taken for every tile).
+- THR with INAV and Betaflight: they send no throttle in their telemetry, so the THR block now
+  shows your radio's throttle stick (0-100 %), as iNav LuaTelemetry does. It is your command, not
+  the motor: in INAV's automatic modes (RTH, cruise, auto launch, failsafe) the motor can differ.
+  With ArduPilot THR is still the real throttle output sent by the flight controller.
 - Flight logs: each flight that opens the flight summary (10 s or more armed) is saved as its own
   file in /scripts/omnideck/logs/, named like the radio's telemetry logs:
   <model>-<YYYY-MM-DD>-<HHMMSS>.txt (e.g. "Talon Pro-2026-11-10-144336.txt"). It holds the date

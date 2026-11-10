@@ -383,9 +383,11 @@ G.sportTelemetryPush = lambda *a: True
 
 native = {}
 units = {}       # EdgeTX unit numbers
+STICK = [-1024]   # the radio's throttle stick (getValue("thr"))
 def get_value(name):
     name = str(name)
     if name == 'tx-voltage': return 8.1
+    if name == 'thr': return STICK[0]
     v = native.get(name)
     if isinstance(v, dict): return L.table_from(v)
     return v
@@ -1074,6 +1076,18 @@ if not OTX:
     assert UIm.FS.last() is None and UIm.FS.live() is None, 'model switch clears the flight'
     G.model.getInfo = lambda *a: L.table_from({'name': 'Sim Plane'})
     print('test43 buttons + model switch OK')
+if not OTX:
+    # THR: ArduPilot's throttle output; INAV / Betaflight the radio's throttle stick
+    wd.page = 1
+    STICK[0] = 410
+    step(0.2, 6)
+    frame()
+    S2 = UIm.T.s
+    if NATIVE:
+        assert S2.thr == 70, 'stick throttle %s' % S2.thr
+    else:
+        assert S2.thr == st['thr'], 'ArduPilot throttle %s (sent %s)' % (S2.thr, st['thr'])
+    print('throttle OK (%s)' % ('stick' if NATIVE else 'ArduPilot output'))
 print('EdgeTX checks OK', tag)
 
 # OD_BENCH=1: Lua instructions to decode ArduPilot CRSF passthrough frames (the EdgeTX limit is

@@ -21,6 +21,10 @@ WHAT'S NEW IN 0.2.0-etx3_test43 (as Ethos test 43, except its faster map tile lo
   summary page closes, and the welcome is said again. The last position (shown as LAST on the map
   when the fix is lost) is kept only while the same model stays selected and the radio stays on;
   lastpos.txt is no longer used (you can delete it from /WIDGETS/OmniDeck/).
+- THR with INAV and Betaflight: they send no throttle in their telemetry, so the THR block now
+  shows your radio's throttle stick (0-100 %), as iNav LuaTelemetry does. It is your command, not
+  the motor: in INAV's automatic modes (RTH, cruise, auto launch, failsafe) the motor can differ.
+  With ArduPilot THR is still the real throttle output sent by the flight controller.
 - Flight logs: each flight that opens the flight summary (10 s or more armed) is saved as its own
   file in /WIDGETS/OmniDeck/logs/, named like the radio's telemetry logs:
   <model>-<YYYY-MM-DD>-<HHMMSS>.txt (the radio's clock). It holds the date and time, model, FC and

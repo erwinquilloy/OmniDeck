@@ -333,7 +333,10 @@ def telem_members():
 def mksrc(key):
     return L.eval("""function(k, unit) return { value = function(self) return _NV(k) end, unit = function(self) return unit end,
         name = function(self) return k end, stringValue = function(self) return tostring(_NV(k)) end } end""")(key, native_units.get(key))
+STICK = [-1024]   # the radio's throttle stick, -1024..1024 (Ethos source "Throttle")
+_stick_src = L.eval('function(get) return { value = function(self) return get() end, unit = function() return nil end, name = function() return "Throttle" end } end')(lambda: STICK[0])
 def get_source(q):
+    if isinstance(q, str) and q == 'Throttle': return _stick_src
     if not isinstance(q, str) and 'category' in q and int(q['category']) == 500 and 'member' in q:   # telemetry sensor by member
         names = telem_members(); m = int(q['member'])
         if m >= len(names): return None
@@ -1629,3 +1632,18 @@ vmod.setVoice('off')
 S_before.odMarker2 = 2
 assert getS().odMarker2 == 2, 'the state table is reset in place (the UI holds it)'
 print('model switch OK')
+
+# THR: ArduPilot's own throttle output (0x5001); INAV / Betaflight send none, so the radio's
+# throttle stick (label THR either way)
+widget.page = 1
+for stick, want in ((-1024, 0), (0, 50), (1024, 100), (410, 70)):
+    STICK[0] = stick
+    for _ in range(3): step(0.2)
+    cv = Canvas(); drawn.clear(); wt['paint'](widget)
+    txt = [t for t, c, x in drawn]
+    S = getS()
+    if NATIVE:
+        assert S.thr == want and 'THR' in txt and '%d%%' % want in txt, 'stick %d -> %s %s' % (stick, S.thr, txt[-12:])
+    else:
+        assert 'THR' in txt and S.thr == st['thr'], 'ArduPilot THR %s (sent %s)' % (S.thr, st['thr'])
+print('throttle OK (%s)' % ('stick' if NATIVE else 'ArduPilot output'))

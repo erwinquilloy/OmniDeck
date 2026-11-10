@@ -193,6 +193,18 @@ local function txVolts()
   return ok and v or nil
 end
 
+-- INAV and Betaflight send no throttle in their telemetry (CRSF or S.Port: checked in both
+-- crsf.c and smartport.c), so for them the THR block shows the radio's throttle stick, as iNav
+-- LuaTelemetry reads it (getFieldInfo("thr")). It is the pilot's command, not the motor: in INAV's
+-- automatic modes (RTH, cruise, launch, failsafe) the two differ. The label stays THR (user's
+-- choice; "THR STK" crowded out the efficiency note on the X18). ArduPilot sends its real throttle
+-- output in 0x5001 (VFR_HUD throttle = CTUN.ThO).
+local function stickThr()
+  local v = getValue("thr")   -- the throttle stick, -1024..1024 (EdgeTX follows the stick mode)
+  if type(v) ~= "number" then return nil end
+  return math.max(0, math.min(100, math.floor((v + 1024) / 20.48 + 0.5)))
+end
+
 local mid = {}   -- top bar middle layout, kept until its inputs change
 local barTxt = {}                          -- top bar right side: texts kept until their values change
 local barParts = { {}, {}, {}, {} }        -- and the (text, colour) slots, reused each update
@@ -1266,6 +1278,8 @@ local function wakeup(w)
   local s = T.s
   -- ArduPilot sends BATT_CAPACITY; INAV and Betaflight don't, so the pilot enters it
   if s.fc ~= "ArduPilot" then s.cap = w.batCap > 0 and w.batCap or nil end
+  -- INAV / Betaflight: THR is the throttle stick (they send no throttle; see stickThr)
+  if s.fc and s.fc ~= "ArduPilot" then s.thr = stickThr() end
   -- EdgeTX / OpenTX: voice, flight summary and alarms take turns, one per update, so no
   -- update carries all three (each still runs about 3 times a second). All three work from the
   -- time, not from how often they are called (the summary adds up distance from positions, a
