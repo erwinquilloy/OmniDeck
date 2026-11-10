@@ -8,7 +8,7 @@
 The zip holds scripts/omnideck/ as it goes on the radio's SD card:
     main.lua      the loader: picks x18/ (screens 480 px wide or less) or x20/
     x18/, x20/    the two separate copies of OmniDeck (targets/ethos/x18, x20)
-    tones/, logos/, missions/ (empty), audio/<pack>/ (voice packs, if given)
+    tones/, logos/, missions/ and logs/ (empty), audio/<pack>/ (voice packs, if given)
 plus INSTALL.txt at the top (targets/ethos/INSTALL.txt unless --install names another;
 its first line gets the version from x20/ui.lua). Voice packs are not in the repository (14 MB
 each): take them from a folder (--audio) or from an older tester zip (--audio-from).
@@ -72,6 +72,7 @@ def build(out_zip, audio=None, audio_from=None, install=None):
         entries.append(('INSTALL.txt', txt.encode('utf-8')))
     with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr(zipfile.ZipInfo(DST + 'missions/'), b'')
+        z.writestr(zipfile.ZipInfo(DST + 'logs/'), b'')       # flight logs (test43)
         for name, data in entries:
             z.writestr(name, data)
     with zipfile.ZipFile(out_zip) as z:

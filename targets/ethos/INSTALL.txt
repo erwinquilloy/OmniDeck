@@ -20,9 +20,11 @@ WHAT'S NEW IN TEST 43 (X20 family and X18-size screens)
   flight's summary, the mission and the alarms are cleared, and the summary page closes. At
   power-on everything starts empty anyway; only the last GPS position (lastpos.txt) is kept, so
   with no fix the map still opens where the model last was.
-- Flight log: each flight that opens the flight summary (10 s or more armed) is added to
-  /scripts/omnideck/flights.txt on the SD card: date and time, model, FC and link, the summary's
-  figures, home, the last position and the last 10 messages. Written once at each landing.
+- Flight logs: each flight that opens the flight summary (10 s or more armed) is saved as its own
+  file in /scripts/omnideck/logs/, named like the radio's telemetry logs:
+  <model>-<YYYY-MM-DD>-<HHMMSS>.txt (e.g. "Talon Pro-2026-11-10-144336.txt"). It holds the date
+  and time, model, FC and link, the summary's figures, home, the last position and the last 10
+  messages. Written once, at the disarm. Copy the whole package so the logs folder is there.
 - Betaflight airmode: AIR is shown and spoken "Air mode", ACRO stays ACRO (the test 42 fix; a copy
   of test 42 sent before it was added still showed ACRO for both).
 

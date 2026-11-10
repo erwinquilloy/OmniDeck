@@ -395,6 +395,9 @@ def st_read(k):
 store = {}
 played = []
 os.makedirs(os.path.join(SD, 'scripts', 'omnideck', 'audio', 'Aria'), exist_ok=True)
+# logs/ comes empty in the package (test43 flight logs, one file per flight)
+LOGD = os.path.join(SD, 'scripts', 'omnideck', 'logs')
+_sh_ = __import__('shutil'); _sh_.rmtree(LOGD, ignore_errors=True); os.makedirs(LOGD)
 # the main page logos (X18-size screens, test41), as the install zip puts them on the card
 import shutil as _sh
 _LOGOS = os.path.join(SRC, 'logos')
@@ -782,12 +785,13 @@ st['armed'] = False
 for _ in range(10): step(0.2)
 assert widget.page == 4, 'disarm opens the summary, page %s' % widget.page
 # test43: the flight is also added to flights.txt (one entry per summary)
-LOGF = os.path.join(SD, 'scripts', 'omnideck', 'flights.txt')
-def log_entries():
-    return open(LOGF, encoding='utf8').read().count('=== ') if os.path.isfile(LOGF) else 0
-log_txt = open(LOGF, encoding='utf8').read()
-last_entry = log_txt[log_txt.rfind('=== '):]
-assert SIM_MODEL in last_entry and 'Flight time' in last_entry and 'Last position' in last_entry, 'flight log entry %s' % last_entry
+# test43: the flight is saved as logs/<model>-<YYYY-MM-DD>-<HHMMSS>.txt, a file per flight
+import re as _re
+def log_entries(): return len(os.listdir(LOGD))
+_logs = sorted(os.listdir(LOGD))
+assert len(_logs) == 1 and _re.match(_re.escape(SIM_MODEL) + r'-\d{4}-\d\d-\d\d-\d{6}\.txt$', _logs[0]), 'log file name %s' % _logs
+last_entry = open(os.path.join(LOGD, _logs[0]), encoding='utf8').read()
+assert ('Model          ' + SIM_MODEL) in last_entry and 'Flight time' in last_entry and 'Last position' in last_entry, 'flight log %s' % last_entry
 log_n = log_entries()
 f = FS.last()
 print('summary: time %.0f dist %.0f home %s alt %s gspd %s as %s used %s volt %s curr %s lq %s rssi %s lost %s' % (
@@ -823,7 +827,7 @@ for _ in range(15): step(0.2)             # 3 s on the bench: too short to count
 st['armed'] = False
 for _ in range(10): step(0.2)
 assert widget.page == 1 and FS.last().time == first_time, 'short arm shows nothing'
-assert log_entries() == log_n, 'short arm adds nothing to flights.txt'
+assert log_entries() == log_n, 'short arm adds no log file'
 
 st['armed'] = True                        # link lost mid-flight, then found disarmed
 for _ in range(100): step(0.2)

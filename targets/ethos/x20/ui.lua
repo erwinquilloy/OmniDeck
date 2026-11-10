@@ -1022,16 +1022,52 @@ local function pageSummary(w, W, H, s, u)
 end
 
 -- ---------------------------------------------------------------- flight log
--- Each flight long enough for the summary is also added to flights.txt next to the scripts: the
--- summary's figures, home, the last position (to find the model) and the last messages. One write
--- per landing, from wakeup, like lastpos.txt: no SD writes from paint (see safe() above).
-local LOG_FILE = (OD_ROOT or "/scripts/omnideck/") .. "flights.txt"
+-- Each flight long enough for the summary is saved as a file of its own in logs/ next to the
+-- scripts, named as the radio names its telemetry logs: <model>-<YYYY-MM-DD>-<HHMMSS>.txt
+-- (<model>-001.txt and up with no clock). It holds the summary's figures, home, the last
+-- position (to find the model) and the last messages. One write per landing, from wakeup: no SD
+-- writes from paint (see safe() above). logs/ comes in the package; if it is missing, os.mkdir
+-- makes it where the radio has one, else the file goes next to the scripts.
+local LOG_ROOT = OD_ROOT or "/scripts/omnideck/"
+local LOG_DIR = LOG_ROOT .. "logs/"
 local LOG_MSGS = 10
+-- the radio's date and time as os.date("*t") gives it, or nil when there is no clock
+local function nowDate()
+  local ok, d = pcall(os.date, "*t")
+  if ok and type(d) == "table" and d.year then return d end
+  return nil
+end
+local function exists(path)
+  local ok, f = pcall(io.open, path, "r")
+  if ok and f then f:close() return true end
+  return false
+end
+-- a free file name in logs/: never overwrites an earlier flight
+local function logName(model, d)
+  local m = string.gsub(model or "", [=[[\/:*?"<>|]]=], "_")   -- characters a file name cannot hold
+  if m == "" then m = "model" end
+  if d then
+    local base = string.format("%s-%04d-%02d-%02d-%02d%02d%02d", m, d.year, d.month, d.day, d.hour, d.min, d.sec)
+    if not exists(LOG_DIR .. base .. ".txt") then return base .. ".txt" end
+    for i = 2, 99 do
+      local n = base .. "-" .. i .. ".txt"
+      if not exists(LOG_DIR .. n) then return n end
+    end
+    return base .. "-99.txt"
+  end
+  for i = 1, 999 do
+    local n = string.format("%s-%03d.txt", m, i)
+    if not exists(LOG_DIR .. n) then return n end
+  end
+  return m .. "-999.txt"
+end
 local function logFlight(w, s, f)
   if not f then return end
   local u = units(w)
-  local okD, when = pcall(os.date, "%Y-%m-%d %H:%M:%S")
-  if not okD or type(when) ~= "string" then when = "date unknown" end
+  local d = nowDate()
+  local when = d and string.format("%04d-%02d-%02d %02d:%02d:%02d", d.year, d.month, d.day, d.hour, d.min, d.sec)
+    or "date unknown"
+  local model = T.modelName() or "?"
   local function pos(la, lo)
     if la and lo then return string.format("%.6f, %.6f", la, lo) end
     return "--"
@@ -1039,8 +1075,11 @@ local function logFlight(w, s, f)
   local function num(fmt, v) return v and string.format(fmt, v) or "--" end
   local perKm = (f.used and f.dist > 100) and f.used / (f.dist / 1000) or nil
   local L = {
-    string.format("=== %s | %s | OmniDeck %s", when, T.modelName() or "?", VERSION),
-    string.format("FC %s, link %s", tostring(s.fc or "?"), tostring(s.link or "?")),
+    "OmniDeck " .. VERSION .. " flight log",
+    "Model          " .. model,
+    "Date           " .. when,
+    string.format("FC             %s, link %s", tostring(s.fc or "?"), tostring(s.link or "?")),
+    "",
     "Flight time    " .. fmtTime(f.time),
     "Distance       " .. u.distF(f.dist),
     "Max home       " .. u.distF(f.maxHome),
@@ -1054,24 +1093,26 @@ local function logFlight(w, s, f)
     "Max curr       " .. num("%.1fA", f.maxCurr),
     (f.minLq and "Min LQ         " or "Min RSSI       ") .. num("%d", (f.minLq or f.minRssi) and R(f.minLq or f.minRssi)),
     "Link lost      " .. (f.lost > 0 and fmtTime(f.lost) or "none"),
+    "",
     "Home           " .. pos(s.homeLat, s.homeLon),
     "Last position  " .. pos(s.lat or f.lat, s.lon or f.lon),
   }
   local m = s.msgs
   if m and #m > 0 then
+    L[#L + 1] = ""
     L[#L + 1] = "Messages (last " .. math.min(#m, LOG_MSGS) .. "):"
     for i = math.max(1, #m - LOG_MSGS + 1), #m do L[#L + 1] = "  " .. tostring(m[i].text) end
   end
-  local text = table.concat(L, "\n") .. "\n\n"
+  local text = table.concat(L, "\n") .. "\n"
   pcall(function()
-    local okA, fh = pcall(io.open, LOG_FILE, "a")
-    if okA and fh then fh:write(text) fh:close() return end
-    -- no append mode: the old file read back and written whole
-    local old = ""
-    local okR, fr = pcall(io.open, LOG_FILE, "r")
-    if okR and fr then old = readAll(fr) fr:close() if old ~= "" then old = old .. "\n" end end
-    local fw = io.open(LOG_FILE, "w")
-    if fw then fw:write(old .. text) fw:close() end
+    local name = logName(model, d)
+    local ok, fh = pcall(io.open, LOG_DIR .. name, "w")
+    if not (ok and fh) and os.mkdir then   -- no logs/ folder
+      pcall(os.mkdir, string.sub(LOG_DIR, 1, -2))
+      ok, fh = pcall(io.open, LOG_DIR .. name, "w")
+    end
+    if not (ok and fh) then ok, fh = pcall(io.open, LOG_ROOT .. name, "w") end
+    if ok and fh then fh:write(text) fh:close() end
   end)
 end
 
