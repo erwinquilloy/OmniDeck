@@ -258,7 +258,9 @@ def io_open(p, mode='r'):
     fp = sd_path(p)
     if str(mode) in ('w', 'a'):
         os.makedirs(os.path.dirname(fp), exist_ok=True)
-        h = len(files) + 1; files[h] = [fp, None]; open(fp, 'w').close(); return h
+        h = len(files) + 1; files[h] = [fp, None]
+        if str(mode) == 'w': open(fp, 'w').close()      # 'a' keeps what is there
+        return h
     if not os.path.isfile(fp): return None
     h = len(files) + 1; files[h] = [open(fp, 'rb').read(), 0]; return h
 def io_write(h, text):
@@ -269,6 +271,8 @@ def io_read(h, n):
     return chunk.decode('latin-1')
 def io_close(h): files.pop(h, None)
 G.io = L.table_from({'open': io_open, 'read': io_read, 'write': io_write, 'close': io_close})
+# the radio's clock (EdgeTX getDateTime; the flight log stamps entries with it)
+G.getDateTime = lambda *a: L.table_from({'year': 2026, 'mon': 11, 'day': 10, 'hour': 9, 'min': 5, 'sec': 7})
 def read_file(p):
     fp = sd_path(p)
     return open(fp, encoding='utf8').read() if os.path.isfile(fp) else None
@@ -730,6 +734,16 @@ st['armed'] = False
 step(0.2, 12)
 assert wd.page == 4, 'summary opens on disarm, page %s' % wd.page
 render('etx_summary_%s.png' % tag, 4)
+if not OTX:
+    # test43: the flight is saved as logs/<model>-<date>-<time>.txt (getDateTime); a second flight
+    # in the same second (the sim's clock stands still) gets -2, so nothing is overwritten
+    ld = sd_path('/WIDGETS/OmniDeck/logs')
+    names = sorted(os.listdir(ld)) if os.path.isdir(ld) else []
+    assert names and names[0] == 'Sim Plane-2026-11-10-090507.txt', 'log file %s' % names
+    lt = read_file('/WIDGETS/OmniDeck/logs/' + names[-1]) or ''
+    assert 'Model          Sim Plane' in lt and 'Date           2026-11-10 09:05:07' in lt and 'Flight time' in lt, 'flight log %s' % lt[:300]
+    assert all(n == names[0] or n == names[0][:-4] + '-%d.txt' % i for i, n in enumerate(names[1:], 2)), names
+    print('flight log OK')
 
 # touch and keys: a tap moves to the next page, ENTER too, the wheel zooms the map
 wd.page = 1
@@ -875,7 +889,7 @@ for _ in range(40):
     frame()
 assert not UIm.T.alive(), 'link lost when telemetry stops'
 posf = sd_path('/WIDGETS/OmniDeck/lastpos.txt')
-assert os.path.isfile(posf) and ',' in open(posf).read(), 'last position saved through the EdgeTX io adapter'
+assert not os.path.isfile(posf), 'test43: lastpos.txt is no longer written (memory only)'
 render('etx_lost_%s.png' % tag, 1)
 
 # a long mission (INAV allows 120 waypoints) loaded from a Mission Planner file, plus a
@@ -1047,6 +1061,19 @@ if not NATIVE and not SPORT:
     assert drops and all(d == 0 for d in drops[1:]), 'main page keeps up with 22 frames/s at 8 updates/s: %s' % drops
     assert abs(UIm.T.s.roll - st['roll']) < 1.5, 'horizon is current'
     REFRESH_S, FEED_S = old
+if not OTX:
+    # test43: map page + and - only (no PLANE / HOME button), square and at least 48 px
+    wd.page = 2
+    frame()
+    b = wd.btns
+    assert b['auto'] is None and b.plus.w == b.plus.h and b.plus.w >= 48 and b.minus.y > b.plus.y + b.plus.h, 'zoom buttons'
+    # model switch: a fresh start - no last flight, the summary is not kept
+    assert UIm.FS.last() is not None, 'a flight before the switch'
+    G.model.getInfo = lambda *a: L.table_from({'name': 'Other Plane'})
+    w3 = CALL('create', widget_def['create'], FULL, options)
+    assert UIm.FS.last() is None and UIm.FS.live() is None, 'model switch clears the flight'
+    G.model.getInfo = lambda *a: L.table_from({'name': 'Sim Plane'})
+    print('test43 buttons + model switch OK')
 print('EdgeTX checks OK', tag)
 
 # OD_BENCH=1: Lua instructions to decode ArduPilot CRSF passthrough frames (the EdgeTX limit is

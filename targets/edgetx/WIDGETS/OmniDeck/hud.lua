@@ -638,19 +638,24 @@ function H.draw(x, y, w, h, s, u)
   if yaw then
     headingTape(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, yaw, nil, font, hdgFont, ov ~= nil)
   end
-  -- home marker: a white H in a black box with a home-blue frame, on a row under the heading box,
-  -- at home's bearing on the compass strip's own scale (90 degrees across); only while home is in
-  -- that window. Drawn last and kept between the speed and altitude tapes, so nothing covers it.
+  -- home marker: a white H in a black box with a home-blue frame, on a row under the heading box.
+  -- Its scale is its own, not the compass strip's: the strip's full width is 180 degrees, so home
+  -- 90 degrees off the nose puts the H at that end. Further round it stays parked on the end on
+  -- home's side, and goes only with home right behind (within 5 degrees of the tail). test42 used
+  -- the strip's 90 degree window and showed the H only within 45 degrees of the nose: it came up
+  -- late, with the aircraft already turned for home (X18 2026-11-10). Drawn last and kept between
+  -- the speed and altitude tapes, so nothing covers it.
   if yaw and homeBrg then
     local tx, tw = x + tapeW + 4, w - 2 * tapeW - varW - 8
     local rel = (homeBrg - yaw + 540) % 360 - 180
-    if rel >= -45 and rel <= 45 then
+    if rel > -175 and rel < 175 then
+      rel = math.max(-90, math.min(90, rel))
       lcd.font(hdgFont)
       local _, hbh = lcd.getTextSize("000")
       lcd.font(boxFont)
       local cw, ch = lcd.getTextSize("H")
       local bw, bh = cw + 10, ch + 4
-      local hx = tx + tw / 2 + rel * tw / 90
+      local hx = tx + tw / 2 + rel * tw / 180
       hx = math.max(tx + bw / 2, math.min(tx + tw - bw / 2, hx))
       local by = y + headH + hbh + 2 + 4         -- under the heading box, which hangs below the strip
       lcd.color(C.box)

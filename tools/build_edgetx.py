@@ -33,6 +33,8 @@ def build(sd_root, audio=None, otx=False):
     shutil.copytree(os.path.join(src, 'SCRIPTS'), os.path.join(sd_root, 'SCRIPTS'), dirs_exist_ok=True)
     dst = os.path.join(sd_root, 'WIDGETS', 'OmniDeck')
     os.makedirs(os.path.join(dst, 'missions'), exist_ok=True)
+    if not otx:
+        os.makedirs(os.path.join(dst, 'logs'), exist_ok=True)   # flight logs (EdgeTX test43)
     if audio:
         for pack in sorted(os.listdir(audio)):
             p = os.path.join(audio, pack)
@@ -69,7 +71,7 @@ def build_zip(out_zip, otx=False, audio_from=None, audio=None):
                 dirs.sort()
                 rel = os.path.relpath(root, sd).replace(os.sep, '/')
                 if not files and not dirs:
-                    z.writestr(zipfile.ZipInfo(rel + '/'), b'')     # the empty missions folder
+                    z.writestr(zipfile.ZipInfo(rel + '/'), b'')     # the empty missions / logs folders
                 for f in sorted(files):
                     arc = (rel + '/' if rel != '.' else '') + f
                     z.write(os.path.join(root, f), arc)

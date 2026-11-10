@@ -15,7 +15,7 @@ local _ENV = OD_ENV or _ENV
     5 CHECK - sensor check; in the cycle only with "Sensor check page" On
 ]]
 
-local VERSION = "0.2.0-etx3_test42"
+local VERSION = "0.2.0-etx3_test43"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -162,9 +162,10 @@ local function fontFor(h)
 end
 
 -- ---------------------------------------------------------------- widget state
+local freshStart   -- defined with the alarms below
 local function create()
-  -- another model selected: clean telemetry state, and the welcome again (as Yaapu)
-  if T.checkModel() then AU.greetAgain() end
+  -- another model selected: a fresh start (test43), and the welcome again (as Yaapu)
+  if T.checkModel() then freshStart(nil) AU.greetAgain() end
   return {
     modelName = T.modelName(),   -- top bar; widgets are re-created when another model is picked
     page = 1, level = 4,
@@ -547,10 +548,11 @@ local function activeTileSet(w)
   return nil
 end
 
--- last good GPS position, kept on the SD card: with no fix (bench, start-up) the map centres
--- there, so the tile set still shows
-local POS_FILE = (OD_ROOT or "/scripts/omnideck/") .. "lastpos.txt"
-local lastPos, lastPosRead = nil, false
+-- last good GPS position, in memory only (test43): with no fix (GPS or link lost, the aircraft
+-- switched off after landing) the map centres there and shows it as LAST, so the tile set still
+-- shows. A model switch clears it (freshStart) and a radio restart starts without one: each boot
+-- is a fresh script. test42 and earlier kept it in lastpos.txt, which is no longer read or written.
+local lastPos = nil
 
 -- whole file, a line at a time: Ethos rejects read("a") ("invalid format", X18 tester
 -- 2026-11-03); "*l" is what b14ckyy's mapping widget uses on Ethos
@@ -564,36 +566,13 @@ local function readAll(f)
   return table.concat(lines, "\n")
 end
 
-local function readLastPos()
-  lastPosRead = true
-  local ok, f = pcall(io.open, POS_FILE, "r")
-  if not ok or not f then return end
-  local text = readAll(f)
-  f:close()
-  local la, lo = string.match(text, "([%-%d%.]+)%s*,%s*([%-%d%.]+)")
-  la, lo = tonumber(la), tonumber(lo)
-  if la and lo and (la ~= 0 or lo ~= 0) then lastPos = { la, lo } end
-end
-
--- Written once per landing (the first fix after a disarm), not every minute while there is a
--- fix: no SD writes while sitting on the bench or flying (see safe() below)
-local posArmed = false
-local function rememberPos(s, now)
-  if not (s.lat and (s.fix or 0) >= 3) then return end
-  lastPos = { s.lat, s.lon }
-  local landed = posArmed and s.armed == false
-  if s.armed ~= nil then posArmed = s.armed == true end
-  if not landed then return end
-  pcall(function()
-    local f = io.open(POS_FILE, "w")
-    if f then f:write(string.format("%.7f,%.7f\n", s.lat, s.lon)) f:close() end
-  end)
+local function rememberPos(s)
+  if s.lat and (s.fix or 0) >= 3 then lastPos = { s.lat, s.lon } end
 end
 
 local function mapCenter()
   local s = T.s
   if s.lat then return nil end
-  if not lastPosRead then readLastPos() end
   if lastPos then return lastPos end
   if s.homeLat then return { s.homeLat, s.homeLon } end
   return nil
@@ -1055,6 +1034,103 @@ local function pageSummary(w, W, H, s, u)
   end
 end
 
+-- ---------------------------------------------------------------- flight log
+-- Each flight long enough for the summary is saved as a file of its own in logs/ next to the
+-- scripts, named as the radio names its telemetry logs: <model>-<YYYY-MM-DD>-<HHMMSS>.txt
+-- (<model>-001.txt and up with no clock). It holds the summary's figures, home, the last
+-- position (to find the model) and the last messages. One write per landing, from wakeup: no SD
+-- writes from paint (see safe() above). logs/ comes in the package; if it is missing, os.mkdir
+-- makes it where the radio has one, else the file goes next to the scripts.
+local LOG_ROOT = OD_ROOT or "/scripts/omnideck/"
+local LOG_DIR = LOG_ROOT .. "logs/"
+local LOG_MSGS = 10
+-- the radio's date and time (EdgeTX getDateTime(); its Lua has no os.date), or nil
+local function nowDate()
+  local ok, d = pcall(getDateTime)
+  if ok and type(d) == "table" and d.year then
+    return { year = d.year, month = d.mon, day = d.day, hour = d.hour, min = d.min, sec = d.sec }
+  end
+  return nil
+end
+local function exists(path)
+  local ok, f = pcall(io.open, path, "r")
+  if ok and f then f:close() return true end
+  return false
+end
+-- a free file name in logs/: never overwrites an earlier flight
+local function logName(model, d)
+  local m = string.gsub(model or "", [=[[\/:*?"<>|]]=], "_")   -- characters a file name cannot hold
+  if m == "" then m = "model" end
+  if d then
+    local base = string.format("%s-%04d-%02d-%02d-%02d%02d%02d", m, d.year, d.month, d.day, d.hour, d.min, d.sec)
+    if not exists(LOG_DIR .. base .. ".txt") then return base .. ".txt" end
+    for i = 2, 99 do
+      local n = base .. "-" .. i .. ".txt"
+      if not exists(LOG_DIR .. n) then return n end
+    end
+    return base .. "-99.txt"
+  end
+  for i = 1, 999 do
+    local n = string.format("%s-%03d.txt", m, i)
+    if not exists(LOG_DIR .. n) then return n end
+  end
+  return m .. "-999.txt"
+end
+local function logFlight(w, s, f)
+  if not f then return end
+  local u = units(w)
+  local d = nowDate()
+  local when = d and string.format("%04d-%02d-%02d %02d:%02d:%02d", d.year, d.month, d.day, d.hour, d.min, d.sec)
+    or "date unknown"
+  local model = T.modelName() or "?"
+  local function pos(la, lo)
+    if la and lo then return string.format("%.6f, %.6f", la, lo) end
+    return "--"
+  end
+  local function num(fmt, v) return v and string.format(fmt, v) or "--" end
+  local perKm = (f.used and f.dist > 100) and f.used / (f.dist / 1000) or nil
+  local L = {
+    "OmniDeck " .. VERSION .. " flight log",
+    "Model          " .. model,
+    "Date           " .. when,
+    string.format("FC             %s, link %s", tostring(s.fc or "?"), tostring(s.link or "?")),
+    "",
+    "Flight time    " .. fmtTime(f.time),
+    "Distance       " .. u.distF(f.dist),
+    "Max home       " .. u.distF(f.maxHome),
+    "Max alt        " .. u.altF(f.maxAlt),
+    "Max GSPD       " .. u.spdF(f.maxGspd) .. " " .. u.spdLbl,
+    "Max AS         " .. u.spdF(f.maxAspd) .. " " .. u.spdLbl,
+    "Used           " .. num("%dmAh", f.used and R(f.used)),
+    "Efficiency     " .. u.effVal(perKm, f.voltN and f.voltSum / f.voltN) .. " " .. u.effLbl,
+    "Min volt       " .. num("%.2fV", f.minVolt),
+    "Avg volt       " .. num("%.2fV", f.voltN and f.voltSum / f.voltN),
+    "Max curr       " .. num("%.1fA", f.maxCurr),
+    (f.minLq and "Min LQ         " or "Min RSSI       ") .. num("%d", (f.minLq or f.minRssi) and R(f.minLq or f.minRssi)),
+    "Link lost      " .. (f.lost > 0 and fmtTime(f.lost) or "none"),
+    "",
+    "Home           " .. pos(s.homeLat, s.homeLon),
+    "Last position  " .. pos(s.lat or f.lat, s.lon or f.lon),
+  }
+  local m = s.msgs
+  if m and #m > 0 then
+    L[#L + 1] = ""
+    L[#L + 1] = "Messages (last " .. math.min(#m, LOG_MSGS) .. "):"
+    for i = math.max(1, #m - LOG_MSGS + 1), #m do L[#L + 1] = "  " .. tostring(m[i].text) end
+  end
+  local text = table.concat(L, "\n") .. "\n"
+  pcall(function()
+    local name = logName(model, d)
+    local ok, fh = pcall(io.open, LOG_DIR .. name, "w")
+    if not (ok and fh) and os.mkdir then   -- no logs/ folder
+      pcall(os.mkdir, string.sub(LOG_DIR, 1, -2))
+      ok, fh = pcall(io.open, LOG_DIR .. name, "w")
+    end
+    if not (ok and fh) then ok, fh = pcall(io.open, LOG_ROOT .. name, "w") end
+    if ok and fh then fh:write(text) fh:close() end
+  end)
+end
+
 -- ---------------------------------------------------------------- alarms
 -- Voltage, per cell, in two stages: low ("Low voltage", again every VOLT_REPEAT_S) and
 -- critical ("Critical voltage", every CRIT_REPEAT_S). Each needs VOLT_HOLD_S below its
@@ -1063,6 +1139,27 @@ end
 -- the landing approach from below don't count; again every ALT_REPEAT_S while low.
 local VOLT_HOLD_S, VOLT_REPEAT_S, CRIT_REPEAT_S, ALT_REPEAT_S = 5, 30, 15, 15
 local alarm = { lowSince = nil, critSince = nil, voltStage = 0, voltSaid = -100, altArmed = false, altSaid = -100, cells = 0 }
+
+-- A model switch is a fresh start (test43): T.checkModel() has cleared the telemetry, messages
+-- included; this clears the rest - the trail, the flight in progress and the last flight's
+-- summary, the flight time, the mission (learned waypoints, INAV download), the alarms and the
+-- last position - so nothing of the old model stays on any page. A power-on starts fresh anyway.
+freshStart = function(w)
+  MAP.reset()
+  FS.reset()
+  MI.clearLearned()
+  MI.setInav(nil)
+  MSPC.restart()
+  alarm.lowSince, alarm.critSince, alarm.voltStage, alarm.voltSaid = nil, nil, 0, -100
+  alarm.altArmed, alarm.altSaid, alarm.cells = false, -100, 0
+  flightClock.sec, flightClock.txt = nil, "--"
+  lastPos = nil
+  if w then
+    w.inavWpN, w.linkUpAt = nil, nil
+    if w.page == PAGE_SUMMARY then w.page = w.homePage or 1 end
+    lcd.invalidate()
+  end
+end
 
 local function checkAlarms(w, s, now)
   -- cell count: the setting, else the most cells the highest voltage seen could be (4.35 V max)
@@ -1161,7 +1258,7 @@ local function wakeup(w)
   -- 2 s on an X18), so the old model's state was kept. A switch is a fresh start, welcome included.
   if not OD_LITE and os.clock() - (w.modelAt or -10) >= 1 then
     w.modelAt = os.clock()
-    if T.checkModel() then AU.greetAgain() end
+    if T.checkModel() then freshStart(w) AU.greetAgain() end
     local n = T.modelName()
     if n ~= w.modelName then w.modelName = n end
   end
@@ -1183,6 +1280,7 @@ local function wakeup(w)
   local flight = nil
   if runAU then AU.update(s, T.alive(), nowc) end
   if runFS then flight = FS.update(s, T.alive(), nowc, T.distBrg) end
+  if flight == "done" then logFlight(w, s, FS.last()) end
   if flight == "armed" and w.page == PAGE_SUMMARY then
     -- arming always brings the main page back (an EdgeTX instance with a fixed Page: that page)
     w.page = w.homePage or 1
@@ -1253,7 +1351,7 @@ local function wakeup(w)
     w.linkUpAt = nil
   end
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
-  rememberPos(s, nowc)
+  rememberPos(s)
   if runAL then checkAlarms(w, s, nowc) end
   -- no folder listing (OpenTX): look for a tile set by its files at the map's position
   if NO_LIST and (w.tileSet == nil or w.tileSet == "") then
@@ -1345,7 +1443,6 @@ local function event(w, category, value, x, y)
     if w.page == 2 and w.btns then
       if inBox(w.btns.plus, x, y) then zoomStep(w, -1) lcd.invalidate() return true end
       if inBox(w.btns.minus, x, y) then zoomStep(w, 1) lcd.invalidate() return true end
-      if inBox(w.btns.auto, x, y) then w.zoomMode = (w.zoomMode == 1) and 0 or 1 lcd.invalidate() return true end
     end
     if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
       w.msgScroll = 0 lcd.invalidate() return true
