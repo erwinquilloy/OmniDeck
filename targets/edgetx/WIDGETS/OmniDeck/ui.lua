@@ -15,7 +15,7 @@ local _ENV = OD_ENV or _ENV
     5 CHECK - sensor check; in the cycle only with "Sensor check page" On
 ]]
 
-local VERSION = "0.2.0-etx3_test43"
+local VERSION = "0.3b"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")

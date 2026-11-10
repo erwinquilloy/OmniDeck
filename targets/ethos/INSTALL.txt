@@ -1,4 +1,4 @@
-OmniDeck 0.2.0-test43 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 0.3b for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
@@ -6,7 +6,7 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
-WHAT'S NEW IN TEST 43 (X20 family and X18-size screens)
+WHAT'S NEW IN 0.3b - public beta (test 43; X20 family and X18-size screens)
 - HUD home marker (the H under the heading box): it now uses the whole width of the heading strip
   for +-90 degrees, so it shows up as soon as home is anywhere ahead, not only within 45 degrees
   of the nose. With home further round than 90 degrees it stays parked at the end of the strip on
