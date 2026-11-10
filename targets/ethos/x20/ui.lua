@@ -43,6 +43,7 @@ local AU = need("audio.lua")
 MI.init(T)
 
 local PAGE_SUMMARY = 4
+local SUM_SHOW_S = 15    -- the flight summary opened by the disarm closes to main after this
 local PAGE_CHECK = 5     -- sensor check: what each telemetry lookup returns on this radio
 local ORIENT = { [0] = "north", [1] = "heading" }
 
@@ -986,14 +987,22 @@ local function pageSummary(w, W, H, s, u)
   local fBig, fMid, fSmall = fontFor(H)
   local barH = R(H * 0.09)
   topBar(w, 0, 0, W, barH, s, u, H)
-  local f = FS.last()
-  if not f then return end
-  f.shown = true
+  -- the flight in progress (the stats page is in the cycle with "Flight stats page" On, so it can
+  -- be looked at in flight), else the last one; nothing yet before the first flight
+  local f = FS.live()
+  if not f then
+    lcd.font(fMid)
+    lcd.color(COL.dim)
+    lcd.drawText(I(W / 2), I(H / 2), "No flight yet", CENTERED)
+    return
+  end
+  local live = f ~= FS.last()
+  if not live then f.shown = true end
   local dist, alt, spd = u.distF, u.altF, u.spdF
   -- average for the whole flight, unlike the live figure in the THR block
   local perKm = (f.used and f.dist > 100) and f.used / (f.dist / 1000) or nil
   local items = {
-    { "FLIGHT TIME", fmtTime(f.time) },
+    { live and "FLIGHT TIME (NOW)" or "FLIGHT TIME", fmtTime(live and (FS.timer(os.clock()) or 0) or f.time) },
     { "DISTANCE", dist(f.dist) },
     { "MAX HOME", dist(f.maxHome) },
     { "MAX ALT", alt(f.maxAlt) },
@@ -1276,8 +1285,18 @@ local function wakeup(w)
   -- screen was up at disarm) and the moment the flight ended was missed.
   local done = FS.last()
   if done and not done.shown and w.sumAuto == 1 and s.armed ~= true and w.page ~= PAGE_SUMMARY then
-    w.pageBefore = w.page
     w.page = PAGE_SUMMARY
+    w.sumOpenedAt = nowc
+    lcd.invalidate()
+  end
+  -- the summary opened by the disarm goes back to the main page after SUM_SHOW_S, whether or not
+  -- the stats page is in the cycle. Moving to another page first cancels it; the stats page
+  -- opened by hand (Flight stats page On) stays.
+  if w.page ~= PAGE_SUMMARY then
+    w.sumOpenedAt = nil
+  elseif w.sumOpenedAt and nowc - w.sumOpenedAt >= SUM_SHOW_S then
+    w.sumOpenedAt = nil
+    w.page = w.homePage or 1
     lcd.invalidate()
   end
   zoomFromSource(w)
@@ -1368,7 +1387,7 @@ local function pageOn(w, p)
     if m == 1 then return true elseif m == 2 then return false end
     return T.s.fc ~= "INAV/BF"
   end
-  if p == PAGE_SUMMARY then return w.statsPage == 1 and FS.last() ~= nil end
+  if p == PAGE_SUMMARY then return w.statsPage == 1 end   -- On: always, in flight too (live)
   if p == PAGE_CHECK then return w.checkPage == 1 end
   return true
 end

@@ -1647,3 +1647,54 @@ for stick, want in ((-1024, 0), (0, 50), (1024, 100), (410, 70)):
     else:
         assert 'THR' in txt and S.thr == st['thr'], 'ArduPilot THR %s (sent %s)' % (S.thr, st['thr'])
 print('throttle OK (%s)' % ('stick' if NATIVE else 'ArduPilot output'))
+
+# Flight stats page (user 2026-11-10): On = always in the page cycle, in flight too (the flight in
+# progress); Off = never. Either way the disarm opens the summary, and it goes back to the main page
+# after SUM_SHOW_S (15 s); a stats page opened by hand stays.
+def page_txt(page):
+    widget.page = page
+    global cv
+    cv = Canvas(); drawn.clear(); wt['paint'](widget)
+    return [t for t, c, x in drawn]
+MODEL_NAME[0] = 'Stats Plane'
+for _ in range(3): wake_only(0.4)               # a fresh model: no flight yet
+widget.statsPage, widget.sumAuto = 1, 1
+st['armed'] = False
+for _ in range(5): step(0.2)
+assert 'No flight yet' in page_txt(4), 'stats page before any flight'
+widget.page = 3 if not NATIVE else 2
+for _ in range(4):
+    if widget.page == 4: break
+    wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+assert widget.page == 4, 'On: stats page in the cycle before the first flight (page %s)' % widget.page
+st['armed'] = True
+for _ in range(100): step(0.2)                  # 20 s armed
+txt = page_txt(4)
+assert 'FLIGHT TIME (NOW)' in txt, 'in flight the stats page shows the flight in progress %s' % txt[:12]
+for _ in range(100): step(0.2)                  # opened by hand: stays, also past 15 s
+assert widget.page == 4, 'stats page opened by hand stays in flight (page %s)' % widget.page
+for statsPage in (1, 0):
+    widget.statsPage = statsPage
+    widget.page = 1
+    st['armed'] = True
+    for _ in range(60): step(0.2)
+    st['armed'] = False
+    for _ in range(10): step(0.2)
+    assert widget.page == 4, 'statsPage %d: disarm opens the summary' % statsPage
+    assert 'FLIGHT TIME' in page_txt(4)
+    for _ in range(40): step(0.2)               # 8 s more (about 10 s open): still there
+    assert widget.page == 4, 'statsPage %d: summary still open before 15 s' % statsPage
+    for _ in range(40): step(0.2)               # past 15 s (opened ~1 s into the disarm steps): back to main
+    assert widget.page == 1, 'statsPage %d: summary closed to main after 15 s (page %s)' % (statsPage, widget.page)
+# moving away first cancels the timer
+st['armed'] = True
+for _ in range(60): step(0.2)
+st['armed'] = False
+for _ in range(10): step(0.2)
+assert widget.page == 4
+page_txt(4)                                     # drawn (on the radio every update): seen
+widget.page = 2
+for _ in range(100): step(0.2)
+assert widget.page == 2, 'left the summary by hand: no jump back to main'
+widget.statsPage = 0
+print('flight stats page OK')

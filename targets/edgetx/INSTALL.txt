@@ -21,6 +21,12 @@ WHAT'S NEW IN 0.3b - public beta (etx3_test43: as Ethos 0.3b, except its faster 
   summary page closes, and the welcome is said again. The last position (shown as LAST on the map
   when the fix is lost) is kept only while the same model stays selected and the radio stays on;
   lastpos.txt is no longer used (you can delete it from /WIDGETS/OmniDeck/).
+- Flight stats page: with "Flight stats page" On it is always in the page cycle, also in flight,
+  where it shows the flight in progress (FLIGHT TIME (NOW), distance and maximums so far); before
+  the first flight it says "No flight yet". Off: never in the cycle. Either way the flight
+  summary still opens on disarm ("Flight summary on disarm") and now goes back to the main page
+  by itself after 15 s; tap or turn to another page first to leave it sooner. A stats page you
+  open yourself stays.
 - THR with INAV and Betaflight: they send no throttle in their telemetry, so the THR block now
   shows your radio's throttle stick (0-100 %), as iNav LuaTelemetry does. It is your command, not
   the motor: in INAV's automatic modes (RTH, cruise, auto launch, failsafe) the motor can differ.
