@@ -813,11 +813,11 @@ if not NATIVE and not SPORT:
     native.update({'FM': 'QHOV', 'RQly': 96, '1RSS': -72})
     if 'FM' not in sensor_list: sensor_list.append('FM')
     crsf_q.clear()
-    for _ in range(80):                        # 8 s (the ArduPilot-over-CRSF window is 7 s): passthrough silent, RSSI still live
+    for _ in range(60):                        # 6 s: passthrough silent, RSSI still live
         sim_time[0] += 0.1
         frame()
     assert UIm.T.s.armed is False, 'ArduPilot FM text without "*" must not read as armed'
-    assert not UIm.T.alive(), 'no passthrough for 8 s: ArduPilot telemetry is lost'
+    assert not UIm.T.alive(), 'no passthrough for 6 s: ArduPilot telemetry is lost'
     assert wd.page == 1, 'no flight summary on a pulled battery, page %s' % wd.page
     print('AP battery pull OK')
     native.pop('FM', None)
@@ -871,6 +871,22 @@ if not NATIVE and not SPORT:
         native.update({'GSpd': gs_kmh, 'Sats': sats, 'RxBt': volt, 'Curr': curr, 'Capa': mah,
                        'GPS': {'lat': lat, 'lon': lon}})
     assert UIm.T.s.homeLat is not None, 'home known before the 50 Hz test'
+    def link_msg(t):
+        crsf_q.append((0x80, [0xF1, 6] + list(t.encode()) + [0]))
+    # ELRS: ArduPilot keeps it on its fast schedule, so nothing here may change (3 s windows)
+    link_msg('ELRS: Link rate 500Hz, Telemetry rate 62Hz')
+    step(0.3)
+    burst[0] = False
+    crsf_sensors(72.0, 11, 15.1, 7.5, 3333, st['lat'], st['lon'])
+    step(0.2, 11)
+    assert UIm.T.s.sats == min(st['sats'], 15), 'ELRS: no fill from CRSF sensors (sats %s)' % UIm.T.s.sats
+    step(0.2, 6)                                   # 3.4 s without passthrough
+    assert not UIm.T.alive(), 'ELRS: lost after 3 s as before'
+    burst[0] = True
+    step(0.2, 5)
+    link_msg('CRSFv3: Link rate 50Hz, Telemetry rate 50Hz')
+    step(0.3)
+    assert UIm.T.s.crsfSlow == True, 'CRSFv3 50 Hz message read'
     crsf_sensors(999.0, 3, 99.0, 99.0, 9999, st['lat'], st['lon'])
     step(0.2, 10)                                  # 150 Hz: passthrough wins
     S = UIm.T.s
@@ -889,10 +905,15 @@ if not NATIVE and not SPORT:
     assert S.sats == 11 and abs(S.volt - 15.1) < 1e-6 and abs(S.curr - 7.5) < 1e-6 and S.mah == 3333,         '50 Hz: sats/battery from CRSF (%s %s %s %s)' % (S.sats, S.volt, S.curr, S.mah)
     assert abs(S.homeDist - exp_d) < 1, '50 Hz: home distance from the CRSF position %s vs %s' % (S.homeDist, exp_d)
     assert UIm.T.alive(), '50 Hz: link still alive 2.2 s after a burst'
+    step(0.2, 6)                                   # 3.4 s: past the old 3 s window, no lost-link flash
+    assert UIm.T.alive(), '50 Hz: still alive 3.4 s after a burst'
     burst[0] = True
     step(0.3)                                      # the next burst takes over again
     S = UIm.T.s
     assert S.sats == min(st['sats'], 15) and abs(S.volt - st['volt']) < 0.2, 'burst: passthrough back in charge'
+    link_msg('CRSFv3: Link rate 150Hz, Telemetry rate 150Hz')
+    step(0.3)
+    assert not UIm.T.s.crsfSlow, '150 Hz message: slow-link handling off'
     packets = real_packets2
     for k in ('GSpd', 'Sats', 'RxBt', 'Curr', 'Capa', 'GPS'): native.pop(k, None)
     for k in added: sensor_list.remove(k)
@@ -928,8 +949,7 @@ if NATIVE and not SPORT:
 # telemetry stops: EdgeTX keeps old values, OmniDeck must see the link as lost
 streaming[0] = False
 crsf_q.clear(); sport_q.clear()
-# 4 s; ArduPilot over CRSF is given 7 s (3 s passthrough frames in Crossfire's 50 Hz mode), so 8 s there
-for _ in range(40 if (NATIVE or SPORT) else 80):
+for _ in range(40):
     sim_time[0] += 0.1
     frame()
 assert not UIm.T.alive(), 'link lost when telemetry stops'
