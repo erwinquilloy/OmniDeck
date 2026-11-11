@@ -813,11 +813,11 @@ if not NATIVE and not SPORT:
     native.update({'FM': 'QHOV', 'RQly': 96, '1RSS': -72})
     if 'FM' not in sensor_list: sensor_list.append('FM')
     crsf_q.clear()
-    for _ in range(60):                        # 6 s: passthrough silent, RSSI still live
+    for _ in range(80):                        # 8 s (the ArduPilot-over-CRSF window is 7 s): passthrough silent, RSSI still live
         sim_time[0] += 0.1
         frame()
     assert UIm.T.s.armed is False, 'ArduPilot FM text without "*" must not read as armed'
-    assert not UIm.T.alive(), 'no passthrough for 6 s: ArduPilot telemetry is lost'
+    assert not UIm.T.alive(), 'no passthrough for 8 s: ArduPilot telemetry is lost'
     assert wd.page == 1, 'no flight summary on a pulled battery, page %s' % wd.page
     print('AP battery pull OK')
     native.pop('FM', None)
@@ -886,7 +886,8 @@ if NATIVE and not SPORT:
 # telemetry stops: EdgeTX keeps old values, OmniDeck must see the link as lost
 streaming[0] = False
 crsf_q.clear(); sport_q.clear()
-for _ in range(40):
+# 4 s; ArduPilot over CRSF is given 7 s (3 s passthrough frames in Crossfire's 50 Hz mode), so 8 s there
+for _ in range(40 if (NATIVE or SPORT) else 80):
     sim_time[0] += 0.1
     frame()
 assert not UIm.T.alive(), 'link lost when telemetry stops'

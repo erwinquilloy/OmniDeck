@@ -48,6 +48,16 @@ local s = fresh()
 T.s = s
 
 local SPEED_STALE_S = 5
+-- ArduPilot over TBS Crossfire in its 50 Hz RF mode (forced, or Dynamic at range) sends passthrough
+-- as one packed frame every 3 s (AP_CRSF_Telem's low-rate table: PASSTHROUGH 500, 3000). The 3 s
+-- windows below then ran out just before each frame: the NO TELEMETRY frame flashed, the native
+-- read cut in (and restarted the ready-to-arm wait), and a speed sent on alternate frames went
+-- blank (X18 + Crossfire + ArduPilot, 2026-11-11). Once ArduPilot has been heard over CRSF the
+-- windows are wider. A real loss still shows at once where the radio says so (Ethos's telemetry
+-- flag, or link quality 0), see T.alive.
+local SLOW_PT_S, SPEED_STALE_SLOW_S = 7, 10
+local function slowPt() return s.fc == "ArduPilot" and s.link == "CRSF" end
+local function ptWindow() return slowPt() and SLOW_PT_S or 3 end
 -- ArduPilot repeats its PreArm failures every 30 s and has no "ready" flag in telemetry,
 -- so ready means disarmed for this long with no PreArm message heard
 local PREARM_HOLD_S = 40   -- repeats every 30 s, plus slack for delays on the way
@@ -1002,7 +1012,7 @@ function T.sensorCheck(kind)
   for i = 0, 1 do mod[#mod + 1] = moduleOn(i) and "on" or "off" end
   local ta = telemActive()
   rows.header = string.format("link %s  int %s ext %s  pt %s  fc %s  tlm %s", tostring(kind), mod[1], mod[2],
-    (now() - s.lastPt <= 3) and "yes" or "no", tostring(s.fc), ta == nil and "n/a" or (ta and "on" or "LOST"))
+    (now() - s.lastPt <= ptWindow()) and "yes" or "no", tostring(s.fc), ta == nil and "n/a" or (ta and "on" or "LOST"))
   if not kind then return rows end
   for _, key in ipairs(CHECK_KEYS) do
     local src = findSource(key, kind)
@@ -1109,7 +1119,7 @@ function T.wakeup(linkMode)
   if linkMode ~= LINK_CRSF then
     for _ = 1, OD_MAX_SPORT or 10 do if not sportPop() then break end got = true end
   end
-  if now() - s.lastPt > 3 then
+  if now() - s.lastPt > ptWindow() then
     -- no passthrough: native sensors of the link in use. GPS and most other sensors
     -- exist on either link, so the link is told apart by a CRSF-only sensor.
     local kind = (linkMode == LINK_CRSF and "crsf") or (linkMode == LINK_SPORT and "sport") or T.detectLink()
@@ -1160,8 +1170,9 @@ function T.wakeup(linkMode)
     else s.armReady, s.armNote = nil, nil end
     -- 0x5005 carries only one of the two if FRSKY_OPTIONS bit 0 is off: drop the one that stopped
     -- rather than show it frozen. This branch only runs while packets arrive, so a lost link keeps both.
-    if s.aspdAt and now() - s.aspdAt > SPEED_STALE_S then s.aspd = nil end
-    if s.gspdAt and now() - s.gspdAt > SPEED_STALE_S then s.gspd = nil end
+    local stale = slowPt() and SPEED_STALE_SLOW_S or SPEED_STALE_S
+    if s.aspdAt and now() - s.aspdAt > stale then s.aspd = nil end
+    if s.gspdAt and now() - s.gspdAt > stale then s.gspd = nil end
     if s.lat and s.homeLat and s.homeDist == nil then s.homeDist, s.homeBrg = T.distBrg(s.lat, s.lon, s.homeLat, s.homeLon) end
   end
   return got
@@ -1183,6 +1194,13 @@ function T.rawCheck()
     hex(rawStatus), rawStatus and tostring(ext(rawStatus[1], rawStatus[2], 0, 5) - 1) or "--")
 end
 
-function T.alive() return now() - s.lastRx < 3 and telemActive() ~= false end
+-- ArduPilot over CRSF (see SLOW_PT_S): past the first 3 s the link still counts while the radio
+-- does not report link quality 0, up to the wider window
+function T.alive()
+  if telemActive() == false then return false end
+  local age = now() - s.lastRx
+  if age < 3 then return true end
+  return slowPt() and age < SLOW_PT_S and not (s.lq ~= nil and s.lq <= 0)
+end
 
 return T

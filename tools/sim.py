@@ -999,7 +999,8 @@ else:
     gs = [t for t, c, x in ops if c == GS_COL]
     assert gs == [str(round(S.gspd * 3.6)), 'GS'] and float(gs[0]) != round(S.aspd * 3.6), 'GS box %s' % gs
     st['nogs'] = True
-    for _ in range(30): step(0.2)
+    # ArduPilot over CRSF keeps a speed for 10 s (3 s passthrough frames in Crossfire's 50 Hz mode), S.Port for 5 s
+    for _ in range(30 if SPORT else 55): step(0.2)
     ops = main_drawn()
     assert S.gspd is None and S.aspd is not None and not any(c == GS_COL for t, c, x in ops), 'stale GS must go'
     st['nogs'] = False
