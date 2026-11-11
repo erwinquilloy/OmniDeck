@@ -1132,6 +1132,28 @@ if not OTX:
     frame()
     b = wd.btns
     assert b['auto'] is None and b.plus.w == b.plus.h and b.plus.w >= 48 and b.minus.y > b.plus.y + b.plus.h, 'zoom buttons'
+    # near misses: a quarter of the button around it, the gap split in the middle, the press point counts
+    keep_ts = wd.tileSet
+    wd.tileSet = ''                                # vector map: + and - step w.level (with tiles they step the tile zoom)
+    pad = b.plus.w // 4
+    gap_mid = (b.plus.y + b.plus.h + b.minus.y) / 2
+    cxb = b.plus.x + b.plus.w // 2
+    for (tx, ty, d, what) in ((cxb, b.plus.y - pad + 2, -1, 'above +'), (cxb, gap_mid - 1, -1, 'gap, upper half'),
+                              (cxb, gap_mid + 1, 1, 'gap, lower half'), (cxb, b.minus.y + b.minus.h + pad - 2, 1, 'below -')):
+        wd.level = 5
+        frame(G.EVT_TOUCH_FIRST, {'x': tx, 'y': ty})
+        frame(G.EVT_TOUCH_BREAK, {'x': tx, 'y': ty})
+        assert wd.page == 2 and wd.level == 5 + d, 'near miss %s: page %s level %s' % (what, wd.page, wd.level)
+    wd.level = 5
+    frame(G.EVT_TOUCH_FIRST, {'x': cxb, 'y': b.plus.y + 5})
+    frame(G.EVT_TOUCH_BREAK, {'x': b.plus.x - pad - 8, 'y': b.plus.y + 5})
+    assert wd.page == 2 and wd.level == 4, 'press on +, lift outside: %s %s' % (wd.page, wd.level)
+    frame(G.EVT_TOUCH_FIRST, {'x': 40, 'y': 100})
+    frame(G.EVT_TOUCH_BREAK, {'x': 40, 'y': 100})
+    assert wd.page != 2, 'a tap away from the buttons still turns the page'
+    wd.page = 2
+    wd.tileSet = keep_ts
+    frame()
     # model switch: a fresh start - no last flight, the summary is not kept
     assert UIm.FS.last() is not None, 'a flight before the switch'
     G.model.getInfo = lambda *a: L.table_from({'name': 'Other Plane'})

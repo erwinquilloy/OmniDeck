@@ -1453,6 +1453,21 @@ end
 
 local TAP_PX = 12   -- a touch that moves less than this is a tap, more is a drag
 
+-- Map +/-: which button a point belongs to (-1 zoom in, 1 zoom out, nil none). The squares are
+-- drawn about 8.5 mm wide (X18 49 px, X20 73 px), less than a fingertip, and a near miss counted
+-- as a tap on the map, which turns the page (tester, X18, 2026-11-11). Each button now also takes
+-- a quarter of its size around it, and the gap between the two is split at its middle.
+local function zoomBtnAt(b, x, y)
+  if not (b and b.plus and b.minus and x and y) then return nil end
+  local p, m = b.plus, b.minus
+  local pad = math.floor(p.w / 4)
+  if x < p.x - pad or x > p.x + p.w + pad then return nil end
+  local mid = (p.y + p.h + m.y) / 2
+  if y >= p.y - pad and y < mid then return -1 end
+  if y >= mid and y <= m.y + m.h + pad then return 1 end
+  return nil
+end
+
 local function event(w, category, value, x, y)
   if category == EVT_TOUCH then
     if value == TOUCH_START then
@@ -1471,11 +1486,13 @@ local function event(w, category, value, x, y)
     end
     if value ~= TOUCH_END then return true end
     local dragged = w.dragged or (w.touchY and math.abs(y - w.touchY) > TAP_PX)
-    w.touchY, w.dragged = nil, false
+    local sx, sy = w.touchX, w.touchY
+    w.touchX, w.touchY, w.dragged = nil, nil, false
     if dragged then return true end
     if w.page == 2 and w.btns then
-      if inBox(w.btns.plus, x, y) then zoomStep(w, -1) lcd.invalidate() return true end
-      if inBox(w.btns.minus, x, y) then zoomStep(w, 1) lcd.invalidate() return true end
+      -- where the finger pressed counts first, then where it lifted
+      local d = zoomBtnAt(w.btns, sx, sy) or zoomBtnAt(w.btns, x, y)
+      if d then zoomStep(w, d) lcd.invalidate() return true end
     end
     if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
       w.msgScroll = 0 lcd.invalidate() return true
