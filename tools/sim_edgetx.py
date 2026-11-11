@@ -891,6 +891,14 @@ if not NATIVE and not SPORT:
     step(0.2, 10)                                  # 150 Hz: passthrough wins
     S = UIm.T.s
     assert abs(S.gspd - st['gs']) < 1.0 and S.sats == min(st['sats'], 15) and abs(S.volt - st['volt']) < 0.2,         '150 Hz: passthrough values kept (gs %s sats %s volt %s)' % (S.gspd, S.sats, S.volt)
+    # a 50 Hz message on a link that never pauses (an ELRS link named before the receiver answered):
+    # still off - it also takes one real gap that ends with a burst
+    assert not S.crsfGap, 'no gap seen yet on a fast link'
+    burst[0] = False
+    step(0.2, 10)                                  # 2 s gap ...
+    burst[0] = True
+    step(0.3)                                      # ... ended by a burst: a slow link
+    assert UIm.T.s.crsfGap == True, 'gap seen'
     step(0.3)                                      # one more burst, then CRSF frames only
     burst[0] = False
     lat1, lon1 = project(st['lat'], st['lon'], 400, 200)
