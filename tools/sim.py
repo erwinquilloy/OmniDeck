@@ -1001,8 +1001,7 @@ else:
     gs = [t for t, c, x in ops if c == GS_COL]
     assert gs == [str(round(S.gspd * 3.6)), 'GS'] and float(gs[0]) != round(S.aspd * 3.6), 'GS box %s' % gs
     st['nogs'] = True
-    # ArduPilot over CRSF keeps a speed for 10 s (3 s passthrough frames in Crossfire's 50 Hz mode), S.Port for 5 s
-    for _ in range(30 if SPORT else 55): step(0.2)
+    for _ in range(30): step(0.2)
     ops = main_drawn()
     assert S.gspd is None and S.aspd is not None and not any(c == GS_COL for t, c, x in ops), 'stale GS must go'
     st['nogs'] = False
@@ -1224,6 +1223,21 @@ if not NATIVE and not SPORT:
         sim_time[0] += 0.2
         feed([(a, v) for a, v in packets(st) if a != 0x0800] if burst else [])
         for _ in range(4): wt['wakeup'](widget)
+    def link_msg(t):
+        crsf_q.append([0xF1, 6] + list(t.encode()) + [0])
+    # ELRS: ArduPilot keeps it on its fast schedule, so nothing here may change (3 s windows)
+    link_msg('ELRS: Link rate 500Hz, Telemetry rate 62Hz')
+    tick(True)
+    crsf_sensors(72.0, 11, 15.1, 7.5, 3333, st['lat'], st['lon'])
+    for _ in range(8): tick(False)
+    assert S2.sats == min(st['sats'], 15), 'ELRS: no fill from CRSF sensors (sats %s)' % S2.sats
+    for _ in range(9): tick(False)            # 3.4 s without passthrough
+    assert not Tm.alive(), 'ELRS: lost after 3 s as before'
+    for _ in range(5): tick(True)
+    # TBS Crossfire at 50 Hz: ArduPilot's own message switches the slow-link handling on
+    link_msg('CRSFv3: Link rate 50Hz, Telemetry rate 50Hz')
+    tick(True)
+    assert S2.crsfSlow == True, 'CRSFv3 50 Hz message read'
     # 150 Hz: passthrough every 0.2 s, CRSF sensors deliberately different: passthrough wins
     crsf_sensors(999.0, 3, 99.0, 99.0, 9999, st['lat'], st['lon'])
     for _ in range(10): tick(True)
@@ -1240,11 +1254,16 @@ if not NATIVE and not SPORT:
     assert S2.sats == 11 and abs(S2.volt - 15.1) < 1e-6 and abs(S2.curr - 7.5) < 1e-6 and S2.mah == 3333,         '50 Hz: sats/battery from CRSF (%s %s %s %s)' % (S2.sats, S2.volt, S2.curr, S2.mah)
     assert abs(S2.homeDist - exp_d) < 1, '50 Hz: home distance from the CRSF position %s vs %s' % (S2.homeDist, exp_d)
     assert Tm.alive(), '50 Hz: link still alive 1.6 s after a burst'
+    for _ in range(9): tick(False)            # 3.4 s: past the old 3 s window, no lost-link flash
+    assert Tm.alive(), '50 Hz: still alive 3.4 s after a burst'
     crsf_sensors(90.0, 12, 15.0, 7.0, 3400, lat1, lon1)
-    for _ in range(5): tick(False)            # 2.6 s: the next GPS / battery values come through
+    for _ in range(5): tick(False)            # 4.4 s: the next GPS / battery values come through
     assert abs(S2.gspd - 25.0) < 0.05 and S2.sats == 12 and S2.mah == 3400, '50 Hz: values keep moving'
     tick(True)                                # the next burst takes over again
     assert S2.sats == min(st['sats'], 15) and abs(S2.volt - st['volt']) < 0.2, 'burst: passthrough back in charge'
+    link_msg('CRSFv3: Link rate 150Hz, Telemetry rate 150Hz')
+    tick(True)
+    assert not S2.crsfSlow, '150 Hz message: slow-link handling off'
     AP_EXTRA[0] = False
     for k in ('GPS speed', 'GPS Satellites', 'Rx Batt', 'Rx Current', 'Rx Cons', 'GPS1', 'GPS2'): native_vals.pop(k, None)
     for _ in range(12): step(0.2)

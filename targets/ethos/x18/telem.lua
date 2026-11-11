@@ -52,11 +52,16 @@ local SPEED_STALE_S = 5
 -- as one packed frame every 3 s (AP_CRSF_Telem's low-rate table: PASSTHROUGH 500, 3000). The 3 s
 -- windows below then ran out just before each frame: the NO TELEMETRY frame flashed, the native
 -- read cut in (and restarted the ready-to-arm wait), and a speed sent on alternate frames went
--- blank (X18 + Crossfire + ArduPilot, 2026-11-11). Once ArduPilot has been heard over CRSF the
--- windows are wider. A real loss still shows at once where the radio says so (Ethos's telemetry
--- flag, or link quality 0), see T.alive.
+-- blank (X18 + Crossfire + ArduPilot, 2026-11-11). While ArduPilot reports a TBS link below 150 Hz
+-- (slowPt) the windows are wider. A real loss still shows at once where the radio says so (Ethos's
+-- telemetry flag, or link quality 0), see T.alive.
 local SLOW_PT_S, SPEED_STALE_SLOW_S = 7, 10
-local function slowPt() return s.fc == "ArduPilot" and s.link == "CRSF" end
+-- Only when ArduPilot has said so: it names its CRSF link and rate on every change ("CRSFv3: Link
+-- rate 50Hz, Telemetry rate 50Hz", "ELRS: Link rate 500Hz, ..."), and falls back to the 3 s
+-- passthrough schedule only on a non-ELRS link below 150 Hz (AP_CRSF_Telem is_high_speed_telemetry).
+-- ELRS, mLRS on MAVLink, S.Port, and TBS at 150 Hz keep the 3 s windows they always had; with the
+-- message missed (radio switched on after the aircraft, or RC_OPTIONS bit 9) nothing changes either.
+local function slowPt() return s.crsfSlow == true and s.fc == "ArduPilot" and s.link == "CRSF" end
 local function ptWindow() return slowPt() and SLOW_PT_S or 3 end
 -- ArduPilot repeats its PreArm failures every 30 s and has no "ready" flag in telemetry,
 -- so ready means disarmed for this long with no PreArm message heard
@@ -139,6 +144,8 @@ local msgBuf, msgLastLo, msgLastHi = "", nil, nil
 local MSG_MAX = 60
 local function pushMsg(text, sev)
   if text == "" then return end
+  local proto, rate = string.match(text, "^(%w+): Link rate (%d+)Hz")
+  if proto then s.crsfSlow = proto ~= "ELRS" and (tonumber(rate) or 999) < 150 end
   local m = s.msgs
   sev = sev or 6
   local last = m[#m]
@@ -1180,7 +1187,7 @@ function T.wakeup(linkMode)
           s.lat, s.lon, s.nativePosAt = lat, lon, now()
         end
       end
-      if kind == "crsf" and now() - s.lastPt > FILL_AFTER_S and telemActive() ~= false
+      if kind == "crsf" and slowPt() and now() - s.lastPt > FILL_AFTER_S and telemActive() ~= false
          and (lq == nil or lq > 0) then fillFromCrsf() end
     end
     -- ArduPilot sends no "ready to arm" flag. Not ready: a PreArm message in the last 35 s, or
