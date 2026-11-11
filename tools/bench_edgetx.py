@@ -313,6 +313,8 @@ if '--split' in args and WHO == 'omnideck':
         end
       end''', wdef.refresh)
 STEP, FEED = 0.05, 0.25
+# --slow (with --elrs): Crossfire's 50 Hz RF mode - one packed passthrough frame every 3 s
+if '--slow' in args: FEED = 3.0
 last_feed = -1.0
 while sim_t[0] < SECONDS:
     sim_t[0] += STEP

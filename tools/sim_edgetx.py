@@ -857,6 +857,48 @@ if not NATIVE and not SPORT:
     assert abs(UIm.T.s.lat - st['lat']) < 1e-4, '0x0800 back in charge'
     print('AP CRSF native position OK')
 
+# ArduPilot over Crossfire at 50 Hz: passthrough every 3 s, but the CRSF GPS frame every 1 s and the
+# battery frame every 2 s. Between bursts ground speed, satellites, distance to home and the battery
+# follow GSpd / Sats / RxBt / Curr / Capa; at 150 Hz they stay on passthrough.
+if not NATIVE and not SPORT:
+    real_packets2 = packets
+    burst = [True]
+    def packets(s, _p=real_packets2): return [(a, v) for a, v in _p(s) if a != 0x0800] if burst[0] else []
+    units['GSpd'] = 7
+    added = [k for k in ('GSpd', 'Sats', 'RxBt', 'Curr', 'Capa', 'GPS') if k not in sensor_list]
+    sensor_list.extend(added)                      # discovered on the radio, as the tester's were
+    def crsf_sensors(gs_kmh, sats, volt, curr, mah, lat, lon):
+        native.update({'GSpd': gs_kmh, 'Sats': sats, 'RxBt': volt, 'Curr': curr, 'Capa': mah,
+                       'GPS': {'lat': lat, 'lon': lon}})
+    assert UIm.T.s.homeLat is not None, 'home known before the 50 Hz test'
+    crsf_sensors(999.0, 3, 99.0, 99.0, 9999, st['lat'], st['lon'])
+    step(0.2, 10)                                  # 150 Hz: passthrough wins
+    S = UIm.T.s
+    assert abs(S.gspd - st['gs']) < 1.0 and S.sats == min(st['sats'], 15) and abs(S.volt - st['volt']) < 0.2,         '150 Hz: passthrough values kept (gs %s sats %s volt %s)' % (S.gspd, S.sats, S.volt)
+    step(0.3)                                      # one more burst, then CRSF frames only
+    burst[0] = False
+    lat1, lon1 = project(st['lat'], st['lon'], 400, 200)
+    crsf_sensors(72.0, 11, 15.1, 7.5, 3333, lat1, lon1)
+    step(0.2, 3)                                   # 0.6 s: passthrough still fresh enough
+    S = UIm.T.s
+    assert S.sats == min(st['sats'], 15), 'no fill within 1 s of a burst: sats %s' % S.sats
+    step(0.2, 8)                                   # 2.2 s after the burst (EdgeTX looks up 4 sensors per update: the fifth comes on the next round)
+    S = UIm.T.s
+    exp_d = UIm.T.distBrg(lat1, lon1, S.homeLat, S.homeLon)[0]
+    assert abs(S.gspd - 20.0) < 0.05, '50 Hz: ground speed from GSpd, got %s' % S.gspd
+    assert S.sats == 11 and abs(S.volt - 15.1) < 1e-6 and abs(S.curr - 7.5) < 1e-6 and S.mah == 3333,         '50 Hz: sats/battery from CRSF (%s %s %s %s)' % (S.sats, S.volt, S.curr, S.mah)
+    assert abs(S.homeDist - exp_d) < 1, '50 Hz: home distance from the CRSF position %s vs %s' % (S.homeDist, exp_d)
+    assert UIm.T.alive(), '50 Hz: link still alive 2.2 s after a burst'
+    burst[0] = True
+    step(0.3)                                      # the next burst takes over again
+    S = UIm.T.s
+    assert S.sats == min(st['sats'], 15) and abs(S.volt - st['volt']) < 0.2, 'burst: passthrough back in charge'
+    packets = real_packets2
+    for k in ('GSpd', 'Sats', 'RxBt', 'Curr', 'Capa', 'GPS'): native.pop(k, None)
+    for k in added: sensor_list.remove(k)
+    step(0.2, 10)
+    print('AP CRSF 50 Hz fill OK')
+
 # Betaflight 4.5: CRSF "GPS alt" is sea level while disarmed and the height above the arming point
 # once armed; the reading at the arm edge was sea level (X18 + BF + TBS: MAX ALT -278 m, 2026-11-08).
 # Newer Betaflight sends sea level all along, which must still be subtracted.
