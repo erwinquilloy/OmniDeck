@@ -1,10 +1,27 @@
-OmniDeck 0.3b for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 0.3c-test1 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.3c-test1 (test build, after 0.3b; X20 family and X18-size screens)
+- ArduPilot over TBS Crossfire at 50 Hz (forced, or Dynamic dropping to 50 Hz at range): ArduPilot
+  then sends its telemetry in one burst every 3 seconds, and the screen stepped every 3 s with
+  glitches between bursts. OmniDeck now reads ArduPilot's own "CRSF: Link rate 50Hz" message and,
+  only on a TBS link below 150 Hz:
+  - no red NO TELEMETRY flash between bursts, speeds no longer blank out, READY TO ARM works;
+  - ground speed, satellites and distance to home update every second, and voltage, current and
+    mAh every 2 s, from the standard Crossfire GPS and battery sensors between bursts.
+  Horizon, airspeed, altitude and flight mode still update every 3 s: only ArduPilot's burst
+  carries them. ELRS, mLRS, F.Port, S.Port, INAV, Betaflight and TBS at 150 Hz: unchanged.
+  The Crossfire GPS and battery sensors must be discovered (Model > Telemetry > Discover new
+  sensors) for the faster values. A real link loss on that 50 Hz link shows after up to 7 s if
+  Ethos does not report it sooner (it usually does, with its own telemetry-lost flag).
+- Map page + and - buttons: a tap near a button, in the gap between them, or one that rolls off the
+  edge as you lift your finger now zooms instead of turning the page. A tap elsewhere on the map
+  still turns the page.
 
 WHAT'S NEW IN 0.3b - public beta (test 43; X20 family and X18-size screens)
 - HUD home marker (the H under the heading box): it now uses the whole width of the heading strip
