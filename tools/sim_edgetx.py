@@ -928,6 +928,26 @@ if not NATIVE and not SPORT:
     step(0.2, 10)
     print('AP CRSF 50 Hz fill OK')
 
+# more than 15 satellites: passthrough has 4 bits, ArduPilot sends at most 15. S.Port: "15+";
+# CRSF: the real count from the standard GPS frame (Sats)
+if not NATIVE:
+    st['sats'] = 18
+    step(0.2, 6)
+    wd.page = 1
+    del TEXTS[:]; frame()
+    assert UIm.T.s.sats == 15 and UIm.T.s.satsPlus == True and any(t.endswith(' 15+') for t in TEXTS),         'capped at 15: %s %s' % (UIm.T.s.sats, [t for t in TEXTS if '3D' in t])
+    if not SPORT:
+        native['Sats'] = 18
+        if 'Sats' not in sensor_list: sensor_list.append('Sats')
+        step(0.2, 10)
+        del TEXTS[:]; frame()
+        assert UIm.T.s.sats == 18 and not UIm.T.s.satsPlus and '3D 18' in TEXTS,             'CRSF real count: %s %s' % (UIm.T.s.sats, [t for t in TEXTS if '3D' in t])
+        native.pop('Sats', None); sensor_list.remove('Sats')
+    st['sats'] = 14
+    step(0.2, 20)
+    assert UIm.T.s.sats == 14 and not UIm.T.s.satsPlus, 'back under 15: %s' % UIm.T.s.sats
+    print('satellites above 15 OK')
+
 # Betaflight 4.5: CRSF "GPS alt" is sea level while disarmed and the height above the arming point
 # once armed; the reading at the arm edge was sea level (X18 + BF + TBS: MAX ALT -278 m, 2026-11-08).
 # Newer Betaflight sends sea level all along, which must still be subtracted.
