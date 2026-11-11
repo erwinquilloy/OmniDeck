@@ -760,6 +760,24 @@ assert widget.level == lvl0, 'minus button'
 assert widget.zoomMode == 0 and b.auto is None, 'aircraft-centred by default, no view button'
 assert b.plus.w == b.plus.h and b.plus.w >= 48 and b.minus.w == b.plus.w, 'big square zoom buttons %s' % b.plus.w
 assert b.minus.y > b.plus.y + b.plus.h, 'minus under plus'
+# near misses (tester, X18 2026-11-11): a quarter of the button around it, the gap split in the middle,
+# the press point counts; a tap away from the buttons still turns the page
+def tapxy(x0, y0, x1=None, y1=None):
+    wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_START'], x0, y0)
+    wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], x0 if x1 is None else x1, y0 if y1 is None else y1)
+pad = b.plus.w // 4
+gap_mid = (b.plus.y + b.plus.h + b.minus.y) / 2
+cxb = b.plus.x + b.plus.w // 2
+for (tx, ty, d, what) in ((cxb, b.plus.y - pad + 2, -1, 'above +'), (b.plus.x - pad + 2, b.plus.y + 5, -1, 'left of +'),
+                          (cxb, gap_mid - 1, -1, 'gap, upper half'), (cxb, gap_mid + 1, 1, 'gap, lower half'),
+                          (cxb, b.minus.y + b.minus.h + pad - 2, 1, 'below -')):
+    widget.level = 5
+    tapxy(tx, ty)
+    assert widget.page == 2 and widget.level == 5 + d, 'near miss %s: page %s level %s' % (what, widget.page, widget.level)
+widget.level = 5
+tapxy(cxb, b.plus.y + 5, b.plus.x - pad - 8, b.plus.y + 5)        # pressed on +, lifted off to the left
+assert widget.page == 2 and widget.level == 4, 'press on +, lift outside: %s %s' % (widget.page, widget.level)
+widget.level = lvl0
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
 assert widget.level == lvl0 - 1, 'rotary'
 # test42 page cycle: main, map, messages for ArduPilot only (INAV/BF send none); the flight stats
