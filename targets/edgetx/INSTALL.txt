@@ -1,4 +1,4 @@
-OmniDeck 0.3c-test1 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.3c for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
@@ -6,7 +6,7 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
-WHAT'S NEW IN 0.3c-test1 (test build, after 0.3b)
+WHAT'S NEW IN 0.3c (after 0.3b)
 - ArduPilot over TBS Crossfire at 50 Hz (forced, or Dynamic dropping to 50 Hz at range): ArduPilot
   then sends its telemetry in one burst every 3 seconds, and the screen stepped every 3 s with
   glitches between bursts. OmniDeck now reads ArduPilot's own "CRSF: Link rate 50Hz" message and,
@@ -16,6 +16,8 @@ WHAT'S NEW IN 0.3c-test1 (test build, after 0.3b)
     mAh every 2 s, from the standard Crossfire GPS and battery sensors between bursts.
   Horizon, airspeed, altitude and flight mode still update every 3 s: only ArduPilot's burst
   carries them. ELRS, mLRS, F.Port, S.Port, INAV, Betaflight and TBS at 150 Hz: unchanged.
+  It switches on at the first 3-second pause after ArduPilot's message, so that first pause may
+  still flash once.
   The Crossfire GPS and battery sensors must be discovered (Model > Telemetry > Discover new
   sensors) for the faster values (GSpd, Sats, RxBt, Curr, Capa). A real link loss on that 50 Hz
   link shows after up to 7 s, or at once when the link quality drops to 0.
