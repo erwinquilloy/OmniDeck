@@ -1293,6 +1293,26 @@ if not NATIVE and not SPORT:
     for _ in range(12): step(0.2)
     print('ArduPilot CRSF 50 Hz fill OK')
 
+# more than 15 satellites: passthrough has 4 bits, ArduPilot sends at most 15. S.Port: "15+";
+# CRSF: the real count from the standard GPS frame's "GPS Satellites"
+if not NATIVE:
+    st['sats'] = 18
+    for _ in range(6): step(0.2)
+    assert Tm.s.sats == 15 and Tm.s.satsPlus == True, 'capped at 15: %s %s' % (Tm.s.sats, Tm.s.satsPlus)
+    assert any(t.endswith(' 15+') for t, c, x in main_drawn()), 'top bar shows 15+'
+    if not SPORT:
+        AP_EXTRA[0] = True
+        native_vals['GPS Satellites'] = 18
+        for _ in range(8): step(0.2)
+        assert Tm.s.sats == 18 and not Tm.s.satsPlus, 'CRSF real count: %s %s' % (Tm.s.sats, Tm.s.satsPlus)
+        ops = main_drawn()
+        assert any(t == '3D 18' for t, c, x in ops) and not any(t.endswith('15+') for t, c, x in ops), 'top bar shows 3D 18'
+        native_vals.pop('GPS Satellites', None); AP_EXTRA[0] = False
+    st['sats'] = 14
+    for _ in range(20): step(0.2)
+    assert Tm.s.sats == 14 and not Tm.s.satsPlus, 'back under 15: %s' % Tm.s.sats
+    print('satellites above 15 OK')
+
 # Betaflight 4.5: CRSF "GPS alt" is the GPS's sea-level altitude while disarmed and the height
 # above the arming point once armed (flight/position.c). The reading at the arm edge was sea
 # level, so everything after it came out a field elevation too low (X18 + BF + TBS, MAX ALT -278 m,

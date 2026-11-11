@@ -249,10 +249,10 @@ local function topBar(w, x, y, W, h, s, u, H)
   -- right side: GPS, link. Each text is made again only when its value changes, into tables
   -- kept from one update to the next
   local c = barTxt
-  local fix, sats = s.fix or 0, s.sats or 0
-  if fix ~= c.fix or sats ~= c.sats then
-    c.fix, c.sats = fix, sats
-    c.gps = string.format("%s %d", fix >= 3 and "3D" or (fix == 2 and "2D" or "NoFix"), sats)
+  local fix, sats, plus = s.fix or 0, s.sats or 0, s.satsPlus == true
+  if fix ~= c.fix or sats ~= c.sats or plus ~= c.plus then
+    c.fix, c.sats, c.plus = fix, sats, plus
+    c.gps = string.format("%s %d%s", fix >= 3 and "3D" or (fix == 2 and "2D" or "NoFix"), sats, plus and "+" or "")
   end
   local lq = s.lq and math.floor(s.lq)
   if lq ~= c.lq then c.lq = lq c.lqT = lq and string.format("LQ %d", lq) end

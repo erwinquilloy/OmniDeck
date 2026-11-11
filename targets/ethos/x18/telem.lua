@@ -270,7 +270,14 @@ local function pt(appId, lo, hi)
     local raw = ext(lo, hi, 19, 6)
     s.thr = (raw > 0 and math.min(100, math.floor(0.5 + (raw + 0.5) / 0.63)) or 0) * (ext(lo, hi, 25, 1) == 1 and -1 or 1)
   elseif appId == 0x5002 then
-    s.sats = ext(lo, hi, 0, 4)
+    -- 4 bits: ArduPilot sends at most 15 (GPS_SATS_LIMIT), more satellites also arrive as 15. Over
+    -- CRSF the standard GPS frame has the real count (read in T.wakeup, satsNative); without it the
+    -- top bar shows "15+" (S.Port / F.Port: passthrough is the only source)
+    local n = ext(lo, hi, 0, 4)
+    s.satsCapped = n == 15
+    local native = n == 15 and s.satsNativeAt and now() - s.satsNativeAt < 3
+    s.sats = native and math.max(15, s.satsNative) or n
+    s.satsPlus = n == 15 and not native
     s.fix = ext(lo, hi, 4, 2) + ext(lo, hi, 14, 2)
     s.hdop = ext(lo, hi, 7, 7) * (10 ^ ext(lo, hi, 6, 1)) / 10
     local a = ext(lo, hi, 24, 7) * (10 ^ ext(lo, hi, 22, 2)) / 10
@@ -1146,13 +1153,25 @@ local function fillFromCrsf()
   fillAt = t
   local v, u = srcVal("gspd", "crsf")
   if num(v) then s.gspd, s.gspdAt = toMS(v, u), t end
-  v = srcVal("sats", "crsf");  if num(v) then s.sats = math.floor(v) end
+  v = srcVal("sats", "crsf");  if num(v) then s.sats, s.satsPlus = math.floor(v), false end
   v = srcVal("volt", "crsf");  if num(v) and v > 0 then s.volt = v end
   v = srcVal("curr", "crsf");  if num(v) then s.curr = v end
   v = srcVal("mah", "crsf");   if num(v) then s.mah = v end
   -- the position above is read every update while 0x0800 is missing (always, over CRSF)
   if s.lat and s.homeLat and s.nativePosAt and t - s.nativePosAt < 1.5 then
     s.homeDist, s.homeBrg = T.distBrg(s.lat, s.lon, s.homeLat, s.homeLon)
+  end
+end
+
+-- the real satellite count over CRSF while passthrough says 15 (its 4-bit limit), once a second
+local satsReadAt = -100
+local function readSats()
+  if now() - satsReadAt < 1 then return end
+  satsReadAt = now()
+  local v = srcVal("sats", "crsf")
+  if num(v) and v >= 15 then
+    s.satsNative, s.satsNativeAt = math.floor(v), now()
+    s.sats, s.satsPlus = s.satsNative, false
   end
 end
 
@@ -1203,6 +1222,7 @@ function T.wakeup(linkMode)
       end
       if kind == "crsf" and slowPt() and now() - s.lastPt > FILL_AFTER_S and telemActive() ~= false
          and (lq == nil or lq > 0) then fillFromCrsf() end
+      if kind == "crsf" and s.satsCapped and telemActive() ~= false and (lq == nil or lq > 0) then readSats() end
     end
     -- ArduPilot sends no "ready to arm" flag. Not ready: a PreArm message in the last 35 s, or
     -- what telemetry shows directly (GPS without a 3D fix, EKF not happy, a failsafe). Ready only
