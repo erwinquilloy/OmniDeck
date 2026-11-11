@@ -61,7 +61,17 @@ local SLOW_PT_S, SPEED_STALE_SLOW_S = 7, 10
 -- passthrough schedule only on a non-ELRS link below 150 Hz (AP_CRSF_Telem is_high_speed_telemetry).
 -- ELRS, mLRS on MAVLink, S.Port, and TBS at 150 Hz keep the 3 s windows they always had; with the
 -- message missed (radio switched on after the aircraft, or RC_OPTIONS bit 9) nothing changes either.
-local function slowPt() return s.crsfSlow == true and s.fc == "ArduPilot" and s.link == "CRSF" end
+-- Guard: ArduPilot can name the link before the receiver has told it what it is, so an ELRS link
+-- may be announced once as "CRSFv2: Link rate 50Hz" right after power-up. The wider windows also
+-- need one real passthrough gap of 1.5 s to SLOW_PT_S that ended with data again (s.crsfGap,
+-- noteGap): ELRS never pauses that long, a TBS link at 50 Hz does on its first burst.
+local function slowPt() return s.crsfSlow == true and s.crsfGap == true and s.fc == "ArduPilot" and s.link == "CRSF" end
+local function noteGap(t)
+  if s.crsfSlow and s.link == "CRSF" then
+    local g = t - s.lastPt
+    if g > 1.5 and g < SLOW_PT_S then s.crsfGap = true end
+  end
+end
 local function ptWindow() return slowPt() and SLOW_PT_S or 3 end
 -- ArduPilot repeats its PreArm failures every 30 s and has no "ready" flag in telemetry,
 -- so ready means disarmed for this long with no PreArm message heard
@@ -145,7 +155,10 @@ local MSG_MAX = 60
 local function pushMsg(text, sev)
   if text == "" then return end
   local proto, rate = string.match(text, "^(%w+): Link rate (%d+)Hz")
-  if proto then s.crsfSlow = proto ~= "ELRS" and (tonumber(rate) or 999) < 150 end
+  if proto then
+    s.crsfSlow = proto ~= "ELRS" and (tonumber(rate) or 999) < 150
+    if not s.crsfSlow then s.crsfGap = false end
+  end
   local m = s.msgs
   sev = sev or 6
   local last = m[#m]
@@ -222,7 +235,7 @@ local function pt(appId, lo, hi)
   -- (an R9 with INAV, X18 tester 2026-11-03). Taken as ArduPilot it stopped every native
   -- sensor read. It only proves the link is up; the 0x50xx frames say ArduPilot.
   s.lastRx = t
-  if appId ~= 0x0800 then s.lastPt, s.fc = t, "ArduPilot" end
+  if appId ~= 0x0800 then noteGap(t) s.lastPt, s.fc = t, "ArduPilot" end
   if appId == 0x0800 then
     local raw = ext(lo, hi, 0, 30)
     local deg
@@ -371,6 +384,7 @@ local function crsfPop()
     -- ArduPilot status text: severity, then the text up to a 0
     s.link = "CRSF"
     local t = now()
+    noteGap(t)
     s.lastPt, s.lastRx, s.fc = t, t, "ArduPilot"
     -- the whole frame in one C call, then cut at the 0: a byte at a time (string.char per byte
     -- and a join) made the update that brings a message the heaviest of all on OpenTX

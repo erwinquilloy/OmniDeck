@@ -1260,6 +1260,12 @@ if not NATIVE and not SPORT:
     crsf_sensors(999.0, 3, 99.0, 99.0, 9999, st['lat'], st['lon'])
     for _ in range(10): tick(True)
     assert abs(S2.gspd - st['gs']) < 1.0 and S2.sats == min(st['sats'], 15) and abs(S2.volt - st['volt']) < 0.2,         '150 Hz: passthrough values kept (gs %s sats %s volt %s)' % (S2.gspd, S2.sats, S2.volt)
+    # a 50 Hz message on a link that never pauses (an ELRS link named before the receiver answered):
+    # still off - it also takes one real gap that ends with a burst
+    assert not S2.crsfGap, 'no gap seen yet on a fast link'
+    for _ in range(10): tick(False)           # 2 s gap ...
+    tick(True)                                # ... ended by a burst: a slow link
+    assert S2.crsfGap == True, 'gap seen'
     # 50 Hz: one burst, then CRSF frames only. The aircraft has moved 400 m since the burst.
     tick(True)
     lat1, lon1 = project(st['lat'], st['lon'], 400, 200)
