@@ -174,7 +174,7 @@ Yellow pins mark the top bar and the HUD, blue pins the top-right panel and the 
 | 2 | **Arm state:** ARMED in red, DISARMED in grey. **NO TELEMETRY** replaces both when the link drops. |
 | 3 | **Model name** from the radio. |
 | 4 | **Radio battery** (TX voltage). |
-| 5 | **GPS fix and satellites**, e.g. 3D 14. Green with a 3D fix. |
+| 5 | **GPS fix and satellites**, e.g. 3D 14. Green with a 3D fix. ArduPilot's telemetry carries at most 15: over Crossfire or ELRS the real count comes from the Crossfire GPS sensor, over S.Port or F.Port it shows 15+. |
 | 6 | **Link quality and RSSI** from the receiver. |
 
 **HUD**
@@ -311,8 +311,8 @@ EdgeTX stops a widget whose screen update runs more than about 20,000 Lua instru
 
 | EdgeTX | Horizon ground in C | Clipped lines in C | Heaviest main-page update |
 |---|---|---|---|
-| 2.11, 2.12 | Yes | All | 71 % of the limit |
-| 2.9, 2.10 | Yes | Only lines with no part left of or above the screen | 72 % of the limit |
+| 2.11, 2.12 | Yes | All | 75 % of the limit |
+| 2.9, 2.10 | Yes | Only lines with no part left of or above the screen | 76 % of the limit |
 
 0.3c, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. S.Port peaks at 68 %, INAV and Betaflight at 62 %, and a typical main-page update in steady flight is about 48 %. The 800 x 480 screen costs the same as 480 x 272.
 
