@@ -11,7 +11,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 ![Main page in flight](docs/screens/main.png)
 
-**Status:** 0.3b, public beta. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
+**Status:** 0.3c, public beta. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
 
 ## Contents
 
@@ -72,16 +72,28 @@ ArduPilot sends FrSky passthrough telemetry (the same data Yaapu uses) over ever
 - **Betaflight:** attitude, GPS, speed, battery, flight mode, and ready to arm from the CRSF flight mode text. No airspeed and no status messages.
 - **Throttle:** ArduPilot sends its real throttle output. INAV and Betaflight send none, so THR shows your radio's throttle stick (0 to 100 %), which can differ from the motor in INAV's automatic modes.
 
+### ArduPilot over TBS Crossfire at 50 Hz
+
+TBS Crossfire drops to its 50 Hz RF mode when you force it, or on the Dynamic profile when the signal weakens. ArduPilot then sends its passthrough data (horizon, speeds, altitude, flight mode, battery) only once every 3 seconds, so OmniDeck, like Yaapu, can only update those every 3 s.
+
+Since 0.3c, once ArduPilot has reported a TBS link below 150 Hz (its `CRSFv3: Link rate 50Hz` message) and the first 3-second pause has been seen:
+
+- no NO TELEMETRY flash between bursts, speeds stay on screen, and READY TO ARM works;
+- ground speed, satellites and distance to home update every second, and voltage, current and mAh every 2 s, from the standard Crossfire GPS and battery sensors (discover them on the radio once);
+- horizon, airspeed, altitude and flight mode still update every 3 s.
+
+ELRS, mLRS, F.Port and S.Port are not affected. For the smoothest display, force Crossfire to 150 Hz on the transmitter.
+
 ## Install
 
 Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC. Each package holds an `INSTALL.txt` with the same steps.
 
 | Package | For |
 |---|---|
-| `OmniDeck_Ethos_0.3b.zip` | Any Ethos colour radio. Holds both screen sizes; the radio picks the right one. |
-| `OmniDeck_Ethos_0.3b_X20.zip` | X20 family only (800 x 480). Smaller download. |
-| `OmniDeck_Ethos_0.3b_X18.zip` | X18 and other 480 x 320 Ethos screens only. |
-| `OmniDeck_EdgeTX_0.3b.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
+| `OmniDeck_Ethos_0.3c.zip` | Any Ethos colour radio. Holds both screen sizes; the radio picks the right one. |
+| `OmniDeck_Ethos_0.3c_X20.zip` | X20 family only (800 x 480). Smaller download. |
+| `OmniDeck_Ethos_0.3c_X18.zip` | X18 and other 480 x 320 Ethos screens only. |
+| `OmniDeck_EdgeTX_0.3c.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
 
 **No SD card?** On radios that keep everything on built-in storage, the same folders go on the radio's internal drive: the one that already holds `scripts` (Ethos) or `WIDGETS` (EdgeTX). Wherever this guide says "card", read that drive. Put map tiles on the same drive as OmniDeck, and check the free space first: a satellite tile set can run to hundreds of MB.
 
@@ -250,7 +262,7 @@ The **flight summary** opens by itself on disarm (if **Flight summary on disarm*
 
 - **Info box** (top left): distance to home, altitude, airspeed, the active waypoint and its distance, and the tile set with its zoom when tiles are on.
 - **Wind** (top right): the blue arrow and its speed.
-- **Range rings** with their distances. The map zooms itself; + and − or the wheel zoom by hand.
+- **Range rings** with their distances. The map zooms itself; + and − or the wheel zoom by hand. A tap near a button or in the gap between them counts as that button; a tap elsewhere on the map changes page.
 - **Trail** in yellow. The **H** badge marks home; off the map it waits on the edge with the distance.
 - **Bottom bar:** the aircraft's latitude and longitude.
 - **Map view** and **Map orientation** settings: aircraft-centred or home-centred, north up or heading up. A tiled map is always north up.
@@ -299,10 +311,10 @@ EdgeTX stops a widget whose screen update runs more than about 20,000 Lua instru
 
 | EdgeTX | Horizon ground in C | Clipped lines in C | Heaviest main-page update |
 |---|---|---|---|
-| 2.11, 2.12 | Yes | All | 70 % of the limit |
+| 2.11, 2.12 | Yes | All | 71 % of the limit |
 | 2.9, 2.10 | Yes | Only lines with no part left of or above the screen | 72 % of the limit |
 
-0.3b, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. S.Port peaks at 68 %, INAV and Betaflight at 62 %, and a typical main-page update in steady flight is about 48 %. The 800 x 480 screen costs the same as 480 x 272.
+0.3c, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. S.Port peaks at 68 %, INAV and Betaflight at 62 %, and a typical main-page update in steady flight is about 48 %. The 800 x 480 screen costs the same as 480 x 272.
 
 **Recommendation:** use EdgeTX 2.11 or later, ideally the latest 2.12.x. Keep the radio's own telemetry alarms and the flight controller's failsafes as your safety net; OmniDeck is a display. Since 2.11.1, EdgeTX refuses sound files whose path is longer than 45 characters: the bundled packs fit, and your own pack's folder name should be 4 letters or fewer.
 
@@ -408,6 +420,7 @@ Please send the radio model and its Ethos or EdgeTX version, the flight controll
 - **Flight time 00:00 on ArduPilot on the bench:** expected. It only counts while ArduPilot reports it is flying.
 - **No flight summary:** the aircraft has to be armed for at least 10 s.
 - **Tiles not listed:** check the folder path and capitals, then restart the radio.
+- **Display steps every few seconds on TBS Crossfire with ArduPilot:** Crossfire is in its 50 Hz mode; see [ArduPilot over TBS Crossfire at 50 Hz](#ardupilot-over-tbs-crossfire-at-50-hz). Force 150 Hz on the transmitter for a smooth horizon.
 - **EdgeTX "CPU limit" or widget missing:** run OmniDeck Check; update to EdgeTX 2.11 or later.
 
 ## Development
