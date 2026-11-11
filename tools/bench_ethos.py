@@ -205,6 +205,10 @@ st = dict(lat=43.49323, lon=142.88785, hlat=43.49323, hlon=142.88785, mode=5, ar
 
 paints, wakes = [], []
 STEP, FEED = 0.05, 0.25
+# --slow: ArduPilot over Crossfire in its 50 Hz RF mode - one packed passthrough frame every 3 s,
+# and no 0x0800 (AP_CRSF_Telem leaves the position to the standard CRSF GPS frame)
+SLOW = '--slow' in args
+if SLOW: FEED = 3.0
 last_feed = -1.0
 t_end = SECONDS
 while sim_t[0] < t_end:
@@ -215,6 +219,7 @@ while sim_t[0] < t_end:
         st['lat'], st['lon'] = project(st['lat'], st['lon'], st['gs'] * FEED, st['yaw'])
         st['mah'] += 1
         pk = packets(st)
+        if SLOW: pk = [(a, v) for a, v in pk if a != 0x0800]
         if CRSF:
             for i in range(0, len(pk), 9):
                 grp = pk[i:i + 9]
@@ -239,7 +244,7 @@ if '--texts' in args:   # what the last paint drew: proof the widget shows fligh
 skip = int(len(wakes) * 0.1)          # the first seconds: start-up work, not the steady state
 pw, ww = paints[int(len(paints) * 0.1):], wakes[skip:]
 dur = SECONDS * 0.9
-print('%s %s, %.0f s of flight (first 10 %% left out), %s passthrough' % (WHO, RES, SECONDS, 'CRSF' if CRSF else 'S.Port'))
+print('%s %s, %.0f s of flight (first 10 %% left out), %s passthrough%s' % (WHO, RES, SECONDS, 'CRSF' if CRSF else 'S.Port', ', 50 Hz (every 3 s)' if SLOW else ''))
 print('  paint : %5.1f per s   worst %7d   median %7d instructions' % (len(pw) / dur, max(pw), statistics.median(pw)))
 print('  wakeup: %5.1f per s   worst %7d   median %7d instructions' % (len(ww) / dur, max(ww), statistics.median(ww)))
 print('  Lua instructions per second, paint + wakeup: %d' % ((sum(pw) + sum(ww)) / dur))

@@ -1108,6 +1108,33 @@ function T.drainCrsf(limitPct, maxN)
   return n
 end
 
+-- ArduPilot over Crossfire in its 50 Hz RF mode: passthrough comes only every 3 s (see SLOW_PT_S),
+-- but ArduPilot still sends the standard CRSF GPS frame every second and the battery frame every
+-- 2 s (AP_CRSF_Telem's low-rate table). While passthrough is more than FILL_AFTER_S old, ground
+-- speed, satellites, distance to home and the battery come from those sensors, so they move
+-- between bursts (tester's Sensor check, X18 + TBS + ArduPilot: GPS speed, GPS Satellites,
+-- Rx Batt, Rx Current, Rx Cons all present). At 150 Hz passthrough is never that old and this
+-- never runs. Horizon, airspeed, altitude and flight mode stay on passthrough: CRSF has no
+-- airspeed, and its GPS altitude and course are not ArduPilot's altitude above home and heading.
+local FILL_AFTER_S, FILL_EVERY_S = 1.0, 0.2
+local fillAt = -100
+local function num(v) return type(v) == "number" and v == v and v >= 0 end
+local function fillFromCrsf()
+  local t = now()
+  if t - fillAt < FILL_EVERY_S then return end
+  fillAt = t
+  local v, u = srcVal("gspd", "crsf")
+  if num(v) then s.gspd, s.gspdAt = toMS(v, u), t end
+  v = srcVal("sats", "crsf");  if num(v) then s.sats = math.floor(v) end
+  v = srcVal("volt", "crsf");  if num(v) and v > 0 then s.volt = v end
+  v = srcVal("curr", "crsf");  if num(v) then s.curr = v end
+  v = srcVal("mah", "crsf");   if num(v) then s.mah = v end
+  -- the position above is read every update while 0x0800 is missing (always, over CRSF)
+  if s.lat and s.homeLat and s.nativePosAt and t - s.nativePosAt < 1.5 then
+    s.homeDist, s.homeBrg = T.distBrg(s.lat, s.lon, s.homeLat, s.homeLon)
+  end
+end
+
 function T.wakeup(linkMode)
   local got = false
   lookupBudget = LOOKUPS_PER_WAKEUP
@@ -1153,6 +1180,8 @@ function T.wakeup(linkMode)
           s.lat, s.lon, s.nativePosAt = lat, lon, now()
         end
       end
+      if kind == "crsf" and now() - s.lastPt > FILL_AFTER_S and telemActive() ~= false
+         and (lq == nil or lq > 0) then fillFromCrsf() end
     end
     -- ArduPilot sends no "ready to arm" flag. Not ready: a PreArm message in the last 35 s, or
     -- what telemetry shows directly (GPS without a 3D fix, EKF not happy, a failsafe). Ready only

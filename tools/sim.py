@@ -293,7 +293,9 @@ G.sport = L.eval('_mksport')()
 native_vals = {}
 SPORT_APPIDS = {0x0100: 'Altitude', 0x0830: 'GPS speed', 0x0840: 'Yaw', 0x0480: 'GPS satellites',
                 0x0210: 'Rx Batt', 0xF101: 'RSSI', 0xF010: 'VFR', 0x0A00: 'Airspeed'}
-LINK_SENSORS = ('Rx Quality', 'Rx RSSI1', 'Flight mode')    # CRSF; these exist whatever the flight stack is
+LINK_SENSORS = ('Rx Quality', 'Rx RSSI1', 'Flight mode')
+# ArduPilot over CRSF also has the standard GPS and battery sensors (50 Hz test sets this)
+AP_EXTRA = [False]    # CRSF; these exist whatever the flight stack is
 TX_VOLTS = [8.1]
 # OD_R9=1 (with --native --sport): INAV over an R9 on Ethos. Ethos hasn't discovered INAV's mode,
 # roll, pitch and satellites sensors until the widget creates them (model.createSensor), and
@@ -356,7 +358,7 @@ def get_source(q):
         return L.eval('function() return { value = function() return _TXV() end, unit = function() return nil end, name = function() return "Main voltage" end } end')()
     if not NATIVE:
         if isinstance(q, str):
-            if SPORT or q not in LINK_SENSORS: return None
+            if SPORT or (q not in LINK_SENSORS and not (AP_EXTRA[0] and q in native_vals)): return None
         elif not (SPORT and 'appId' in q and int(q['appId']) in (0xF101, 0xF010)) \
                 and not (not SPORT and 'name' in q and q['name'] == 'GPS' and 'GPS1' in native_vals):
             # (ArduPilot over CRSF: the native GPS frame does exist; a test sets GPS1/GPS2 for it)
@@ -1206,6 +1208,47 @@ if not NATIVE and not SPORT:
     for _ in range(12): step(0.2)
     assert abs(S.lat - st['lat']) < 1e-5, '0x0800 back in charge'
     print('ArduPilot CRSF native position OK')
+
+# ArduPilot over Crossfire at 50 Hz: passthrough every 3 s, but the CRSF GPS frame every 1 s and the
+# battery frame every 2 s. Between bursts ground speed, satellites, distance to home and the battery
+# follow those sensors; at 150 Hz (passthrough every 0.2 s) they stay on passthrough.
+if not NATIVE and not SPORT:
+    S2 = Tm.s
+    assert S2.homeLat is not None, 'home known before the 50 Hz test'
+    AP_EXTRA[0] = True
+    native_units['GPS speed'] = consts['UNIT_KILOMETER_PER_HOUR']
+    def crsf_sensors(gs_kmh, sats, volt, curr, mah, lat, lon):
+        native_vals.update({'GPS speed': gs_kmh, 'GPS Satellites': sats, 'Rx Batt': volt,
+                            'Rx Current': curr, 'Rx Cons': mah, 'GPS1': lat, 'GPS2': lon})
+    def tick(burst):
+        sim_time[0] += 0.2
+        feed([(a, v) for a, v in packets(st) if a != 0x0800] if burst else [])
+        for _ in range(4): wt['wakeup'](widget)
+    # 150 Hz: passthrough every 0.2 s, CRSF sensors deliberately different: passthrough wins
+    crsf_sensors(999.0, 3, 99.0, 99.0, 9999, st['lat'], st['lon'])
+    for _ in range(10): tick(True)
+    assert abs(S2.gspd - st['gs']) < 1.0 and S2.sats == min(st['sats'], 15) and abs(S2.volt - st['volt']) < 0.2,         '150 Hz: passthrough values kept (gs %s sats %s volt %s)' % (S2.gspd, S2.sats, S2.volt)
+    # 50 Hz: one burst, then CRSF frames only. The aircraft has moved 400 m since the burst.
+    tick(True)
+    lat1, lon1 = project(st['lat'], st['lon'], 400, 200)
+    crsf_sensors(72.0, 11, 15.1, 7.5, 3333, lat1, lon1)
+    for _ in range(3): tick(False)            # 0.6 s: passthrough still fresh enough
+    assert S2.sats == min(st['sats'], 15), 'no fill within 1 s of a burst: sats %s' % S2.sats
+    for _ in range(5): tick(False)            # 1.6 s after the burst
+    exp_d = Tm.distBrg(lat1, lon1, S2.homeLat, S2.homeLon)[0]
+    assert abs(S2.gspd - 20.0) < 0.05, '50 Hz: ground speed from CRSF GPS speed, got %s' % S2.gspd
+    assert S2.sats == 11 and abs(S2.volt - 15.1) < 1e-6 and abs(S2.curr - 7.5) < 1e-6 and S2.mah == 3333,         '50 Hz: sats/battery from CRSF (%s %s %s %s)' % (S2.sats, S2.volt, S2.curr, S2.mah)
+    assert abs(S2.homeDist - exp_d) < 1, '50 Hz: home distance from the CRSF position %s vs %s' % (S2.homeDist, exp_d)
+    assert Tm.alive(), '50 Hz: link still alive 1.6 s after a burst'
+    crsf_sensors(90.0, 12, 15.0, 7.0, 3400, lat1, lon1)
+    for _ in range(5): tick(False)            # 2.6 s: the next GPS / battery values come through
+    assert abs(S2.gspd - 25.0) < 0.05 and S2.sats == 12 and S2.mah == 3400, '50 Hz: values keep moving'
+    tick(True)                                # the next burst takes over again
+    assert S2.sats == min(st['sats'], 15) and abs(S2.volt - st['volt']) < 0.2, 'burst: passthrough back in charge'
+    AP_EXTRA[0] = False
+    for k in ('GPS speed', 'GPS Satellites', 'Rx Batt', 'Rx Current', 'Rx Cons', 'GPS1', 'GPS2'): native_vals.pop(k, None)
+    for _ in range(12): step(0.2)
+    print('ArduPilot CRSF 50 Hz fill OK')
 
 # Betaflight 4.5: CRSF "GPS alt" is the GPS's sea-level altitude while disarmed and the height
 # above the arming point once armed (flight/position.c). The reading at the arm edge was sea
