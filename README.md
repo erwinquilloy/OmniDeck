@@ -83,6 +83,8 @@ Download the package for your radio from the [releases page](https://github.com/
 | `OmniDeck_Ethos_0.3b_X18.zip` | X18 and other 480 x 320 Ethos screens only. |
 | `OmniDeck_EdgeTX_0.3b.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
 
+**No SD card?** On radios that keep everything on built-in storage, the same folders go on the radio's internal drive: the one that already holds `scripts` (Ethos) or `WIDGETS` (EdgeTX). Wherever this guide says "card", read that drive. Put map tiles on the same drive as OmniDeck, and check the free space first: a satellite tile set can run to hundreds of MB.
+
 ### Ethos
 
 1. Connect the radio by USB and choose the SD card, or use a card reader.
@@ -364,7 +366,7 @@ bitmaps/ethosmaps/maps/            <- the generator's "maps" folder goes here
 bitmaps/yaapu/maps/                Yaapu Google tiles, as they are
 ```
 
-One tile: `/bitmaps/ethosmaps/maps/GOOGLE/Satellite/15/27470/15200.jpg`. The `bitmaps` folder sits at the card root next to `scripts`; create it if the card has none.
+One tile: `/bitmaps/ethosmaps/maps/GOOGLE/Satellite/15/27470/15200.jpg`. The `bitmaps` folder sits at the root of the same drive as `scripts`; create it if there is none.
 
 ### EdgeTX
 
