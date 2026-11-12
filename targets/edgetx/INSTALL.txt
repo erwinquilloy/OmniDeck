@@ -7,6 +7,8 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 WHAT'S NEW IN 0.3.0 (after 0.3b)
+- Sensor check page: when the rows don't all fit (480x272 screens), they scroll under the header
+  lines (wheel, or drag up and down; a scrollbar shows at the right edge). A tap still turns the page.
 - ArduPilot over TBS Crossfire at 50 Hz (forced, or Dynamic dropping to 50 Hz at range): ArduPilot
   then sends its telemetry in one burst every 3 seconds, and the screen stepped every 3 s with
   glitches between bursts. OmniDeck now reads ArduPilot's own "CRSF: Link rate 50Hz" message and,

@@ -988,8 +988,14 @@ local function pageCheck(w, W, H, s, u)
   lcd.drawText(cx[1], y, "key") lcd.drawText(cx[2], y, "query") lcd.drawText(cx[3], y, "sensor")
   lcd.drawText(cx[4], y, "value") lcd.drawText(cx[5], y, "unit")
   y = y + th + 1
-  for _, r in ipairs(rows) do
-    if y + th > H then break end
+  -- rows that don't fit scroll (wheel, or drag); the header lines above stay put
+  local top = y
+  local fit = math.max(1, math.floor((H - top) / th))
+  local maxOff = math.max(0, #rows - fit)
+  w.chkScroll = math.max(0, math.min(maxOff, math.floor(w.chkScroll or 0)))
+  w.chkMax, w.chkRowH = maxOff, th
+  for i = w.chkScroll + 1, math.min(#rows, w.chkScroll + fit) do
+    local r = rows[i]
     lcd.color(r.name == "not found" and COL.bad or COL.txt)
     lcd.drawText(cx[1], y, r.key)
     lcd.drawText(cx[2], y, r.query)
@@ -997,6 +1003,16 @@ local function pageCheck(w, W, H, s, u)
     lcd.drawText(cx[4], y, r.value)
     lcd.drawText(cx[5], y, r.unit)
     y = y + th
+  end
+  if maxOff > 0 then
+    -- scrollbar: thumb size = visible share, position = how far down the list
+    local trackH = H - top - 2
+    local thumbH = math.max(12, I(trackH * fit / #rows))
+    local thumbY = top + I((trackH - thumbH) * w.chkScroll / maxOff)
+    lcd.color(COL.dim)
+    lcd.drawFilledRectangle(W - 5, top, 3, trackH)
+    lcd.color(COL.txt)
+    lcd.drawFilledRectangle(W - 6, thumbY, 5, thumbH)
   end
   if #rows == 0 then
     lcd.color(COL.bad)
@@ -1451,6 +1467,12 @@ local function msgScrollBy(w, d)
   lcd.invalidate()
 end
 
+-- sensor check page: wheel right = further down the list
+local function chkScrollBy(w, d)
+  w.chkScroll = math.max(0, math.min(w.chkMax or 0, (w.chkScroll or 0) + d))
+  lcd.invalidate()
+end
+
 local TAP_PX = 12   -- a touch that moves less than this is a tap, more is a drag
 
 -- Map +/-: which button a point belongs to (-1 zoom in, 1 zoom out, nil none). The squares are
@@ -1472,6 +1494,7 @@ local function event(w, category, value, x, y)
   if category == EVT_TOUCH then
     if value == TOUCH_START then
       w.touchX, w.touchY, w.touchScroll, w.dragged = x, y, w.msgScroll or 0, false
+      w.touchChk = w.chkScroll or 0
       return true
     end
     if value == TOUCH_MOVE then
@@ -1480,6 +1503,12 @@ local function event(w, category, value, x, y)
       if w.dragged and w.page == 3 and w.msgRowH then
         local rows = math.floor((y - w.touchY) / w.msgRowH + 0.5)
         w.msgScroll = math.max(0, math.min(w.msgMax or 0, w.touchScroll + rows))
+        lcd.invalidate()
+      end
+      -- sensor check: drag up to see the rows further down (like a phone)
+      if w.dragged and w.page == PAGE_CHECK and w.chkRowH then
+        local rows = math.floor((w.touchY - y) / w.chkRowH + 0.5)
+        w.chkScroll = math.max(0, math.min(w.chkMax or 0, (w.touchChk or 0) + rows))
         lcd.invalidate()
       end
       return true
@@ -1508,10 +1537,14 @@ local function event(w, category, value, x, y)
       return true
     elseif value == KEY_ROTARY_LEFT then
       -- messages page: the wheel scrolls (left = older); elsewhere it zooms
-      if w.page == 3 then msgScrollBy(w, 1) else zoomStep(w, 1) lcd.invalidate() end
+      if w.page == 3 then msgScrollBy(w, 1)
+      elseif w.page == PAGE_CHECK then chkScrollBy(w, -1)
+      else zoomStep(w, 1) lcd.invalidate() end
       return true
     elseif value == KEY_ROTARY_RIGHT then
-      if w.page == 3 then msgScrollBy(w, -1) else zoomStep(w, -1) lcd.invalidate() end
+      if w.page == 3 then msgScrollBy(w, -1)
+      elseif w.page == PAGE_CHECK then chkScrollBy(w, 1)
+      else zoomStep(w, -1) lcd.invalidate() end
       return true
     end
   end

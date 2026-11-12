@@ -766,6 +766,21 @@ frame(G.EVT_VIRTUAL_ENTER)
 assert wd.page == 4, 'flight stats page switched on (a flight to show), page %s' % wd.page
 frame(G.EVT_VIRTUAL_ENTER)
 assert wd.page == 5, 'sensor check page switched on, page %s' % wd.page
+# sensor check rows that don't fit scroll: wheel next = further down, drag up = further down
+frame()
+mx, lv0 = wd.chkMax, wd.level
+for _ in range(50): frame(G.EVT_VIRTUAL_NEXT)
+assert wd.chkScroll == mx, ('wheel to the end', wd.chkScroll, mx)
+if mx > 0:
+    frame(); cv.img.save(os.path.join(OUT, 'check_scrolled_%s.png' % tag))
+    rh = wd.chkRowH
+    frame(G.EVT_TOUCH_FIRST, {'x': 200, 'y': 60})
+    frame(G.EVT_TOUCH_SLIDE, {'x': 200, 'y': 60 + 2 * rh})
+    frame(G.EVT_TOUCH_BREAK, {'x': 200, 'y': 60 + 2 * rh})
+    assert wd.chkScroll == max(0, mx - 2) and wd.page == 5, ('drag', wd.chkScroll, wd.page)
+for _ in range(50): frame(G.EVT_VIRTUAL_PREV)
+assert wd.chkScroll == 0 and wd.level == lv0, 'wheel back to the top; map zoom untouched'
+print('sensor check scroll OK (rows hidden at the top: %d)' % mx)
 frame(G.EVT_VIRTUAL_ENTER)
 assert wd.page == 1, 'then back to page 1, page %s' % wd.page
 wd.msgPage = 1 if NATIVE else 2
