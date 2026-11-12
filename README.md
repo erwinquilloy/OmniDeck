@@ -314,6 +314,8 @@ Flight time, distance flown, furthest from home, maximum altitude, ground speed 
 
 Each value, the radio sensor it comes from, and its reading. "not found" in red means the radio has no such sensor (here INAV with no pitot, so no airspeed). The header shows the version, the link, whether passthrough is arriving, the flight controller type and the Lua time per update. Turn it on with **Sensor check page** and send a photo of it with any report.
 
+When the rows don't all fit (smaller screens such as the TX16S MK2, or the extra S.Port and EdgeTX link lines in the header), the list scrolls under the header: turn the wheel, or drag up and down. A scrollbar at the right edge shows there is more. A tap still turns the page.
+
 ## On EdgeTX
 
 | | | |
