@@ -798,6 +798,23 @@ if not NATIVE:
 assert widget.page == 5, 'sensor check page switched on: %s' % widget.page
 cv = Canvas(); drawn.clear(); wt['paint'](widget); cv.img.save(os.path.join(OUT, 'check_%s.png' % tag))
 assert any('SENSOR CHECK' in t for t, c, x in drawn), 'sensor check page draws'
+# rows that don't fit scroll: wheel right = further down, drag up = further down; zoom untouched
+mx, rh, lv0, tz0 = widget.chkMax, widget.chkRowH, widget.level, widget.tz
+for _ in range(50): wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
+assert widget.chkScroll == mx, ('wheel to the end', widget.chkScroll, mx)
+drawn.clear(); wt['paint'](widget)
+assert any(t == 'rssi' for t, c, x in drawn), 'last sensor row visible at the end of the list'
+if mx > 0:
+    cv = Canvas(); drawn.clear(); wt['paint'](widget); cv.img.save(os.path.join(OUT, 'check_scrolled_%s.png' % tag))
+    TE = consts['EVT_TOUCH']
+    wt['event'](widget, TE, consts['TOUCH_START'], 300, 100)
+    wt['event'](widget, TE, consts['TOUCH_MOVE'], 300, 100 + 2 * rh)
+    wt['event'](widget, TE, consts['TOUCH_END'], 300, 100 + 2 * rh)
+    assert widget.chkScroll == max(0, mx - 2) and widget.page == 5, ('drag down shows earlier rows', widget.chkScroll, widget.page)
+for _ in range(50): wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_LEFT'], 0, 0)
+assert widget.chkScroll == 0, 'wheel back to the top'
+assert widget.level == lv0 and widget.tz == tz0, 'wheel on the sensor check page does not zoom the map'
+print('sensor check scroll OK (rows hidden at the top: %d)' % mx)
 ENTER()
 assert widget.page == 1, 'enter wraps to page 1'
 widget.msgPage = 1 if NATIVE else 2; widget.page = 2      # messages forced On (INAV) / Off (ArduPilot)
