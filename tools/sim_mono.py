@@ -182,10 +182,13 @@ def sim_dir(p):
     return L.eval('function(t) local i = 0 return function() i = i + 1 return t[i] end end')(L.table_from(names))
 G.dir = sim_dir
 G.getDateTime = lambda: L.table_from({'year': 2026, 'mon': 11, 'day': 13, 'hour': 9, 'min': 30, 'sec': 5})
-t_ms = [0]
+t_ms = [600000]   # the radio has been on 10 minutes when the script starts (exposed the voice-queue clock bug)
 G.getTime = lambda: t_ms[0] // 10
 G.getVersion = lambda: ('2.12.2', 'tx12mk2', 2, 12, 2, 'EdgeTX')
-G.playFile = lambda *a: None
+PLAYED = []
+def play_file(p):
+    PLAYED.append((t_ms[0], str(p)))
+G.playFile = play_file
 G.playNumber = lambda *a: None
 G.playTone = lambda *a: None
 G.EVT_VIRTUAL_ENTER, G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_PREV, G.EVT_VIRTUAL_EXIT = 0x2001, 0x2002, 0x2003, 0x2004
@@ -310,6 +313,7 @@ for m, sev in [('ArduPlane V4.7.2 (fb773567)', 6), ('PreArm: Throttle below fail
 st.update(wpn=3, wpd=800, wpb=90, roll=0, pitch=2, yaw=90)
 for k in range(30):
     st['mah'] = 640 + 4 * k
+    if k == 15: st['mode'] = 11; MODE_T = t_ms[0]   # FBWA -> RTL halfway (ArduPlane 11): spoken
     st.update(lat=HOME[0] + 0.0004 * k, lon=HOME[1] + 0.0002 * k * k / 10)
     run(frames=10)
 run(G.EVT_VIRTUAL_ENTER, frames=5)
@@ -364,6 +368,19 @@ if not NATIVE:
   print('log:', logs[0]); print(open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs', logs[0])).read()[:700])
   run(G.EVT_VIRTUAL_ENTER)
   assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
+# voice: with Aria picked on first run, the welcome plays at once and the call-outs follow,
+# every one a file that exists in the pack
+clips = [p for _, p in PLAYED]
+print('sounds played:', len(clips), [c.rsplit('/', 1)[-1] for c in clips][:14])
+if not NATIVE and not IMPERIAL and not ALLPAGES:
+    assert clips and clips[0].endswith('/Aria/omniready.wav'), clips[:3]
+    names = [c.rsplit('/', 1)[-1] for c in clips]
+    for need in ('rtl.wav', 'disarmed.wav'):
+        assert need in names, (need, names)
+    assert clips[0] == '/SCRIPTS/OMNID/audio/Aria/omniready.wav'
+    t_rtl = next(tt for tt, p in PLAYED if p.endswith('/rtl.wav'))
+    assert t_rtl - MODE_T < 2000, 'RTL spoken %.1f s after the switch' % ((t_rtl - MODE_T) / 1000)
+    print('RTL spoken %.1f s after the mode switch' % ((t_rtl - MODE_T) / 1000))
 L.execute('collectgarbage()'); mem_now = L.eval('(collectgarbage("count"))')
 print('page cycle OK')
 print('instructions per call: init %d, run max %d, background max %d' % (worst['init'], worst['run'], worst['background']))

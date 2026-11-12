@@ -142,10 +142,13 @@ local greeted = false
 -- "OmniDeck telemetry ready" straight away when the script starts (radio power-on or a model
 -- selected), as the colour builds and Yaapu do: played directly, not queued behind telemetry,
 -- and before any telemetry arrives
-function A.greetNow()
+-- now: the same clock A.update gets (the adapter's, from 0 at script start). It was stamped with
+-- getTime()/100, the radio's time since power-on: the queue then held every clip until the
+-- script's own clock caught up, minutes on a radio that had been on a while (TX12 2026-11-13).
+function A.greetNow(now)
   if greeted or not voice then return end
   greeted = true
-  lastPlay = getTime and getTime() / 100 or 0
+  lastPlay = now or 0
   pcall(playFile, DIR .. voice .. "/omniready.wav")
 end
 

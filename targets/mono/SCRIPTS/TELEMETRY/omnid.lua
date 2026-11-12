@@ -176,7 +176,8 @@ local function init()
   C = nil
   A.setVoice(cfg.voice)
   A.setBeep(cfg.beep)
-  A.greetNow()
+  E.tick()
+  A.greetNow(E.os.clock())
   A.cells, A.vLow, A.vCrit = cfg.cells, cfg.lowVolt / 100, cfg.critVolt / 100
   ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
   loadPage(startPage())
