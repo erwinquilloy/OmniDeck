@@ -346,7 +346,7 @@ INAV / Betaflight: nothing to set on the aircraft beyond normal telemetry. Disco
 
 
 SETTINGS (long-press the widget > Configure widget)
-- Voice: Aria, Guy, Christopher or Michelle, or Off. Picking one plays a short test clip.
+- Voice: Aria or Guy, or Off. Picking one plays a short test clip.
   If you have Yaapu's English sounds, a copy of that folder in scripts/omnideck/audio/ also works.
 - Message beep: a short tone on new status messages (every message, warnings and errors, or off).
 - Battery mAh (INAV/BF only): your pack size. INAV and Betaflight don't send it; ArduPilot sends

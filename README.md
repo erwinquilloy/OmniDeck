@@ -74,15 +74,15 @@ ArduPilot sends FrSky passthrough telemetry (the same data Yaapu uses) over ever
 
 ### ArduPilot over TBS Crossfire at 50 Hz
 
-TBS Crossfire drops to its 50 Hz RF mode when you force it, or on the Dynamic profile when the signal weakens. ArduPilot then sends its passthrough data (horizon, speeds, altitude, flight mode, battery) only once every 3 seconds, so OmniDeck, like Yaapu, can only update those every 3 s.
+**A slow, steppy display at 50 Hz is normal, and Yaapu behaves the same way.** TBS Crossfire drops to its 50 Hz RF mode when you force it, or on the Dynamic profile when the signal weakens. At 50 Hz the return link from the receiver to the radio is very narrow: ArduPilot sends its telemetry (horizon, speeds, altitude, flight mode, battery) only once every 3 seconds, and that data also waits in the link, so the radio's horizon can run a few seconds behind the aircraft. Your goggles' OSD is not affected: the flight controller draws it, and it travels on the video link. Mission Planner over USB is not affected either.
 
-Since 0.3c, once ArduPilot has reported a TBS link below 150 Hz (its `CRSFv3: Link rate 50Hz` message) and the first 3-second pause has been seen:
+What 0.3c does about it, once ArduPilot has reported a TBS link below 150 Hz (its `CRSFv3: Link rate 50Hz` message) and the first 3-second pause has been seen:
 
 - no NO TELEMETRY flash between bursts, speeds stay on screen, and READY TO ARM works;
 - ground speed, satellites and distance to home update every second, and voltage, current and mAh every 2 s, from the standard Crossfire GPS and battery sensors (discover them on the radio once);
-- horizon, airspeed, altitude and flight mode still update every 3 s.
+- the horizon, airspeed, altitude and flight mode can only update as fast as ArduPilot sends them.
 
-ELRS, mLRS, F.Port and S.Port are not affected. For the smoothest display, force Crossfire to 150 Hz on the transmitter.
+ELRS, mLRS, F.Port and S.Port are not affected. **For a live horizon on the radio, force Crossfire to 150 Hz on the transmitter.**
 
 ## Install
 
@@ -91,8 +91,6 @@ Download the package for your radio from the [releases page](https://github.com/
 | Package | For |
 |---|---|
 | `OmniDeck_Ethos_0.3c.zip` | Any Ethos colour radio. Holds both screen sizes; the radio picks the right one. |
-| `OmniDeck_Ethos_0.3c_X20.zip` | X20 family only (800 x 480). Smaller download. |
-| `OmniDeck_Ethos_0.3c_X18.zip` | X18 and other 480 x 320 Ethos screens only. |
 | `OmniDeck_EdgeTX_0.3c.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
 
 **No SD card?** On radios that keep everything on built-in storage, the same folders go on the radio's internal drive: the one that already holds `scripts` (Ethos) or `WIDGETS` (EdgeTX). Wherever this guide says "card", read that drive. Put map tiles on the same drive as OmniDeck, and check the free space first: a satellite tile set can run to hundreds of MB.
@@ -107,7 +105,7 @@ Download the package for your radio from the [releases page](https://github.com/
    ├── main.lua      loader: picks x18/ or x20/ by screen width
    ├── x20/          the code for 800 x 480 screens
    ├── x18/          the code for 480 x 320 and smaller
-   ├── audio/        voice packs: Aria, Guy, Christopher, Michelle
+   ├── audio/        voice packs: Aria, Guy
    ├── tones/        message beeps
    ├── logos/        panel logos; add your own PNG here
    ├── missions/     ArduPilot .waypoints files
@@ -408,7 +406,7 @@ One tile: `/IMAGES/ethosmaps/maps/GOOGLE/Satellite/15/27470/15200.jpg`. In OmniD
 ## Voice and alarms
 
 - **Call-outs:** flight modes, arm and disarm, battery percent (50, 40, 30, 25, 20, 15, 10 and 5 % while armed), failsafes, GPS fix changes, telemetry lost and recovered, ready and not ready to arm, and status messages worth hearing, such as "Takeoff complete".
-- **Voice packs:** Ethos ships Aria, Guy, Christopher and Michelle in `scripts/omnideck/audio/`; EdgeTX ships Aria and Guy in `WIDGETS/OmniDeck/audio/`. A copy of Yaapu's English sound folder there also works, because the file names match.
+- **Voice packs:** Aria and Guy come with both packages, in `scripts/omnideck/audio/` on Ethos and `WIDGETS/OmniDeck/audio/` on EdgeTX. A copy of Yaapu's English sound folder there also works, because the file names match.
 - **Alarms:** low and critical voltage per cell, and the low-altitude "Terrain, pull up". See [Settings](#settings).
 
 ## Reporting a problem
@@ -430,7 +428,7 @@ The shared code in `scripts/omnideck/` runs on Ethos as it is. On EdgeTX, `edget
 - **Ethos simulator:** `python tools/sim.py [outdir] [--sport] [--native] [--tiles] [--res 800x480|480x320|480x272]` runs the widget in Lua 5.4 (lupa) against a stubbed Ethos API, feeds a simulated flight encoded as `AP_Frsky_SPort_Passthrough.cpp` does (or native sensors with `--native`), checks the decoded values and renders every page to PNG.
 - **EdgeTX simulator:** `python tools/sim_edgetx.py [outdir] [--sport] [--native]` runs it in Lua 5.2 with EdgeTX's instruction limit (about 20,000 Lua instructions per widget call) and checks decoding, pages, touch, sound, link loss, the Setup tool and a 120-waypoint mission. The heaviest page must stay within 88 % of the limit.
 - **EdgeTX build:** `python tools/build_edgetx.py <SD root> [--audio <voice folders>]` writes `WIDGETS/OmniDeck/` and the tools.
-- **Voice packs:** `python tools/voicepack.py <folder> Aria Christopher Michelle` builds packs from `tools/phrases.psv`.
+- **Voice packs:** `python tools/voicepack.py <folder> Aria Guy` builds packs from `tools/phrases.psv`.
 
 ## Credits
 
@@ -444,7 +442,7 @@ OmniDeck is written by Erwin Quilloy. It builds on what these projects worked ou
 - **dashx Project:** reading Ethos's own telemetry-lost flag, so a lost link shows at once.
 - **[LeoBar (leobarua)](https://github.com/leobarua):** hardware for development and testing.
 - **Testers, [Marcin J (jaroszmm)](https://github.com/jaroszmm), [Carticiak](https://github.com/Carticiak), Pete Davey and [Leslie Yagin (molokaiboy)](https://github.com/molokaiboy):** testing the pre-release builds and their valuable feedback.
-- **Voices:** Aria, Christopher and Michelle are generated with Microsoft Edge text-to-speech voices.
+- **Voices:** Aria and Guy are generated with Microsoft Edge text-to-speech voices.
 
 ## Licence
 
