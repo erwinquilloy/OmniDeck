@@ -25,7 +25,7 @@ OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out_mono')
 SPORT, NATIVE = '--sport' in sys.argv, '--native' in sys.argv
 SD = os.path.normpath(os.path.join(HERE, '..', 'targets', 'mono'))
 os.makedirs(OUT, exist_ok=True)
-tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '')
+tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '') + ('_notable' if '--notable' in sys.argv else '')
 
 L = lua52.LuaRuntime(unpack_returned_tuples=True)
 G = L.globals()
@@ -173,6 +173,14 @@ def io_write(k, *parts):
     for s in parts: handles[k].write(str(s).encode('latin-1'))
 def io_close(k): handles.pop(k).close()
 G.io = L.table_from({'open': io_open, 'read': io_read, 'write': io_write, 'close': io_close})
+# dir(): as EdgeTX, an iterator over a folder's names; two voice packs on the scratch card
+for pk in ('Guy', 'Aria'):
+    os.makedirs(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'audio', pk), exist_ok=True)
+def sim_dir(p):
+    d = os.path.join(SIMSD, *[x for x in str(p).split('/') if x])
+    names = sorted(os.listdir(d), reverse=True) if os.path.isdir(d) else []
+    return L.eval('function(t) local i = 0 return function() i = i + 1 return t[i] end end')(L.table_from(names))
+G.dir = sim_dir
 G.getDateTime = lambda: L.table_from({'year': 2026, 'mon': 11, 'day': 13, 'hour': 9, 'min': 30, 'sec': 5})
 t_ms = [0]
 G.getTime = lambda: t_ms[0] // 10
@@ -188,7 +196,7 @@ def load_script(path, mode='bt', env=None):
     f = L.eval('function(src, name) local f, e = load(src, "@" .. name, "t") if not f then error(e) end return f end')
     return f(src, str(path))
 G.loadScript = load_script
-G.dir = None
+# G.dir: set with the scratch card below
 
 crsf_q, sport_q = [], []
 def crsf_pop():
@@ -217,15 +225,18 @@ G.model = L.table_from({'getSensor': lambda i: None,
 # instruction counting, as EdgeTX's hook does
 L.execute('''
 _N = 0
+local pack, unpack = table.pack, table.unpack
 function _CALL(f, ...)
   _N = 0
   debug.sethook(function() _N = _N + 100 end, "", 100)
-  local r = table.pack(pcall(f, ...))
+  local r = pack(pcall(f, ...))
   debug.sethook()
   if not r[1] then error(r[2], 0) end
-  return table.unpack(r, 2, r.n)
+  return unpack(r, 2, r.n)
 end''')
 CALL = G._CALL
+if '--notable' in sys.argv:   # as EdgeTX on the TX12 MK2: no table library
+    L.execute('table = nil')
 
 # ------------------------------------------------------------------ vehicle
 HOME = (43.49323, 142.88785)
@@ -362,7 +373,6 @@ print('Mono checks OK', tag)
 G.loadScript = load_script
 tool = load_script('/SCRIPTS/TOOLS/OmniDeck Setup.lua')()
 tool['init']()
-G.dir = lambda p: iter([])
 tool['run'](0); save('setup_%s.png' % tag)
 for e in (G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_ENTER, G.EVT_VIRTUAL_NEXT):
     tool['run'](e)

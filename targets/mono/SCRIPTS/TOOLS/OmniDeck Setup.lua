@@ -3,6 +3,48 @@
 -- ENTER keeps it); RTN leaves. EdgeTX stops telemetry scripts while a tool runs and starts them
 -- again afterwards, so the changes apply as soon as you leave.
 
+-- EdgeTX on this radio may run without Lua's table library ("attempt to index a nil value (field
+-- 'table')", TX12 MK2, EdgeTX 2.12, 2026-11-13). The few calls OmniDeck makes, in plain Lua, only
+-- where the library is missing.
+if rawget(_G, "table") == nil then
+  local T = {}
+  function T.insert(t, a, b)
+    if b == nil then t[#t + 1] = a return end
+    for i = #t, a, -1 do t[i + 1] = t[i] end
+    t[a] = b
+  end
+  function T.remove(t, pos)
+    local n = #t
+    if n == 0 then return nil end
+    pos = pos or n
+    local v = t[pos]
+    for i = pos, n - 1 do t[i] = t[i + 1] end
+    t[n] = nil
+    return v
+  end
+  function T.concat(t, sep, i, j)
+    sep, i, j = sep or "", i or 1, j or #t
+    local out = ""
+    for k = i, j do out = out .. t[k] .. (k < j and sep or "") end
+    return out
+  end
+  function T.sort(t, lt)
+    lt = lt or function(a, b) return a < b end
+    for i = 2, #t do
+      local v, k = t[i], i - 1
+      while k >= 1 and lt(v, t[k]) do t[k + 1] = t[k] k = k - 1 end
+      t[k + 1] = v
+    end
+  end
+  local function unpack(t, i, j)
+    i, j = i or 1, j or #t
+    if i > j then return end
+    return t[i], unpack(t, i + 1, j)
+  end
+  T.unpack = unpack
+  table = T
+end
+
 local C, vals, items = nil, nil, {}
 local sel, top, editing, msg = 1, 1, false, ""
 local ROWS = 5
