@@ -86,7 +86,7 @@ ELRS, mLRS, F.Port and S.Port are not affected. **For a live horizon on the radi
 
 ## Install
 
-Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC. Each package holds an `INSTALL.txt` with the same steps.
+Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC; the Ethos Suite zip goes to Ethos Suite as it is, unopened. Each package holds an `INSTALL.txt` with the same steps.
 
 | Package | For |
 |---|---|
