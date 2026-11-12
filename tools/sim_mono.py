@@ -84,6 +84,7 @@ FONT_S = {
 '>':'0100 0010 0001 0010 0100 0000',
 '-':'0000 0000 1111 0000 0000 0000',
 ' ':'0000 0000 0000 0000 0000 0000',
+'N':'1001 1101 1101 1011 1011 1001',
 '?':'0110 1001 0010 0100 0000 0100',
 }
 def setpx(x, y, v):
@@ -196,6 +197,7 @@ HOME = (43.49323, 142.88785)
 st = dict(lat=HOME[0], lon=HOME[1], hlat=HOME[0], hlon=HOME[1], mode=5, armed=True, thr=55, sats=14, hdop=0.8,
           altmsl=160, volt=15.8, curr=12.3, mah=640, alt=120, vs=1.2, **{'as': 17.0}, gs=18.5, yaw=30, roll=18, pitch=4,
           wdir=270, wspd=4.2, wpn=0, wpd=0, wpb=0)
+TEXTQ = []
 def feed():
     if NATIVE:
         native.update({'GPS': {'lat': st['lat'] + 0.004, 'lon': st['lon'] + 0.003}, 'Alt': st['alt'], 'VSpd': st['vs'],
@@ -204,6 +206,8 @@ def feed():
         return
     native.update({'RQly': 96, '1RSS': -72} if not SPORT else {'RSSI': 88})
     pk = packets(st)
+    if TEXTQ:   # status texts, one message per feed ride along as 0x5000 chunks
+        pk += [(0x5000, c) for c in TEXTQ.pop(0)]
     if SPORT:
         for a, v in pk: sport_q.append([0x1B, 0x10, a, v])
     else:
@@ -252,7 +256,30 @@ st.update(roll=10, pitch=3, lat=HOME[0] + 0.0095, lon=HOME[1] + 0.013, yaw=200)
 run(frames=40); save('main_away_%s.png' % tag)
 words = ' '.join(t for t, x, y in texts)
 assert 'H' in words.split() and '1.5K' in words, words
-run(G.EVT_VIRTUAL_ENTER)
+# a short flight east of home, towards waypoint 3, with status texts
+from simtelem import text_chunks
+for m, sev in [('ArduPlane V4.7.2 (fb773567)', 6), ('PreArm: Throttle below failsafe', 2), ('Mission: 3 WP', 6),
+               ('Takeoff complete at 120 m', 6)]:
+    TEXTQ.append(text_chunks(m, sev))
+st.update(wpn=3, wpd=800, wpb=90, roll=0, pitch=2, yaw=90)
+for k in range(30):
+    st.update(lat=HOME[0] + 0.0004 * k, lon=HOME[1] + 0.0002 * k * k / 10)
+    run(frames=10)
+run(G.EVT_VIRTUAL_ENTER, frames=5)
+words = ' '.join(t for t, x, y in texts)
+save('map_%s.png' % tag)
+if not NATIVE:
+    assert 'WP3' in words and 'H' in words.split(), words
+print('map page OK:', words[:100])
+run(G.EVT_VIRTUAL_ENTER, frames=5)
+words = ' '.join(t for t, x, y in texts)
+save('msg_%s.png' % tag)
+if not NATIVE:
+    assert 'MESSAGES' in words and any('Takeoff' in t for t, x, y in texts), words
+    assert any(t.startswith('! PreArm') for t, x, y in texts), words
+print('messages page OK:', words[:140])
+run(G.EVT_VIRTUAL_PREV, frames=1); save('msg_scrolled_%s.png' % tag)
+run(G.EVT_VIRTUAL_ENTER, frames=5)
 words = ' '.join(t for t, x, y in texts)
 assert 'LINK CHECK' in words, words
 if not NATIVE:

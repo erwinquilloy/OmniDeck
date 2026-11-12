@@ -4,7 +4,7 @@
   Betaflight from the radio's own sensors - the same decoding as the colour OmniDeck.
 
   Set it up as a telemetry screen: MODEL > DISPLAY > a screen > Script > omnid.
-  ENTER: next page. Settings come from SYS > Tools > OmniDeck Setup (a later step).
+  ENTER: next page (main, map, messages, link check); the wheel scrolls the messages. Settings come from SYS > Tools > OmniDeck Setup (a later step).
 
   Memory: EdgeTX gives a telemetry script about 127 KB of Lua memory on a TX12 MK2 (measured).
   The telemetry code stays loaded; a page is loaded when it is shown and dropped when another
@@ -16,10 +16,45 @@
 
 local ROOT = "/SCRIPTS/OMNID/"
 local VERSION = "0.1.0"
-local PAGES = { "pmain.lua", "plink.lua" }
+local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "plink.lua" }
 
 local E, T
-local ctx = { version = VERSION, armedFor = 0 }
+local ctx = { version = VERSION, armedFor = 0, trailE = {}, trailN = {} }
+
+-- flight trail for the map, in metres east / north of home. A point every TRAIL_STEP metres;
+-- when full, every other point goes and the spacing doubles, so the whole flight stays in
+-- TRAIL_MAX points (about 3 KB) however long it is. Cleared when home moves (a new flight).
+local TRAIL_MAX, TRAIL_STEP0 = 80, 15
+local trailStep, trailLat, trailLon = TRAIL_STEP0, nil, nil
+local function trail(s)
+  if not (s.lat and s.homeLat) then return end
+  local tE, tN = ctx.trailE, ctx.trailN
+  if s.homeLat ~= trailLat or s.homeLon ~= trailLon then
+    if trailLat then
+      local dE = (s.homeLon - trailLon) * 111320 * math.cos(math.rad(s.homeLat))
+      local dN = (s.homeLat - trailLat) * 111320
+      if dE * dE + dN * dN > 250000 then   -- home moved over 500 m: a new flight
+        tE, tN = {}, {}
+        ctx.trailE, ctx.trailN, trailStep = tE, tN, TRAIL_STEP0
+      end
+    end
+    trailLat, trailLon = s.homeLat, s.homeLon
+  end
+  local e = (s.lon - s.homeLon) * 111320 * math.cos(math.rad(s.homeLat))
+  local n = (s.lat - s.homeLat) * 111320
+  local k = #tE
+  if k > 0 then
+    local de, dn = e - tE[k], n - tN[k]
+    if de * de + dn * dn < trailStep * trailStep then return end
+  end
+  tE[k + 1], tN[k + 1] = e, n
+  if k + 1 >= TRAIL_MAX then
+    local j = 0
+    for i = 1, k + 1, 2 do j = j + 1; tE[j], tN[j] = tE[i], tN[i] end
+    for i = k + 1, j + 1, -1 do tE[i], tN[i] = nil, nil end
+    trailStep = trailStep * 2
+  end
+end
 local pageN, page = 1, nil
 
 local function loadPage(n)
@@ -42,6 +77,7 @@ local function pump()
   else
     ctx.armAt = nil
   end
+  trail(s)
 end
 
 local function init()
