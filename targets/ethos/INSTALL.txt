@@ -364,6 +364,11 @@ ArduPilot (FrSky passthrough, the same data Yaapu uses):
   mLRS:       set the Tx module to send CRSF passthrough to the radio.
 INAV / Betaflight: nothing to set on the aircraft beyond normal telemetry. Discover the sensors
   on the radio (Model > Telemetry > Discover new sensors) before using OmniDeck.
+LINK SETTINGS on the transmitter:
+  ELRS:          telemetry ratio 1:8 or more often (1:4, 1:2).
+  TBS Crossfire: Dynamic or 150 Hz forced. At 50 Hz the telemetry runs seconds late with any
+                 flight controller, and Dynamic drops to 50 Hz far out.
+  mLRS, F.Port:  the defaults work.
 
 
 SETTINGS (long-press the widget > Configure widget)

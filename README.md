@@ -171,6 +171,14 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
 - **Battery capacity:** ArduPilot sends `BATT_CAPACITY`. For INAV and Betaflight enter the pack size under **Battery mAh (INAV/BF only)**. The battery bar also needs a working current sensor.
 - **INAV virtual pitot** sends an estimate as if it were airspeed. Set the pitot to NONE if you would rather see ground speed on the tape.
 
+### Link settings on the transmitter
+
+| Link | Setting |
+|---|---|
+| ELRS | Telemetry ratio **1:8 or more often** (1:4, 1:2). |
+| TBS Crossfire | **Dynamic** or **150 Hz forced**. At 50 Hz the telemetry runs seconds late with any flight controller, and Dynamic drops to 50 Hz far out ([why](#ardupilot-over-tbs-crossfire-at-50-hz)). |
+| mLRS, F.Port | The defaults work. |
+
 ## Main page and HUD
 
 Yellow pins mark the top bar and the HUD, blue pins the top-right panel and the data blocks.
