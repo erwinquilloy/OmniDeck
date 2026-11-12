@@ -991,6 +991,29 @@ function T.detectLink()
   return linkKind
 end
 
+-- Sensor check (OmniDeck Setup: SENSOR PAGE): what every native sensor resolved to on this
+-- radio, so a tester's photo shows exactly what the telemetry code reads. Slimmer than the
+-- colour build's: no query text, which a 128 px line has no room for.
+local CHECK_KEYS = { "lat", "lon", "mode", "roll", "pitch", "hdg", "alt", "vspd", "gspd", "aspd",
+                     "sats", "volt", "curr", "mah", "lq", "rssi" }
+function T.sensorCheck()
+  local kind = T.detectLink()
+  local rows = { kind = kind }
+  if not kind then return rows end
+  for _, key in ipairs(CHECK_KEYS) do
+    local src = findSource(key, kind)
+    local row = { key = key, name = "-", value = "" }
+    if src then
+      local okN, n = pcall(function() return src:name() end)
+      local okV, v = pcall(function() return src:value() end)
+      row.name = okN and tostring(n) or "?"
+      row.value = okV and (type(v) == "number" and string.format("%.6g", v) or tostring(v)) or "err"
+    end
+    rows[#rows + 1] = row
+  end
+  return rows
+end
+
 -- ---------------------------------------------------------------- per-wakeup entry
 local nativeReadAt = -100
 local linkReadAt = -100   -- link quality sensors on the passthrough path (EdgeTX / OpenTX: 5 Hz)

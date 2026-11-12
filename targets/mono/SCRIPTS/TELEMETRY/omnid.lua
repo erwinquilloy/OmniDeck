@@ -4,8 +4,9 @@
   Betaflight from the radio's own sensors - the same decoding as the colour OmniDeck.
 
   Set it up as a telemetry screen: MODEL > DISPLAY > a screen > Script > omnid.
-  ENTER: next page (main, map, messages, link check); the wheel scrolls the messages.
-  The flight summary opens by itself at disarm; ENTER leaves it.
+  ENTER: next page - main, map, messages (ArduPilot only), flight stats (Setup: STATS PAGE),
+  link check, sensor check (Setup: SENSOR PAGE). The wheel or +/- scrolls messages and sensors.
+  The flight summary opens by itself at disarm (Setup: SUMMARY); ENTER leaves it.
   Settings: SYS > Tools > OmniDeck Setup (per model; applied when the tool is left).
 
   Memory: EdgeTX gives a telemetry script about 127 KB of Lua memory on a TX12 MK2 (measured).
@@ -18,24 +19,40 @@
 
 local ROOT = "/SCRIPTS/OMNID/"
 local VERSION = "0.1.0"
-local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "plink.lua" }
+-- the page cycle; a page whose test fails is skipped
+local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "psum.lua", "plink.lua", "psens.lua" }
+local SHOW = {
+  ["pmsg.lua"] = function(s, c) return s.fc == "ArduPilot" end,
+  ["psum.lua"] = function(s, c) return c.statsPage == 1 end,
+  ["psens.lua"] = function(s, c) return c.checkPage == 1 end,
+}
 
 local E, T, F, A
 local ctx = { version = VERSION, flightT = 0, trailE = {}, trailN = {} }
 local cfg
-local pageN, page, onSummary = 1, nil, false
+local pageN, page, onSummary = 1, nil, false   -- onSummary: opened by the disarm, not the cycle
 
 local function load(name)
   local chunk = loadScript(ROOT .. name, OD_DEBUGLOAD and "T" or "bt")
   return chunk and chunk() or nil
 end
 
-local function loadPage(n, file)
+local function loadPage(n, auto)
   page = nil
   collectgarbage()
-  page = load(file or PAGES[n])
-  pageN, onSummary = n, file ~= nil
+  page = load(PAGES[n])
+  pageN, onSummary = n, auto == true
   collectgarbage()
+end
+
+local function nextPage()
+  local s = T.s
+  for k = 1, #PAGES do
+    local n = (pageN + k - 1) % #PAGES + 1
+    local test = SHOW[PAGES[n]]
+    if not test or test(s, cfg) then return n end
+  end
+  return 1
 end
 
 -- flight trail for the map, in metres east / north of home. A point every TRAIL_STEP metres;
@@ -117,6 +134,7 @@ local function init()
   C = nil
   A.setVoice(cfg.voice)
   A.setBeep(cfg.beep)
+  A.greetNow()
   A.cells, A.vLow, A.vCrit = cfg.cells, cfg.lowVolt / 100, cfg.critVolt / 100
   ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
   loadPage(startPage())
@@ -130,12 +148,12 @@ local function run(event)
   pump()
   if ctx.wantSummary then
     ctx.wantSummary = false
-    loadPage(pageN, "psum.lua")
+    loadPage(4, true)
   elseif ctx.wantStart then
     ctx.wantStart = false
     loadPage(startPage())
   elseif event == EVT_VIRTUAL_ENTER then
-    if onSummary then loadPage(startPage()) else loadPage(pageN % #PAGES + 1) end
+    if onSummary then loadPage(startPage()) else loadPage(nextPage()) end
   end
   lcd.clear()
   if page then

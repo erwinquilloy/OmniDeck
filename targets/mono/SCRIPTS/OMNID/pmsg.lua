@@ -1,6 +1,7 @@
 --[[
   OmniDeck Mono, messages page (128x64): the flight controller's status texts, newest at the
   bottom, long ones wrapped to 21 characters a line, warnings and errors marked "!".
+  Only in the page cycle for ArduPilot (INAV and Betaflight send no status texts this way).
   The wheel (or the +/- keys) scrolls back; the view stays put while new messages arrive,
   and returns to the newest when scrolled to the bottom again.
 ]]
@@ -46,8 +47,12 @@ local function draw(ctx, event)
   seenTotal = total
 
   local maxScroll = math.max(0, #lines - ROWS)
-  if event == EVT_VIRTUAL_PREV or event == EVT_VIRTUAL_DEC then scroll = scroll + 1
-  elseif event == EVT_VIRTUAL_NEXT or event == EVT_VIRTUAL_INC then scroll = scroll - 1 end
+  -- wheel up / minus: back to older lines; wheel down / plus: towards the newest
+  local e = (event ~= 0) and event or -1   -- a key constant this radio lacks is nil: never matches
+  if e == EVT_VIRTUAL_PREV or e == EVT_VIRTUAL_DEC or e == EVT_ROT_LEFT or e == EVT_MINUS_FIRST
+     or e == EVT_MINUS_REPT then scroll = scroll + 1
+  elseif e == EVT_VIRTUAL_NEXT or e == EVT_VIRTUAL_INC or e == EVT_ROT_RIGHT or e == EVT_PLUS_FIRST
+     or e == EVT_PLUS_REPT then scroll = scroll - 1 end
   if scroll < 0 then scroll = 0 elseif scroll > maxScroll then scroll = maxScroll end
 
   local first = #lines - ROWS + 1 - scroll

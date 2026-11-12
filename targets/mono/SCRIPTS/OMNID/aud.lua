@@ -139,6 +139,15 @@ local function pump(now)
 end
 
 local greeted = false
+-- "OmniDeck telemetry ready" straight away when the script starts (radio power-on or a model
+-- selected), as the colour builds and Yaapu do: played directly, not queued behind telemetry,
+-- and before any telemetry arrives
+function A.greetNow()
+  if greeted or not voice then return end
+  greeted = true
+  lastPlay = getTime and getTime() / 100 or 0
+  pcall(playFile, DIR .. voice .. "/omniready.wav")
+end
 
 -- voltage per cell, in two stages: low ("Low voltage", again every 30 s) and critical
 -- ("Critical voltage", every 15 s); each must hold 5 s, so a dip under load doesn't count.

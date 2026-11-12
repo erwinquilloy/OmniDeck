@@ -1,20 +1,21 @@
 --[[
   OmniDeck Mono, flight summary (128x64): opens by itself at disarm after at least 10 s armed
-  (Setup: SUMMARY). The same figures go into the flight log file.
-  ENTER: back to the start page.
+  (Setup: SUMMARY); ENTER then goes back to the start page. With STATS PAGE on it is also in the
+  page cycle, showing the flight in progress (or the last one). The same figures go into the
+  flight log file.
 ]]
 
 local floor = math.floor
 
 local function draw(ctx)
-  local f, u = ctx.F.last(), ctx.u
+  local f, u = ctx.F.live(), ctx.u
   lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
-  lcd.drawText(1, 1, "FLIGHT SUMMARY", INVERS)
+  lcd.drawText(1, 1, ctx.F.last() == f and "FLIGHT SUMMARY" or "FLIGHT STATS", INVERS)
   if not f then
     lcd.drawText(1, 30, "NO FLIGHT YET", 0)
     return
   end
-  local t = floor(f.time or 0)
+  local t = floor(f.time or ctx.flightT or 0)
   local spd = f.maxAspd or f.maxGspd
   local rows = {
     { "FLIGHT", string.format("%02d:%02d", floor(t / 60), t % 60) },

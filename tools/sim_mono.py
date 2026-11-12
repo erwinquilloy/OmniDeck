@@ -25,7 +25,7 @@ OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out_mono')
 SPORT, NATIVE = '--sport' in sys.argv, '--native' in sys.argv
 SD = os.path.normpath(os.path.join(HERE, '..', 'targets', 'mono'))
 os.makedirs(OUT, exist_ok=True)
-tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '')
+tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '')
 
 L = lua52.LuaRuntime(unpack_returned_tuples=True)
 G = L.globals()
@@ -146,9 +146,10 @@ import shutil
 shutil.rmtree(SIMSD, ignore_errors=True)
 os.makedirs(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs'))
 IMPERIAL = '--imperial' in sys.argv
-if IMPERIAL:
+ALLPAGES = '--pages' in sys.argv
+if IMPERIAL or ALLPAGES:
     with open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg'), 'w') as f:
-        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\n')
+        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\n')
 def sd_path(p, base):
     return os.path.join(base, *[x for x in str(p).split('/') if x])
 handles = {}
@@ -305,14 +306,21 @@ save('map_%s.png' % tag)
 if not NATIVE:
     assert 'WP3' in words and 'H' in words.split(), words
 print('map page OK:', words[:100])
-run(G.EVT_VIRTUAL_ENTER, frames=5)
-words = ' '.join(t for t, x, y in texts)
-save('msg_%s.png' % tag)
-if not NATIVE:
+if not NATIVE:   # messages: ArduPilot only
+    run(G.EVT_VIRTUAL_ENTER, frames=5)
+    words = ' '.join(t for t, x, y in texts)
+    save('msg_%s.png' % tag)
     assert 'MESSAGES' in words and any('Takeoff' in t for t, x, y in texts), words
     assert any(t.startswith('! PreArm') for t, x, y in texts), words
-print('messages page OK:', words[:140])
-run(G.EVT_VIRTUAL_PREV, frames=1); save('msg_scrolled_%s.png' % tag)
+    print('messages page OK:', words[:140])
+    run(G.EVT_VIRTUAL_PREV, frames=1); save('msg_scrolled_%s.png' % tag)
+    assert any('ArduPlane' in t for t, x, y in texts), 'wheel scrolls back to the first message'
+if ALLPAGES:     # flight stats in the cycle, live
+    run(G.EVT_VIRTUAL_ENTER, frames=5)
+    words = ' '.join(t for t, x, y in texts)
+    save('stats_%s.png' % tag)
+    assert 'FLIGHT STATS' in words, words
+    print('stats page OK:', words[:120])
 run(G.EVT_VIRTUAL_ENTER, frames=5)
 words = ' '.join(t for t, x, y in texts)
 assert 'LINK CHECK' in words, words
@@ -320,6 +328,12 @@ if not NATIVE:
     assert 'ARDUPILOT' in words and 'YES' in words, words
 save('link_%s.png' % tag)
 print('link page OK:', words[:140])
+if ALLPAGES:     # sensor check, page after the link page
+    run(G.EVT_VIRTUAL_ENTER, frames=5)
+    words = ' '.join(t for t, x, y in texts)
+    save('sensors_%s.png' % tag)
+    assert 'SENSORS' in words, words
+    print('sensor page OK:', words[:160])
 run(G.EVT_VIRTUAL_ENTER)
 assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER back to the main page'
 # disarm: the summary opens by itself and the flight log is written (the native-sensor feed
@@ -354,7 +368,7 @@ for e in (G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_ENTER, G.EVT_VIR
     tool['run'](e)
 save('setup_edit_%s.png' % tag)
 words = ' '.join(t for t, x, y in texts)
-assert 'OMNIDECK SETUP' in words and 'SPEED M/S' in words, words
+assert 'OMNIDECK SETUP' in words and ('SPEED KM/H' if IMPERIAL else 'SPEED M/S') in words, words
 cfgf = os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg')
-assert 'spdUnit=1' in open(cfgf).read()
+assert ('spdUnit=0' if IMPERIAL else 'spdUnit=1') in open(cfgf).read()
 print('setup tool OK:', words[:120])
