@@ -326,9 +326,9 @@ read the drive that holds the scripts folder.
 A. With Ethos Suite
 1. Connect the radio to the PC by USB and start Ethos Suite.
 2. Lua Library > Install from local .zip > pick OmniDeck_Ethos_Suite_0.3.0.zip.
-   The Suite installs to scripts/omnideck/ on the radio's storage and shows the version.
-3. The Suite package has no missions folder: to load ArduPilot .waypoints files, make
-   scripts/omnideck/missions/ yourself. The logs folder appears with the first flight log.
+   The Suite installs to scripts/omnideck/ on the radio's storage.
+3. If scripts/omnideck/missions/ is not there afterwards, make it for ArduPilot .waypoints
+   files. The logs folder appears with the first flight log.
 4. Disconnect, restart the radio, and go on at step 4 of B.
 
 B. By hand

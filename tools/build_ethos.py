@@ -4,7 +4,7 @@
     python tools/build_ethos.py <out.zip> [--audio <folder with voice packs>]
                                           [--audio-from <older OmniDeck Ethos zip>]
                                           [--install <INSTALL.txt>]
-                                          [--suite <out-suite.zip> --notes <notes.md>]
+                                          [--suite <out-suite.zip>]
 
 The zip holds scripts/omnideck/ as it goes on the radio's SD card:
     main.lua      the loader: picks x18/ (screens 480 px wide or less) or x20/
@@ -17,13 +17,11 @@ Paths in the zip use forward slashes (PowerShell's Compress-Archive writes backs
 which break on Mac and Linux).
 
 --suite also writes the Ethos Suite package (Lua Library > Install from local .zip): the same
-files with scripts/omnideck/ stripped, plus ethos_lua_manifest.json at the root (FrSky Lua package
-spec V1, as ETHOSMappingWidget-Revisited ships it). The Suite installs them to SCRIPTS:/omnideck/
-on whichever storage the radio uses. The manifest lists folders by name, never "**": logs/ and
-missions/ hold the user's files and stay out of it. --notes: the release notes (markdown) shown
-in the Suite; the version must be x.y.z.
+files inside one omnideck/ folder, nothing else at the zip root. Ethos Suite unpacks a local zip
+into the scripts folder of whichever storage the radio uses, so this gives scripts/omnideck/.
+(A first try with files at the root and an ethos_lua_manifest.json naming "folder": "omnideck"
+put everything loose in scripts/ on an X20S: the Suite ignored the manifest.)
 """
-import json
 import os
 import re
 import sys
@@ -72,43 +70,26 @@ def audio_files(folder=None, older_zip=None):
     return out
 
 
-SUITE_KEY = 'com.github.erwinquilloy.omnideck'   # never change after the first Suite release
-SUITE_FOLDER = 'omnideck'                         # SCRIPTS:/omnideck/, as the SD-card zip
-SUITE_FILES = ['main.lua', 'x18/**', 'x20/**', 'tones/**', 'logos/**', 'audio/**']
+SUITE_TOP = 'omnideck/'   # the one folder at the root of the Suite zip
 
 
-def build_suite(sd_zip, out_zip, notes):
-    """the Ethos Suite package, from the SD-card zip just built"""
-    ver = version('x20')
-    if not re.fullmatch(r'\d+\.\d+\.\d+', ver):
-        sys.exit('Suite package needs an x.y.z version, ui.lua has %r' % ver)
-    text = open(notes, encoding='utf-8').read() if notes else ''
-    if len(text) > 32000:
-        sys.exit('release notes are %d chars, the Suite takes 32000' % len(text))
-    manifest = {'manifestVersion': 1, 'name': 'OmniDeck', 'key': SUITE_KEY, 'version': ver,
-                'folder': SUITE_FOLDER, 'files': SUITE_FILES}
-    if text:
-        manifest['releaseNotes'] = {'format': 'markdown', 'content': text}
-    covered = re.compile(r'^(main\.lua|(x18|x20|tones|logos|audio)/.+)$')
+def build_suite(sd_zip, out_zip):
+    """the Ethos Suite package, from the SD-card zip just built: scripts/omnideck/... becomes
+    omnideck/..., nothing else at the zip root"""
     with zipfile.ZipFile(sd_zip) as src, zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as z:
-        z.writestr('ethos_lua_manifest.json', json.dumps(manifest, indent=2, ensure_ascii=False).encode('utf-8'))
         n = 0
         for name in src.namelist():
-            if name == 'INSTALL.txt':         # for whoever opens the zip; not in files, so not installed
-                z.writestr(name, src.read(name))
-                continue
-            if not name.startswith(DST) or name.endswith('/'):
-                continue                      # the empty missions/ and logs/ folders
-            rel = name[len(DST):]
-            assert covered.match(rel), 'not covered by the manifest: ' + rel
-            z.writestr(rel, src.read(name))
-            n += 1
+            if not name.startswith(DST):
+                continue                      # INSTALL.txt stays in the SD-card zip only
+            z.writestr(SUITE_TOP + name[len(DST):], b'' if name.endswith('/') else src.read(name))
+            n += 0 if name.endswith('/') else 1
     with zipfile.ZipFile(out_zip) as z:
         assert z.testzip() is None
         names = z.namelist()
-    assert 'main.lua' in names and 'ethos_lua_manifest.json' in names
+    assert all(x.startswith(SUITE_TOP) for x in names), 'everything must sit inside omnideck/'
+    assert SUITE_TOP + 'main.lua' in names
     assert all('\\' not in x and not x.startswith('/') and '..' not in x.split('/') for x in names)
-    print('%s: %d files + manifest | %s %s -> SCRIPTS:/%s/' % (out_zip, n, SUITE_KEY, ver, SUITE_FOLDER))
+    print('%s: %d files, all inside %s' % (out_zip, n, SUITE_TOP))
     return out_zip
 
 
@@ -145,11 +126,11 @@ if __name__ == '__main__':
     if not a or a[0].startswith('--'):
         sys.exit(__doc__)
     opts = {}
-    for k in ('--audio', '--audio-from', '--install', '--suite', '--notes'):
+    for k in ('--audio', '--audio-from', '--install', '--suite'):
         if k in a:
             i = a.index(k)
             opts[k] = a[i + 1]
             del a[i:i + 2]
     build(a[0], opts.get('--audio'), opts.get('--audio-from'), opts.get('--install'))
     if opts.get('--suite'):
-        build_suite(a[0], opts['--suite'], opts.get('--notes'))
+        build_suite(a[0], opts['--suite'])

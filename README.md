@@ -86,7 +86,7 @@ ELRS, mLRS, F.Port and S.Port are not affected. **For a live horizon on the radi
 
 ## Install
 
-Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC; the Ethos Suite zip goes to Ethos Suite as it is, unopened. Each package holds an `INSTALL.txt` with the same steps.
+Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC; the Ethos Suite zip goes to Ethos Suite as it is, unopened. The other two zips each hold an `INSTALL.txt` with the same steps.
 
 | Package | For |
 |---|---|
@@ -103,10 +103,10 @@ Two ways in: Ethos Suite, or copying the files yourself. Both end with the same 
 **With Ethos Suite** (`OmniDeck_Ethos_Suite_0.3.0.zip`)
 
 1. Connect the radio by USB and start **Ethos Suite**.
-2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_0.3.0.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses, and shows its version.
+2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_0.3.0.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses.
 3. Disconnect and restart the radio, then carry on from step 4 below.
 
-The Suite package has no `missions` folder: to load ArduPilot missions, make `scripts/omnideck/missions/` yourself. The `logs` folder appears with the first flight log. Map tiles are never in a package; copy them as in [Map tiles](#map-tiles).
+If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPilot `.waypoints` files; the `logs` folder appears with the first flight log. Map tiles are never in a package; copy them as in [Map tiles](#map-tiles).
 
 **By hand** (`OmniDeck_Ethos_0.3.0.zip`)
 
