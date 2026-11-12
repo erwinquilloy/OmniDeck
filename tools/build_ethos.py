@@ -94,8 +94,11 @@ def build_suite(sd_zip, out_zip, notes):
         z.writestr('ethos_lua_manifest.json', json.dumps(manifest, indent=2, ensure_ascii=False).encode('utf-8'))
         n = 0
         for name in src.namelist():
+            if name == 'INSTALL.txt':         # for whoever opens the zip; not in files, so not installed
+                z.writestr(name, src.read(name))
+                continue
             if not name.startswith(DST) or name.endswith('/'):
-                continue                      # INSTALL.txt, the empty missions/ and logs/ folders
+                continue                      # the empty missions/ and logs/ folders
             rel = name[len(DST):]
             assert covered.match(rel), 'not covered by the manifest: ' + rel
             z.writestr(rel, src.read(name))

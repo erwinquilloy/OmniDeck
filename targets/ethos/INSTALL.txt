@@ -311,28 +311,49 @@ WHAT'S NEW IN TEST 2
 - The map page shows the aircraft's GPS position along the bottom (Lat, Lon).
 
 
-THIS IS A TEST BUILD. It has been checked in a simulator and on one X20S on the bench,
-not in flight. Do not rely on it, or on its voice call-outs, to fly.
+PUBLIC BETA. OmniDeck is a display: keep the radio's own telemetry alarms and the flight
+controller's failsafes as your safety net. Do not rely on it, or on its voice call-outs, alone.
 
 
 INSTALL
+Two packages, the same OmniDeck: pick one.
+  OmniDeck_Ethos_Suite_0.3.0.zip   install with Ethos Suite (A)
+  OmniDeck_Ethos_0.3.0.zip         copy by hand (B)
+Both put OmniDeck in scripts/omnideck/. On radios with built-in storage (X18, X20 Pro/R/RS)
+that is the internal drive unless the radio uses an SD card; wherever these steps say "card",
+read the drive that holds the scripts folder.
+
+A. With Ethos Suite
+1. Connect the radio to the PC by USB and start Ethos Suite.
+2. Lua Library > Install from local .zip > pick OmniDeck_Ethos_Suite_0.3.0.zip.
+   The Suite installs to scripts/omnideck/ on the radio's storage and shows the version.
+3. The Suite package has no missions folder: to load ArduPilot .waypoints files, make
+   scripts/omnideck/missions/ yourself. The logs folder appears with the first flight log.
+4. Disconnect, restart the radio, and go on at step 4 of B.
+
+B. By hand
 1. Connect the radio to the PC by USB and choose the SD card (or use a card reader).
-2. Copy the "scripts" and "bitmaps" folders from this folder to the ROOT of the SD card.
-   You should end up with:
+2. Copy the "scripts" folder from this package to the ROOT of the card. You should end up with:
        scripts/omnideck/main.lua
        scripts/omnideck/x18/   scripts/omnideck/x20/   (the OmniDeck code, one copy per screen size)
        scripts/omnideck/audio/   scripts/omnideck/tones/   scripts/omnideck/logos/
-       scripts/omnideck/missions/
-       bitmaps/ethosmaps/maps/
+       scripts/omnideck/missions/   scripts/omnideck/logs/
    The radio picks x18/ (screens 480 px wide or less) or x20/ by itself; nothing to set.
-   UPDATING FROM TEST 41 OR EARLIER: in scripts/omnideck/ delete the old .lua and .luac files
-   (audio.lua, hud.lua, map.lua, mission.lua, mspclient.lua, summary.lua, telem.lua, tiles.lua,
-   ui.lua) but keep main.lua (the new one replaces it) and the folders. They are no longer used.
-   If you installed the earlier test build called AvMap, delete scripts/avmap from the card.
 3. Eject the card and restart the radio.
 4. Add OmniDeck to a screen with a FULL-SCREEN layout. In a smaller slot it only shows the minimap.
 5. Tap the screen or press ENTER to change page: Main, Map, Messages, and the flight summary
    after a flight. The wheel zooms the map and scrolls the messages.
+
+MAP TILES are not in either package. Put them on the same drive as scripts/omnideck:
+       bitmaps/ethosmaps/maps/<PROVIDER>/<Type>/<z>/<x>/<y>.jpg
+   Guide: https://erwinquilloy.github.io/ardupilot-tools/omnideck.html#tiles
+
+UPDATING: install the newer Suite zip, or copy the new scripts folder over the old one. Either
+way, then delete any .luac files in scripts/omnideck/, x18/ and x20/ (old compiled copies).
+   From test 41 or earlier: in scripts/omnideck/ also delete the old .lua and .luac files
+   (audio.lua, hud.lua, map.lua, mission.lua, mspclient.lua, summary.lua, telem.lua, tiles.lua,
+   ui.lua) but keep main.lua (the new one replaces it) and the folders.
+   If you installed the earlier test build called AvMap, delete scripts/avmap.
 
 
 TELEMETRY SETUP
