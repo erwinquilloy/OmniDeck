@@ -306,7 +306,7 @@ The **flight summary** opens by itself on disarm (if **Flight summary on disarm*
 
 Flight time, distance flown, furthest from home, maximum altitude, ground speed and airspeed, mAh used, efficiency, lowest voltage, maximum current, lowest link quality, and link losses. With **Flight stats page** On the same page is in the cycle during the flight (FLIGHT TIME (NOW), figures so far), and says "No flight yet" before the first one.
 
-**Flight logs:** each flight that opens a summary is saved as its own text file, `<model>-<YYYY-MM-DD>-<HHMMSS>.txt`, with the date and time, model, flight controller and link, the summary's figures, home, the last position and the last 10 messages. Ethos: `scripts/omnideck/logs/`. EdgeTX: `WIDGETS/OmniDeck/logs/`.
+**Flight logs:** at each disarm after at least 10 s armed, the flight is saved as its own text file, `<model>-<YYYY-MM-DD>-<HHMMSS>.txt`, whether or not the summary page is set to open. It holds the date and time, model, flight controller and link, the summary's figures, home, the last position and the last 10 messages. Ethos: `scripts/omnideck/logs/`. EdgeTX: `WIDGETS/OmniDeck/logs/`. The date and time come from the radio's clock: set it once in the radio's settings, or every log is dated 2000-01-01 (common on a TX16S).
 
 ## Sensor check
 
