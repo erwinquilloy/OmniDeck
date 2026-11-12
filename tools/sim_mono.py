@@ -59,6 +59,33 @@ FONT = {
 ')':'01000 00100 00010 00010 00010 00100 01000',"'":'00100 00100 00000 00000 00000 00000 00000','=':'00000 00000 11111 00000 11111 00000 00000',
 '*':'00000 10101 01110 11111 01110 10101 00000','?':'01110 10001 00001 00010 00100 00000 00100',
 }
+FONT_S = {
+'0':'0110 1001 1001 1001 1001 0110',
+'1':'0100 1100 0100 0100 0100 1110',
+'2':'0110 1001 0010 0100 1000 1111',
+'3':'1110 0001 0110 0001 0001 1110',
+'4':'1001 1001 1111 0001 0001 0001',
+'5':'1111 1000 1110 0001 0001 1110',
+'6':'0110 1000 1110 1001 1001 0110',
+'7':'1111 0001 0010 0100 0100 0100',
+'8':'0110 1001 0110 1001 1001 0110',
+'9':'0110 1001 1001 0111 0001 0110',
+'.':'0000 0000 0000 0000 0000 0100',
+':':'0000 0100 0000 0000 0100 0000',
+'W':'1001 1001 1001 1111 1111 1001',
+'H':'1001 1001 1111 1001 1001 1001',
+'/':'0001 0010 0010 0100 0100 1000',
+'K':'1001 1010 1100 1010 1001 1001',
+'M':'1001 1111 1111 1001 1001 1001',
+'T':'1111 0100 0100 0100 0100 0100',
+'G':'0111 1000 1011 1001 1001 0111',
+'S':'0111 1000 0110 0001 0001 1110',
+'<':'0010 0100 1000 0100 0010 0000',
+'>':'0100 0010 0001 0010 0100 0000',
+'-':'0000 0000 1111 0000 0000 0000',
+' ':'0000 0000 0000 0000 0000 0000',
+'?':'0110 1001 0010 0100 0000 0100',
+}
 def setpx(x, y, v):
     if 0 <= x < W and 0 <= y < H: fb[y * W + x] = v
 def lcd_clear(*a):
@@ -89,16 +116,18 @@ def rect(x, y, w, h, flags=0):
 def draw_text(x, y, t, flags=0):
     t = str(t); flags = int(flags or 0)
     x, y = int(x), int(y)
-    width = len(t) * 6
+    small = flags & FLAGS['SMLSIZE']
+    font, pitch, gw, gh = (FONT_S, 5, 4, 6) if small else (FONT, 6, 5, 7)
+    width = len(t) * pitch
     if flags & FLAGS['RIGHT']: x = x - width + 1
     inv = flags & FLAGS['INVERS']
     texts.append((t, x, y))
-    if inv: fill_rect(x - 1, y - 1, width + 1, 9)
+    if inv: fill_rect(x - 1, y - 1, width + 1, gh + 2)
     for k, ch in enumerate(t.upper()):
-        rows = FONT.get(ch, FONT['?']).split()
-        for r in range(7):
-            for c in range(5):
-                if rows[r][c] == '1': setpx(x + k * 6 + c, y + r, 0 if inv else 1)
+        rows = font.get(ch, font['?']).split()
+        for r in range(gh):
+            for c in range(gw):
+                if rows[r][c] == '1': setpx(x + k * pitch + c, y + r, 0 if inv else 1)
     return x + width
 G.lcd = L.table_from({'clear': lcd_clear, 'drawLine': draw_line, 'drawFilledRectangle': fill_rect,
                       'drawRectangle': rect, 'drawText': draw_text, 'drawPoint': lambda x, y, *a: setpx(int(x), int(y), 1)})
@@ -212,10 +241,17 @@ if NATIVE:
     assert 'ANGL' in words, words
 else:
     assert 'FBWA' in words and 'ALT 120M' in words and 'ARM 3D14' in words, words
+    assert '15.8V' in words and 'A' in words and 'GS ' in words and '030' in words, words
+    assert any(w.endswith('WH/KM') and not w.startswith('--') for w in words.split()), words
 print('main page OK:', words[:120])
 # roll the other way and pitch down
 st.update(roll=-35, pitch=-8)
 run(frames=20); save('main_roll_%s.png' % tag)
+# fly 1.5 km north-east of home: the home icon and the distance appear
+st.update(roll=10, pitch=3, lat=HOME[0] + 0.0095, lon=HOME[1] + 0.013, yaw=200)
+run(frames=40); save('main_away_%s.png' % tag)
+words = ' '.join(t for t, x, y in texts)
+assert 'H' in words.split() and '1.5K' in words, words
 run(G.EVT_VIRTUAL_ENTER)
 words = ' '.join(t for t, x, y in texts)
 assert 'LINK CHECK' in words, words
