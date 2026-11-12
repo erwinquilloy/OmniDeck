@@ -1,4 +1,4 @@
-OmniDeck 0.3c for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 0.3.0 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
@@ -6,7 +6,7 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
-WHAT'S NEW IN 0.3c (after 0.3b; X20 family and X18-size screens)
+WHAT'S NEW IN 0.3.0 (after 0.3b; X20 family and X18-size screens)
 - ArduPilot over TBS Crossfire at 50 Hz (forced, or Dynamic dropping to 50 Hz at range): ArduPilot
   then sends its telemetry in one burst every 3 seconds, and the screen stepped every 3 s with
   glitches between bursts. OmniDeck now reads ArduPilot's own "CRSF: Link rate 50Hz" message and,
