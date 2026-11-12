@@ -11,7 +11,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 ![Main page in flight](docs/screens/main.png)
 
-**Status:** 0.3c, public beta. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
+**Status:** 0.3.0, public beta. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
 
 ## Contents
 
@@ -76,7 +76,7 @@ ArduPilot sends FrSky passthrough telemetry (the same data Yaapu uses) over ever
 
 **A slow, steppy display at 50 Hz is normal, and Yaapu behaves the same way.** TBS Crossfire drops to its 50 Hz RF mode when you force it, or on the Dynamic profile when the signal weakens. At 50 Hz the return link from the receiver to the radio is very narrow: ArduPilot sends its telemetry (horizon, speeds, altitude, flight mode, battery) only once every 3 seconds, and that data also waits in the link, so the radio's horizon can run a few seconds behind the aircraft. Your goggles' OSD is not affected: the flight controller draws it, and it travels on the video link. Mission Planner over USB is not affected either.
 
-What 0.3c does about it, once ArduPilot has reported a TBS link below 150 Hz (its `CRSFv3: Link rate 50Hz` message) and the first 3-second pause has been seen:
+What OmniDeck does about it (since 0.3.0), once ArduPilot has reported a TBS link below 150 Hz (its `CRSFv3: Link rate 50Hz` message) and the first 3-second pause has been seen:
 
 - no NO TELEMETRY flash between bursts, speeds stay on screen, and READY TO ARM works;
 - ground speed, satellites and distance to home update every second, and voltage, current and mAh every 2 s, from the standard Crossfire GPS and battery sensors (discover them on the radio once);
@@ -86,16 +86,29 @@ ELRS, mLRS, F.Port and S.Port are not affected. **For a live horizon on the radi
 
 ## Install
 
-Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC. Each package holds an `INSTALL.txt` with the same steps.
+Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC; the Ethos Suite zip goes to Ethos Suite as it is, unopened. The other two zips each hold an `INSTALL.txt` with the same steps.
 
 | Package | For |
 |---|---|
-| `OmniDeck_Ethos_0.3c.zip` | Any Ethos colour radio. Holds both screen sizes; the radio picks the right one. |
-| `OmniDeck_EdgeTX_0.3c.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
+| `OmniDeck_Ethos_Suite_0.3.0.zip` | Any Ethos colour radio, installed with **Ethos Suite**. Holds both screen sizes; the radio picks the right one. |
+| `OmniDeck_Ethos_0.3.0.zip` | The same Ethos files, to copy onto the radio by hand. |
+| `OmniDeck_EdgeTX_0.3.0.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
 
 **No SD card?** On radios that keep everything on built-in storage, the same folders go on the radio's internal drive: the one that already holds `scripts` (Ethos) or `WIDGETS` (EdgeTX). Wherever this guide says "card", read that drive. Put map tiles on the same drive as OmniDeck, and check the free space first: a satellite tile set can run to hundreds of MB.
 
 ### Ethos
+
+Two ways in: Ethos Suite, or copying the files yourself. Both end with the same `scripts/omnideck/` folder.
+
+**With Ethos Suite** (`OmniDeck_Ethos_Suite_0.3.0.zip`)
+
+1. Connect the radio by USB and start **Ethos Suite**.
+2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_0.3.0.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses.
+3. Disconnect and restart the radio, then carry on from step 4 below.
+
+If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPilot `.waypoints` files; the `logs` folder appears with the first flight log. Map tiles are never in a package; copy them as in [Map tiles](#map-tiles).
+
+**By hand** (`OmniDeck_Ethos_0.3.0.zip`)
 
 1. Connect the radio by USB and choose the SD card, or use a card reader.
 2. Copy the `scripts` folder from the package to the **root** of the card. You should end up with:
@@ -115,7 +128,7 @@ Download the package for your radio from the [releases page](https://github.com/
 4. Add **OmniDeck** to a screen with a **full-screen** layout. In a smaller slot it shows only the minimap.
 5. Long-press the widget and choose **Configure widget** for the [settings](#settings).
 
-**Updating:** copy the new `scripts` folder over the old one, then delete any `.luac` files in `scripts/omnideck/` and its `x18/`, `x20/` folders so the radio compiles the new code. Coming from test 41 or older: delete the old loose `.lua` files in `scripts/omnideck/` (audio, hud, map, mission, mspclient, summary, telem, tiles, ui) but keep the new `main.lua` and the folders. `lastpos.txt` is no longer used.
+**Updating:** install the newer Suite zip, or copy the new `scripts` folder over the old one. Either way, then delete any `.luac` files in `scripts/omnideck/` and its `x18/`, `x20/` folders so the radio compiles the new code. Coming from test 41 or older: delete the old loose `.lua` files in `scripts/omnideck/` (audio, hud, map, mission, mspclient, summary, telem, tiles, ui) but keep the new `main.lua` and the folders. `lastpos.txt` is no longer used.
 
 ### EdgeTX
 
@@ -157,6 +170,14 @@ Download the package for your radio from the [releases page](https://github.com/
 - **ArduPilot ground speed next to airspeed** needs `FRSKY_OPTIONS` bit 0; otherwise only one of the two is sent.
 - **Battery capacity:** ArduPilot sends `BATT_CAPACITY`. For INAV and Betaflight enter the pack size under **Battery mAh (INAV/BF only)**. The battery bar also needs a working current sensor.
 - **INAV virtual pitot** sends an estimate as if it were airspeed. Set the pitot to NONE if you would rather see ground speed on the tape.
+
+### Link settings on the transmitter
+
+| Link | Setting |
+|---|---|
+| ELRS | Telemetry ratio **1:8 or more often** (1:4, 1:2). |
+| TBS Crossfire | **Dynamic** or **150 Hz forced**. At 50 Hz the telemetry runs seconds late with any flight controller, and Dynamic drops to 50 Hz far out ([why](#ardupilot-over-tbs-crossfire-at-50-hz)). |
+| mLRS, F.Port | The defaults work. |
 
 ## Main page and HUD
 
@@ -312,7 +333,7 @@ EdgeTX stops a widget whose screen update runs more than about 20,000 Lua instru
 | 2.11, 2.12 | Yes | All | 75 % of the limit |
 | 2.9, 2.10 | Yes | Only lines with no part left of or above the screen | 76 % of the limit |
 
-0.3c, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. S.Port peaks at 68 %, INAV and Betaflight at 62 %, and a typical main-page update in steady flight is about 48 %. The 800 x 480 screen costs the same as 480 x 272.
+0.3.0, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. S.Port peaks at 68 %, INAV and Betaflight at 62 %, and a typical main-page update in steady flight is about 48 %. The 800 x 480 screen costs the same as 480 x 272.
 
 **Recommendation:** use EdgeTX 2.11 or later, ideally the latest 2.12.x. Keep the radio's own telemetry alarms and the flight controller's failsafes as your safety net; OmniDeck is a display. Since 2.11.1, EdgeTX refuses sound files whose path is longer than 45 characters: the bundled packs fit, and your own pack's folder name should be 4 letters or fewer.
 
