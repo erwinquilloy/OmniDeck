@@ -227,10 +227,8 @@ end
 -- longitude, so s.lat is never set without s.lon (the map needs both)
 local latPending = nil
 -- last raw 0x5000 (text) and 0x5001 (status) values, for the sensor check page
-local rawText, rawStatus = nil, nil
 local function pt(appId, lo, hi)
   local t = now()
-  if appId == 0x5000 then rawText = { lo, hi } elseif appId == 0x5001 then rawStatus = { lo, hi } end
   -- 0x0800 is the standard FrSky GPS ID: INAV and Betaflight send their position with it too
   -- (an R9 with INAV, X18 tester 2026-11-03). Taken as ArduPilot it stopped every native
   -- sensor read. It only proves the link is up; the 0x50xx frames say ArduPilot.
@@ -481,20 +479,6 @@ end
 -- page 5 diagnostics: passthrough frames per reader and per app ID, copies dropped, value type
 local DIAG_IDS = { 0x0800, 0x5000, 0x5001, 0x5002, 0x5003, 0x5004, 0x5005, 0x5006 }
 local diag = { n = { 0, 0 }, dup = 0, vt = "-", ids = { {}, {} } }
--- two lines: frames per reader (default / external), copies dropped, value type; then per app ID
--- "def/ext" counts (GPS = 0x0800, 00..06 = 0x5000..0x5006)
-function T.sportDiag()
-  if #sportAll == 0 then return "S.Port readers: none", nil end
-  local parts = {}
-  for _, id in ipairs(DIAG_IDS) do
-    parts[#parts + 1] = string.format("%s %d/%d", id == 0x0800 and "GPS" or string.format("%02X", id % 256),
-      diag.ids[1][id] or 0, diag.ids[2][id] or 0)
-  end
-  return string.format("S.Port rd %d  def %d  ext %d  dup %d  val %s%s  bit32 %s%s  roll %s", #sportAll, diag.n[1],
-    diag.n[2], diag.dup, diag.vt, splitInt and " &>>" or "", bit32 and "yes" or "no", bx and " (used)" or "",
-    s.roll and string.format("%.1f", s.roll) or "-"), table.concat(parts, "  ")
-end
-
 local function sportPop()
   if #sportAll == 0 then
     if sportTried then return false end
@@ -1007,48 +991,6 @@ function T.detectLink()
   return linkKind
 end
 
--- Sensor check (page 5): what every native sensor resolved to on this radio, so a tester's
--- photo shows exactly what the telemetry code reads. kind nil = the detected link.
-local CHECK_KEYS = { "lat", "lon", "mode", "roll", "pitch", "hdg", "alt", "vspd", "gspd", "aspd",
-                     "sats", "volt", "curr", "mah", "lq", "rssi" }
-local function qText(q)
-  if type(q) == "string" then return '"' .. q .. '"' end
-  if type(q) ~= "table" then return tostring(q) end
-  if q.name then return q.name .. (q.options == OPTION_LATITUDE and ".lat" or (q.options == OPTION_LONGITUDE and ".lon" or "")) end
-  if q.crsfId then return string.format("crsf %02X", q.crsfId) end
-  local t = string.format("%04X", q.appId or 0)
-  if q.subId then t = t .. "/" .. q.subId end
-  if q.physId then t = t .. string.format(" p%02X", q.physId) end
-  return t
-end
-function T.sensorCheck(kind)
-  kind = kind or T.detectLink()
-  local rows = {}
-  local mod = {}
-  for i = 0, 1 do mod[#mod + 1] = moduleOn(i) and "on" or "off" end
-  local ta = telemActive()
-  rows.header = string.format("link %s  int %s ext %s  pt %s  fc %s  tlm %s", tostring(kind), mod[1], mod[2],
-    (now() - s.lastPt <= ptWindow()) and "yes" or "no", tostring(s.fc), ta == nil and "n/a" or (ta and "on" or "LOST"))
-  if not kind then return rows end
-  for _, key in ipairs(CHECK_KEYS) do
-    local src = findSource(key, kind)
-    local row = { key = key }
-    if src then
-      local okN, n = pcall(function() return src:name() end)
-      local okV, v = pcall(function() return src:value() end)
-      local okU, u = pcall(function() return src:unit() end)
-      row.query = qText(srcQuery[kind .. key])
-      row.name = okN and tostring(n) or "?"
-      row.value = okV and (type(v) == "number" and string.format("%.6g", v) or tostring(v)) or "err"
-      row.unit = okU and tostring(u) or "?"
-    else
-      row.query, row.name, row.value, row.unit = "-", "not found", "", ""
-    end
-    rows[#rows + 1] = row
-  end
-  return rows
-end
-
 -- ---------------------------------------------------------------- per-wakeup entry
 local nativeReadAt = -100
 local linkReadAt = -100   -- link quality sensors on the passthrough path (EdgeTX / OpenTX: 5 Hz)
@@ -1059,69 +1001,6 @@ local function readAttitude(kind)
   local v, u = srcVal("roll", kind);  if v then s.roll = toDeg(v, u) end
   v, u = srcVal("pitch", kind);       if v then s.pitch = -toDeg(v, u) end
   v, u = srcVal("hdg", kind);         if v then s.yaw = toDeg(v, u) % 360 end
-end
-
--- Ethos and EdgeTX load the widget script once, so this state outlived a model switch: the
--- X18 tester's Betaflight plane showed "fc ArduPilot" left over from his ArduPilot R9 plane.
--- A new model starts clean; sensor handles belong to the old model, so they go too. Checked when
--- a widget is created (both radios re-create a model's widgets when it is selected), not in
--- wakeup: EdgeTX's mission page already peaks at the 88 % margin of its Lua limit.
-local function modelName()
-  if not model then return nil end
-  if model.name then
-    local ok, n = pcall(model.name)
-    if ok and type(n) == "string" then return n end
-  end
-  if model.getInfo then
-    local ok, info = pcall(model.getInfo)
-    if ok and type(info) == "table" and type(info.name) == "string" then return info.name end
-  end
-  return nil
-end
-local curModel = nil
-function T.resetModel()
-  for k in pairs(s) do s[k] = nil end
-  for k, v in pairs(fresh()) do s[k] = v end
-  textViaCrsf, homeBestDist, latPending, rawText, rawStatus = false, nil, nil, nil, nil
-  msgBuf, msgLastLo, msgLastHi = "", nil, nil
-  nativeHomeAlt, lastArmed = nil, nil
-  homeAltAt, altRelative = nil, false
-  linkKind, linkCheckAt = nil, -100
-  srcCache, srcMissAt, srcQuery, srcAt = {}, {}, {}, {}
-  sensorList, sensorListAt = nil, -100
-  createTried, createdAt = {}, -100
-  seen, seenN = {}, 0
-  diag = { n = { 0, 0 }, dup = 0, vt = "-", ids = { {}, {} } }
-end
-function T.checkModel()
-  local n = modelName()
-  if n == nil then return false end
-  local changed = curModel ~= nil and n ~= curModel
-  if changed then T.resetModel() end
-  curModel = n
-  return changed
-end
--- the selected model's name for the top bar (read when a widget is created, not every paint)
-function T.modelName()
-  if curModel == nil then curModel = modelName() end
-  return curModel
-end
-
--- EdgeTX: after the screen is drawn, read more queued CRSF frames while the update's Lua budget
--- allows (getUsage() = percent of EdgeTX's per-call limit used so far). The main page reads only
--- one frame before drawing; ArduPilot over ELRS sends more than that, so the queue grew and the
--- display fell behind ("sluggish", TX16S + ELRS + ArduPilot, 2026-11-03).
-function T.drainCrsf(limitPct, maxN)
-  -- S.Port (or nothing heard yet): no CRSF queue to read, and the call itself costs budget
-  -- (the S.Port mission page sits at the 88 % margin)
-  if not getUsage or s.link ~= "CRSF" then return 0 end
-  local n = 0
-  for _ = 1, maxN do
-    if getUsage() >= limitPct then break end
-    if not crsfPop() then break end
-    n = n + 1
-  end
-  return n
 end
 
 -- ArduPilot over Crossfire in its 50 Hz RF mode: passthrough comes only every 3 s (see SLOW_PT_S),
@@ -1233,22 +1112,6 @@ function T.wakeup(linkMode)
     if s.lat and s.homeLat and s.homeDist == nil then s.homeDist, s.homeBrg = T.distBrg(s.lat, s.lon, s.homeLat, s.homeLon) end
   end
   return got
-end
-
--- alive: data in the last 3 s, and Ethos not saying telemetry is lost (that is immediate, and
--- also stops a lost ArduPilot passthrough link being revived by the native sensors' old values)
--- check page: can this Lua hold a 32-bit value exactly (a float build cannot: text and modes break),
--- and the last text / status values as received, with what they decode to
-function T.rawCheck()
-  local big = 16777216
-  local exact = (big + 1) - big == 1 and (4294967295 % 256) == 255
-  local function hex(v) return v and string.format("%04X%04X", v[2], v[1]) or "--" end
-  local chars = ""
-  if rawText then
-    for sh = 24, 0, -8 do local c = ext(rawText[1], rawText[2], sh, 7) chars = chars .. (c >= 32 and c < 127 and string.char(c) or ".") end
-  end
-  return string.format("32-bit %s  5000 %s '%s'  5001 %s mode %s", exact and "OK" or "LOST", hex(rawText), chars,
-    hex(rawStatus), rawStatus and tostring(ext(rawStatus[1], rawStatus[2], 0, 5) - 1) or "--")
 end
 
 -- ArduPilot over CRSF (see SLOW_PT_S): past the first 3 s the link still counts while the radio
