@@ -25,7 +25,7 @@ OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out_mono')
 SPORT, NATIVE = '--sport' in sys.argv, '--native' in sys.argv
 SD = os.path.normpath(os.path.join(HERE, '..', 'targets', 'mono'))
 os.makedirs(OUT, exist_ok=True)
-tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf')
+tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '')
 
 L = lua52.LuaRuntime(unpack_returned_tuples=True)
 G = L.globals()
@@ -139,6 +139,40 @@ def save(name):
     im.resize((W * 4, H * 4), Image.NEAREST).save(os.path.join(OUT, name))
 
 # ------------------------------------------------------------------ radio
+# EdgeTX-style io on a scratch copy of the card: reads fall back to the package, writes stay in
+# OUT/sd (EdgeTX cannot make folders, so only the ones the package ships exist)
+SIMSD = os.path.join(OUT, 'sd')
+import shutil
+shutil.rmtree(SIMSD, ignore_errors=True)
+os.makedirs(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs'))
+IMPERIAL = '--imperial' in sys.argv
+if IMPERIAL:
+    with open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg'), 'w') as f:
+        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\n')
+def sd_path(p, base):
+    return os.path.join(base, *[x for x in str(p).split('/') if x])
+handles = {}
+def io_open(p, mode='r'):
+    mode = str(mode)
+    w = os.path.join(SIMSD, *[x for x in str(p).split('/') if x])
+    if 'w' in mode or 'a' in mode:
+        if not os.path.isdir(os.path.dirname(w)): return None
+        fh = open(w, mode.replace('b', '') + 'b')
+    else:
+        src = w if os.path.isfile(w) else sd_path(p, SD)
+        if not os.path.isfile(src): return None
+        fh = open(src, 'rb')
+    k = len(handles) + 1
+    handles[k] = fh
+    return k
+def io_read(k, n=1024):
+    d = handles[k].read(int(n))
+    return d.decode('latin-1') if d else ''
+def io_write(k, *parts):
+    for s in parts: handles[k].write(str(s).encode('latin-1'))
+def io_close(k): handles.pop(k).close()
+G.io = L.table_from({'open': io_open, 'read': io_read, 'write': io_write, 'close': io_close})
+G.getDateTime = lambda: L.table_from({'year': 2026, 'mon': 11, 'day': 13, 'hour': 9, 'min': 30, 'sec': 5})
 t_ms = [0]
 G.getTime = lambda: t_ms[0] // 10
 G.getVersion = lambda: ('2.12.2', 'tx12mk2', 2, 12, 2, 'EdgeTX')
@@ -244,9 +278,9 @@ s = G.OD_ENV  # adapter environment (not used directly)
 if NATIVE:
     assert 'ANGL' in words, words
 else:
-    assert 'FBWA' in words and 'ALT 120M' in words and 'ARM 3D14' in words, words
+    assert 'FBWA' in words and ('ALT 394FT' if IMPERIAL else 'ALT 120M') in words and 'ARM 3D14' in words, words
     assert '15.8V' in words and 'A' in words and 'GS ' in words and '030' in words, words
-    assert any(w.endswith('WH/KM') and not w.startswith('--') for w in words.split()), words
+    assert any(w.endswith('MAH/MI' if IMPERIAL else 'WH/KM') and not w.startswith('--') for w in words.split()), words
 print('main page OK:', words[:120])
 # roll the other way and pitch down
 st.update(roll=-35, pitch=-8)
@@ -255,7 +289,7 @@ run(frames=20); save('main_roll_%s.png' % tag)
 st.update(roll=10, pitch=3, lat=HOME[0] + 0.0095, lon=HOME[1] + 0.013, yaw=200)
 run(frames=40); save('main_away_%s.png' % tag)
 words = ' '.join(t for t, x, y in texts)
-assert 'H' in words.split() and '1.5K' in words, words
+assert 'H' in words.split() and ('0.9MI' if IMPERIAL else '1.5K') in words, words
 # a short flight east of home, towards waypoint 3, with status texts
 from simtelem import text_chunks
 for m, sev in [('ArduPlane V4.7.2 (fb773567)', 6), ('PreArm: Throttle below failsafe', 2), ('Mission: 3 WP', 6),
@@ -288,8 +322,39 @@ save('link_%s.png' % tag)
 print('link page OK:', words[:140])
 run(G.EVT_VIRTUAL_ENTER)
 assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER back to the main page'
+# disarm: the summary opens by itself and the flight log is written (the native-sensor feed
+# has no arm state to clear, so that run stops here)
+if NATIVE:
+    st.update(armed=True)
+st.update(armed=False)
+run(frames=60)
+words = ' '.join(t for t, x, y in texts)
+save('summary_%s.png' % tag)
+if not NATIVE:
+  assert 'FLIGHT SUMMARY' in words and 'DISTANCE' in words, words
+  logs = os.listdir(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs'))
+  assert logs and logs[0].startswith('Sim Plane-2026-11-13'), logs
+  print('summary page OK:', words[:120])
+  print('log:', logs[0]); print(open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs', logs[0])).read()[:700])
+  run(G.EVT_VIRTUAL_ENTER)
+  assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
 L.execute('collectgarbage()'); mem_now = L.eval('(collectgarbage("count"))')
 print('page cycle OK')
 print('instructions per call: init %d, run max %d, background max %d' % (worst['init'], worst['run'], worst['background']))
 print('Lua memory (64-bit sim, above the bare runtime %.1f KB): %.1f KB after init, %.1f KB after the page cycle' % (MEM_BASE, mem_init - MEM_BASE, mem_now - MEM_BASE))
 print('Mono checks OK', tag)
+
+# SYS > Tools > OmniDeck Setup, on the same screen stubs
+G.loadScript = load_script
+tool = load_script('/SCRIPTS/TOOLS/OmniDeck Setup.lua')()
+tool['init']()
+G.dir = lambda p: iter([])
+tool['run'](0); save('setup_%s.png' % tag)
+for e in (G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_ENTER, G.EVT_VIRTUAL_NEXT):
+    tool['run'](e)
+save('setup_edit_%s.png' % tag)
+words = ' '.join(t for t, x, y in texts)
+assert 'OMNIDECK SETUP' in words and 'SPEED M/S' in words, words
+cfgf = os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg')
+assert 'spdUnit=1' in open(cfgf).read()
+print('setup tool OK:', words[:120])

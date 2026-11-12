@@ -7,7 +7,7 @@
                  under it; ground speed alone otherwise), altitude box at the right edge
     right        ALT, SPD, home distance + arrow, voltage, current (normal font);
                  efficiency and flight time (small font)
-  Values are in metres and km/h for now (units come with the settings in a later step).
+  Units follow OmniDeck Setup (ctx.u, from cfg.lua).
 ]]
 
 local floor, sin, cos, rad, abs = math.floor, math.sin, math.cos, math.rad, math.abs
@@ -127,14 +127,6 @@ local function homeArrow(x, y, s)
   lcd.drawLine(lx, ly, rx, ry, SOLID, FORCE)
 end
 
--- at most 5 characters: 999M, 9.9K, 99.9K, 123K
-local function dist(m)
-  if not m then return "---" end
-  if m < 1000 then return string.format("%dM", floor(m + 0.5)) end
-  if m < 100000 then return string.format("%.1fK", m / 1000) end
-  return string.format("%dK", floor(m / 1000 + 0.5))
-end
-
 local function topBar(s, alive)
   lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
   local mode = alive and (s.mode or "---") or "NO TELEM"
@@ -144,49 +136,52 @@ local function topBar(s, alive)
   lcd.drawText(127, 1, (s.armed and "ARM " or "DIS ") .. gps, INVERS + RIGHT)
 end
 
--- live efficiency, Wh/km: power over ground speed, smoothed over about 10 s
-local effW, effV, lastT
-local function efficiency(s, now)
+-- live efficiency: volts, amps and ground speed each smoothed over about 10 s, then the ratio
+local sV, sA, sG, lastT
+local function efficiency(u, s, now)
   local dt = lastT and (now - lastT) or 0
   lastT = now
-  if not (s.volt and s.curr and s.gspd) or s.gspd < 2 then effW = nil return nil end
-  local a = (dt > 0 and dt < 2) and dt / 10 or 1
-  local p, v = s.volt * s.curr, s.gspd * 3.6
-  effW = effW and (effW + (p - effW) * a) or p
-  effV = effV and (effV + (v - effV) * a) or v
-  return effW / effV
+  if not (s.curr and s.gspd) then sV, sA, sG = nil, nil, nil return nil end
+  local k = (dt > 0 and dt < 2) and dt / (10 + dt) or 1
+  sA = sA and (sA + (s.curr - sA) * k) or s.curr
+  sG = sG and (sG + (s.gspd - sG) * k) or s.gspd
+  if s.volt then sV = sV and (sV + (s.volt - sV) * k) or s.volt end
+  return u.eff(sV, sA, sG)
 end
 
 local function draw(ctx)
-  local T = ctx.T
+  local T, u = ctx.T, ctx.u
   local s = T.s
   local alive = T.alive()
   topBar(s, alive)
   local spd = s.aspd or s.gspd
   horizon(s, (s.aspd and s.gspd) and CY + 14 or CY + 4)
   heading(s)
-  if spd then valBox(BX0 + 1, CY - 3, tostring(floor(spd * 3.6 + 0.5))) end
+  if spd then valBox(BX0 + 1, CY - 3, tostring(u.spd(spd))) end
   if s.aspd and s.gspd then
-    local str = "GS " .. floor(s.gspd * 3.6 + 0.5)
+    local str = "GS " .. u.spd(s.gspd)
     local w = #str * SW + 3
     lcd.drawFilledRectangle(BX0, CY + 5, w + 2, 9, ERASE)
     lcd.drawRectangle(BX0 + 1, CY + 6, w, 7, FORCE)
     lcd.drawText(BX0 + 3, CY + 7, str, SMLSIZE)
   end
-  if s.alt then valBox(BX1 - 1, CY - 3, tostring(floor(s.alt + 0.5)), true) end
+  if s.alt then valBox(BX1 - 1, CY - 3, tostring(u.alt(s.alt)), true) end
   lcd.drawLine(BX1 + 1, BY0 - 1, BX1 + 1, BY1, SOLID, FORCE)
 
   local x = 74
-  lcd.drawText(x, 10, "ALT " .. (s.alt and string.format("%dM", floor(s.alt + 0.5)) or "---"), 0)
-  lcd.drawText(x, 18, "SPD " .. (spd and string.format("%3dK", floor(spd * 3.6 + 0.5)) or "---"), 0)
+  lcd.drawText(x, 10, "ALT " .. (s.alt and (u.alt(s.alt) .. u.altLbl) or "---"), 0)
+  lcd.drawText(x, 18, "SPD " .. (spd and (string.format("%3d", u.spd(spd)) .. u.spdLbl) or "---"), 0)
   lcd.drawText(x, 26, "H", 0)
-  lcd.drawText(117, 26, dist(s.homeDist), RIGHT)
+  lcd.drawText(117, 26, u.dist(s.homeDist), RIGHT)
   homeArrow(123, 29, s)
-  lcd.drawText(x, 34, s.volt and string.format("%.1fV", s.volt) or "--.-V", 0)
+  -- voltage alarm (OmniDeck Setup): inverted while low, blinking while critical
+  local st = ctx.A.stage or 0
+  local vf = (st == 2 and BLINK + INVERS) or (st == 1 and INVERS) or 0
+  lcd.drawText(x, 34, s.volt and string.format("%.1fV", s.volt) or "--.-V", vf)
   lcd.drawText(x, 42, s.curr and string.format("%.1fA", s.curr) or "--.-A", 0)
-  local e = efficiency(s, ctx.clock())
-  lcd.drawText(x, 51, (e and string.format("%.1f", e) or "--") .. "WH/KM", SMLSIZE)
-  local t = floor(ctx.armedFor or 0)
+  local e = efficiency(u, s, ctx.clock())
+  lcd.drawText(x, 51, (e and string.format(e < 100 and "%.1f" or "%d", e) or "--") .. u.effLbl, SMLSIZE)
+  local t = floor(ctx.flightT or 0)
   lcd.drawText(x, 58, string.format("T %02d:%02d", floor(t / 60), t % 60), SMLSIZE)
 end
 

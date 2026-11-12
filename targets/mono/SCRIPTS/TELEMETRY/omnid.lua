@@ -4,11 +4,13 @@
   Betaflight from the radio's own sensors - the same decoding as the colour OmniDeck.
 
   Set it up as a telemetry screen: MODEL > DISPLAY > a screen > Script > omnid.
-  ENTER: next page (main, map, messages, link check); the wheel scrolls the messages. Settings come from SYS > Tools > OmniDeck Setup (a later step).
+  ENTER: next page (main, map, messages, link check); the wheel scrolls the messages.
+  The flight summary opens by itself at disarm; ENTER leaves it.
+  Settings: SYS > Tools > OmniDeck Setup (per model; applied when the tool is left).
 
   Memory: EdgeTX gives a telemetry script about 127 KB of Lua memory on a TX12 MK2 (measured).
-  The telemetry code stays loaded; a page is loaded when it is shown and dropped when another
-  one is, so only one page's code is in memory at a time.
+  The telemetry code, the flight summary and the voice stay loaded; a page is loaded when it is
+  shown and dropped when another one is, and the log writer only for the moment it writes.
 
   background() runs while another screen is up, run() while this one is shown; both read
   telemetry, so nothing is missed either way.
@@ -18,8 +20,23 @@ local ROOT = "/SCRIPTS/OMNID/"
 local VERSION = "0.1.0"
 local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "plink.lua" }
 
-local E, T
-local ctx = { version = VERSION, armedFor = 0, trailE = {}, trailN = {} }
+local E, T, F, A
+local ctx = { version = VERSION, flightT = 0, trailE = {}, trailN = {} }
+local cfg
+local pageN, page, onSummary = 1, nil, false
+
+local function load(name)
+  local chunk = loadScript(ROOT .. name, OD_DEBUGLOAD and "T" or "bt")
+  return chunk and chunk() or nil
+end
+
+local function loadPage(n, file)
+  page = nil
+  collectgarbage()
+  page = load(file or PAGES[n])
+  pageN, onSummary = n, file ~= nil
+  collectgarbage()
+end
 
 -- flight trail for the map, in metres east / north of home. A point every TRAIL_STEP metres;
 -- when full, every other point goes and the spacing doubles, so the whole flight stays in
@@ -55,36 +72,54 @@ local function trail(s)
     trailStep = trailStep * 2
   end
 end
-local pageN, page = 1, nil
 
-local function loadPage(n)
-  page = nil
-  collectgarbage()
-  local chunk = loadScript(ROOT .. PAGES[n], OD_DEBUGLOAD and "T" or "bt")
-  page = chunk and chunk() or nil
-  pageN = n
-  collectgarbage()
-end
-
--- read telemetry; the flight timer counts while armed (the flight summary comes in a later step)
+-- read telemetry; voice and flight summary take turns, one per call (each still runs several
+-- times a second), so no call carries both inside EdgeTX's per-call Lua limit
+local turn = 0
 local function pump()
   E.tick()
-  T.wakeup(0)
+  T.wakeup(cfg.linkMode)
   local s, now = T.s, E.os.clock()
-  if s.armed then
-    if not ctx.armAt then ctx.armAt = now - ctx.armedFor end
-    ctx.armedFor = now - ctx.armAt
+  -- ArduPilot sends BATT_CAPACITY; INAV and Betaflight don't, so the pilot sets it
+  if s.fc and s.fc ~= "ArduPilot" then s.cap = cfg.batCap > 0 and cfg.batCap or nil end
+  turn = 1 - turn
+  local alive = T.alive()
+  if turn == 0 then
+    A.update(s, alive, now)
   else
-    ctx.armAt = nil
+    local ev = F.update(s, alive, now, T.distBrg)
+    if ev == "done" then
+      local w = load("log.lua")
+      local ok, name = false, nil
+      if w then ok, name = pcall(w, s, F.last(), ctx.u, VERSION) end
+      ctx.logName = ok and name or nil
+      w = nil
+      if cfg.sumAuto == 1 then ctx.wantSummary = true end
+    elseif ev == "armed" then
+      ctx.logName = nil
+      if onSummary then ctx.wantStart = true end
+    end
   end
+  ctx.flightT = F.timer(now) or 0
   trail(s)
 end
 
+local function startPage() return cfg.startPage == 2 and 2 or 1 end
+
 local function init()
-  E = loadScript(ROOT .. "etx.lua", OD_DEBUGLOAD and "T" or "bt")()
+  E = load("etx.lua")
   T = E.loadfile("telem.lua")()
-  ctx.T, ctx.clock = T, E.os.clock
-  loadPage(1)
+  F = load("sum.lua")
+  A = load("aud.lua")
+  local C = load("cfg.lua")
+  cfg = C.read()
+  ctx.u = C.units(cfg)
+  C = nil
+  A.setVoice(cfg.voice)
+  A.setBeep(cfg.beep)
+  A.cells, A.vLow, A.vCrit = cfg.cells, cfg.lowVolt / 100, cfg.critVolt / 100
+  ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
+  loadPage(startPage())
 end
 
 local function background()
@@ -93,7 +128,15 @@ end
 
 local function run(event)
   pump()
-  if event == EVT_VIRTUAL_ENTER then loadPage(pageN % #PAGES + 1) end
+  if ctx.wantSummary then
+    ctx.wantSummary = false
+    loadPage(pageN, "psum.lua")
+  elseif ctx.wantStart then
+    ctx.wantStart = false
+    loadPage(startPage())
+  elseif event == EVT_VIRTUAL_ENTER then
+    if onSummary then loadPage(startPage()) else loadPage(pageN % #PAGES + 1) end
+  end
   lcd.clear()
   if page then
     page.draw(ctx, event)

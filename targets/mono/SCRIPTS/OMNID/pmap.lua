@@ -13,13 +13,12 @@ local floor, sin, cos, rad, max, abs = math.floor, math.sin, math.cos, math.rad,
 
 local X0, Y0, X1, Y1 = 0, 10, 127, 52   -- map area; the strip below holds the scale and N
 local M_PER_DEG = 111320
+-- scale bar lengths in metres: metric, or round feet then miles
 local STEPS = { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000 }
-
-local function dist(m)
-  if m < 1000 then return string.format("%dM", floor(m + 0.5)) end
-  if m < 100000 then return string.format("%.1fKM", m / 1000) end
-  return string.format("%dKM", floor(m / 1000 + 0.5))
-end
+local STEPS_FT = { 15.24, 30.48, 60.96, 152.4, 304.8, 804.672, 1609.344, 3218.688, 8046.72, 16093.44, 32186.88,
+                   80467.2, 160934.4 }
+local LABELS_FT = { "50FT", "100FT", "200FT", "500FT", "1000FT", "0.5MI", "1MI", "2MI", "5MI", "10MI", "20MI", "50MI",
+                    "100MI" }
 
 -- metres east / north of the reference point
 local function en(s, lat, lon)
@@ -37,18 +36,19 @@ local function arrow(x, y, hdg)
   lcd.drawLine(lx, ly, rx, ry, SOLID, FORCE)
 end
 
-local function topBar(s, alive)
+local function topBar(s, alive, u)
   lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
   local mode = alive and string.upper(s.mode or "---") or "NO TELEM"
   if alive and s.wpNum and s.wpNum > 0 then mode = mode .. " WP" .. s.wpNum end
   lcd.drawText(1, 1, mode, INVERS)
-  lcd.drawText(127, 1, s.homeDist and dist(s.homeDist) or "", INVERS + RIGHT)
+  lcd.drawText(127, 1, s.homeDist and u.dist(s.homeDist) or "", INVERS + RIGHT)
 end
 
 local function draw(ctx)
   local T = ctx.T
   local s = T.s
-  topBar(s, T.alive())
+  local u = ctx.u
+  topBar(s, T.alive(), u)
   if not (s.lat and s.homeLat) then
     lcd.drawText(16, 30, s.lat and "WAITING FOR HOME" or "WAITING FOR GPS", 0)
     return
@@ -100,14 +100,16 @@ local function draw(ctx)
   arrow(ax, ay, s.yaw)
 
   -- scale bar: the largest round length that fits in 40 px
-  local len = STEPS[1]
-  for i = 1, #STEPS do if STEPS[i] / mpp <= 40 then len = STEPS[i] end end
+  local steps = u.imperial and STEPS_FT or STEPS
+  local idx = 1
+  for i = 1, #steps do if steps[i] / mpp <= 40 then idx = i end end
+  local len = steps[idx]
   local bw = floor(len / mpp + 0.5)
   lcd.drawLine(0, Y1 + 2, 127, Y1 + 2, DOTTED, FORCE)
   lcd.drawLine(1, 60, 1 + bw, 60, SOLID, FORCE)
   lcd.drawLine(1, 57, 1, 60, SOLID, FORCE)
   lcd.drawLine(1 + bw, 57, 1 + bw, 60, SOLID, FORCE)
-  lcd.drawText(bw + 5, 57, dist(len), SMLSIZE)
+  lcd.drawText(bw + 5, 57, u.imperial and LABELS_FT[idx] or u.dist(len), SMLSIZE)
   lcd.drawText(127, 57, "N", SMLSIZE + RIGHT)
   lcd.drawLine(119, 57, 119, 62, SOLID, FORCE)
   lcd.drawLine(118, 58, 120, 58, SOLID, FORCE)
