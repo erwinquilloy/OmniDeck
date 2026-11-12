@@ -309,6 +309,7 @@ for m, sev in [('ArduPlane V4.7.2 (fb773567)', 6), ('PreArm: Throttle below fail
     TEXTQ.append(text_chunks(m, sev))
 st.update(wpn=3, wpd=800, wpb=90, roll=0, pitch=2, yaw=90)
 for k in range(30):
+    st['mah'] = 640 + 4 * k
     st.update(lat=HOME[0] + 0.0004 * k, lon=HOME[1] + 0.0002 * k * k / 10)
     run(frames=10)
 run(G.EVT_VIRTUAL_ENTER, frames=5)
