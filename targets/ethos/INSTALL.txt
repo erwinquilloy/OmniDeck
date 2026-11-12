@@ -27,6 +27,8 @@ WHAT'S NEW IN 0.3.0 (after 0.3b; X20 family and X18-size screens)
 - Map page + and - buttons: a tap near a button, in the gap between them, or one that rolls off the
   edge as you lift your finger now zooms instead of turning the page. A tap elsewhere on the map
   still turns the page.
+- Sensor check page: when the rows don't all fit, they scroll under the header lines (wheel, or
+  drag up and down; a scrollbar shows at the right edge). A tap still turns the page.
 
 WHAT'S NEW IN 0.3b - public beta (test 43; X20 family and X18-size screens)
 - HUD home marker (the H under the heading box): it now uses the whole width of the heading strip
