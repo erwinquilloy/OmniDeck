@@ -463,8 +463,9 @@ OmniDeck is written by Erwin Quilloy. It builds on what these projects worked ou
 - **[INAV Telemetry Dashboard for Ethos](https://github.com/iNavFlight/ETHOS-Telemetry-Dashboard)** by Rob Thomson (iNavFlight): INAV and Betaflight sensor names over CRSF and S.Port, flight-mode and arming decoding, and creating the sensors Ethos doesn't discover on R9.
 - **[iNav OpenTX Telemetry Widget](https://github.com/iNavFlight/OpenTX-Telemetry-Widget)** (iNavFlight): how INAV flight time is counted, from arming.
 - **dashx Project:** reading Ethos's own telemetry-lost flag, so a lost link shows at once.
-- **[LeoBar (leobarua)](https://github.com/leobarua):** hardware for development and testing.
-- **Testers, [Marcin J (jaroszmm)](https://github.com/jaroszmm), [Carticiak](https://github.com/Carticiak), Pete Davey and [Leslie Yagin (molokaiboy)](https://github.com/molokaiboy):** testing the pre-release builds and their valuable feedback.
+- **[LeoBar (leobarua)](https://github.com/leobarua):** hardware.
+- **[Marcin J (jaroszmm)](https://github.com/jaroszmm):** contributor and tester.
+- **Testers:** thank you to everyone who tested the pre-release builds and sent feedback.
 - **Voices:** Aria and Guy are generated with Microsoft Edge text-to-speech voices.
 
 ## Licence
