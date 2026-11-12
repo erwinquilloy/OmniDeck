@@ -356,7 +356,7 @@ run(frames=60)
 words = ' '.join(t for t, x, y in texts)
 save('summary_%s.png' % tag)
 if not NATIVE:
-  assert 'FLIGHT SUMMARY' in words and 'DISTANCE' in words, words
+  assert 'FLIGHT SUMMARY' in words and 'DIST FLOWN' in words and 'MAX AS/GS' in words, words
   logs = os.listdir(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs'))
   assert logs and logs[0].startswith('Sim Plane-2026-11-13'), logs
   print('summary page OK:', words[:120])
