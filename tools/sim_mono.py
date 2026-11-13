@@ -72,6 +72,7 @@ FONT_S = {
 '9':'0110 1001 1001 0111 0001 0110',
 '.':'0000 0000 0000 0000 0000 0100',
 ':':'0000 0100 0000 0000 0100 0000',
+'V':'1001 1001 1001 1001 0110 0110',
 'W':'1001 1001 1001 1111 1111 1001',
 'H':'1001 1001 1111 1001 1001 1001',
 '/':'0001 0010 0010 0100 0100 1000',
@@ -216,6 +217,7 @@ G.sportTelemetryPush = lambda *a: True
 G.getRSSI = lambda: 90
 native = {}
 def get_value(name):
+    if str(name) == 'tx-voltage': return 7.9   # radio battery (TX12 MK2: 2S Li-ion)
     v = native.get(str(name))
     if isinstance(v, dict): return L.table_from(v)
     return v
@@ -293,7 +295,7 @@ s = G.OD_ENV  # adapter environment (not used directly)
 if NATIVE:
     assert 'ANGL' in words, words
 else:
-    assert 'FBWA' in words and ('ALT 394FT' if IMPERIAL else 'ALT 120M') in words and 'ARM 3D14' in words, words
+    assert 'FBWA' in words and ('ALT 394FT' if IMPERIAL else 'ALT 120M') in words and '3D14 ARM 7.9V' in words, words
     assert '15.8V' in words and 'A' in words and 'GS ' in words and '030' in words, words
     assert any(w.endswith('MAH/MI' if IMPERIAL else 'WH/KM') and not w.startswith('--') for w in words.split()), words
 print('main page OK:', words[:120])

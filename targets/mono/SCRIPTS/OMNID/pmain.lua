@@ -1,6 +1,7 @@
 --[[
   OmniDeck Mono, main page (128x64), layout agreed on the scope page 2026-11-12:
-    top bar      flight mode (inverted); arm state and GPS fix + satellites, or NOFIX
+    top bar      flight mode (inverted, small font when long); TX voltage (small); arm state in a
+                 white block; GPS fix + satellites, or NOFIX
     left 70 px   horizon: ground filled, pitch rungs every 10 deg with numbers at their left end,
                  heading box at the top centre, home icon under it at the bearing to home,
                  speed box at the left edge (airspeed when a sensor reports it, with a GS box
@@ -127,13 +128,34 @@ local function homeArrow(x, y, s)
   lcd.drawLine(lx, ly, rx, ry, SOLID, FORCE)
 end
 
+-- top bar, right to left: GPS fix + satellites, arm state in a white block, transmitter voltage;
+-- the flight mode takes what is left, in the small font when the normal one does not fit
 local function topBar(s, alive)
   lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
-  local mode = alive and (s.mode or "---") or "NO TELEM"
-  lcd.drawText(1, 1, string.upper(mode), INVERS)
   local fix = s.fix or 0
   local gps = fix >= 3 and ("3D" .. (s.sats or 0)) or (fix == 2 and ("2D" .. (s.sats or 0)) or "NOFIX")
-  lcd.drawText(127, 1, (s.armed and "ARM " or "DIS ") .. gps, INVERS + RIGHT)
+  lcd.drawText(127, 1, gps, INVERS + RIGHT)
+  local x = 127 - #gps * 6 - 3
+  local arm = s.armed and "ARM" or "DIS"
+  local bw = #arm * 6 + 3
+  x = x - bw
+  lcd.drawFilledRectangle(x, 0, bw, 9, ERASE)
+  lcd.drawText(x + 2, 1, arm, 0)
+  local tx = getValue("tx-voltage")
+  if type(tx) == "number" and tx > 0 then
+    local str = string.format("%.1fV", tx)
+    x = x - 2
+    lcd.drawText(x, 2, str, SMLSIZE + INVERS + RIGHT)
+    x = x - #str * SW
+  end
+  local mode = string.upper(alive and (s.mode or "---") or "NO TELEM")
+  local room = x - 3
+  if #mode * 6 <= room then
+    lcd.drawText(1, 1, mode, INVERS)
+  else
+    local n = floor(room / SW)
+    lcd.drawText(1, 2, #mode > n and string.sub(mode, 1, n) or mode, SMLSIZE + INVERS)
+  end
 end
 
 -- live efficiency: volts, amps and ground speed each smoothed over about 10 s, then the ratio
