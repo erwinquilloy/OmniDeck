@@ -102,7 +102,12 @@ end
 -- TRAIL_MAX points (about 3 KB) however long it is. Cleared when home moves (a new flight).
 local TRAIL_MAX, TRAIL_STEP0 = 80, 15
 local trailStep, trailLat, trailLon = TRAIL_STEP0, nil, nil
+local trailGen = 0
 local function trail(s)
+  if T.gen ~= trailGen then   -- another flight controller (telem.lua resetFc): its own flight
+    trailGen = T.gen
+    ctx.trailE, ctx.trailN, trailStep, trailLat, trailLon = {}, {}, TRAIL_STEP0, nil, nil
+  end
   if not (s.lat and s.homeLat) then return end
   local tE, tN = ctx.trailE, ctx.trailN
   if s.homeLat ~= trailLat or s.homeLon ~= trailLon then

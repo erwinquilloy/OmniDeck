@@ -214,7 +214,8 @@ G.crossfireTelemetryPop = crsf_pop
 G.crossfireTelemetryPush = lambda *a: True
 G.sportTelemetryPop = sport_pop
 G.sportTelemetryPush = lambda *a: True
-G.getRSSI = lambda: 90
+RSSI = [90]
+G.getRSSI = lambda: RSSI[0]
 native = {}
 def get_value(name):
     if str(name) == 'tx-voltage': return 7.9   # radio battery (TX12 MK2: 2S Li-ion)
@@ -249,8 +250,12 @@ st = dict(lat=HOME[0], lon=HOME[1], hlat=HOME[0], hlon=HOME[1], mode=5, armed=Tr
           altmsl=160, volt=15.8, curr=12.3, mah=640, alt=120, vs=1.2, **{'as': 17.0}, gs=18.5, yaw=30, roll=18, pitch=4,
           wdir=270, wspd=4.2, wpn=0, wpd=0, wpb=0)
 TEXTQ = []
+FEED = ['normal']   # 'off': flight controller and receiver gone; 'inav': another craft, native sensors
 def feed():
-    if NATIVE:
+    if FEED[0] == 'off':
+        native.update({'RQly': 0})
+        return
+    if NATIVE or FEED[0] == 'inav':
         native.update({'GPS': {'lat': st['lat'] + 0.004, 'lon': st['lon'] + 0.003}, 'Alt': st['alt'], 'VSpd': st['vs'],
                        'GSpd': st['gs'] * 3.6, 'Hdg': st['yaw'], 'Sats': st['sats'], 'Roll': st['roll'], 'Ptch': -st['pitch'],
                        'RxBt': st['volt'], 'Curr': st['curr'], 'Capa': st['mah'], 'FM': 'ANGL', 'RQly': 96, '1RSS': -72})
@@ -387,6 +392,32 @@ L.execute('collectgarbage()'); mem_now = L.eval('(collectgarbage("count"))')
 print('page cycle OK')
 print('instructions per call: init %d, run max %d, background max %d' % (worst['init'], worst['run'], worst['background']))
 print('Lua memory (64-bit sim, above the bare runtime %.1f KB): %.1f KB after init, %.1f KB after the page cycle' % (MEM_BASE, mem_init - MEM_BASE, mem_now - MEM_BASE))
+
+# flight controller swap without restarting the script (TX12 MK2, 2026-11-13: ArduPilot off,
+# INAV on, everything stayed frozen on ArduPilot). A short ArduPilot dropout must not count.
+if not NATIVE and not SPORT:
+    def link_page():
+        while not any(t == 'LINK' for t, x, y in texts): run(G.EVT_VIRTUAL_ENTER, frames=2)
+        run(frames=4)
+        return ' '.join(t for t, x, y in texts)
+    FEED[0], RSSI[0] = 'off', 0; run(frames=40)             # 2 s dropout
+    FEED[0], RSSI[0] = 'normal', 90; run(frames=300)        # ArduPilot back for 15 s
+    w = link_page()
+    assert 'ARDUPILOT' in w and 'YES' in w, 'short dropout reset the FC: ' + w
+    FEED[0], RSSI[0] = 'off', 0; run(frames=60)             # ArduPilot powered off
+    FEED[0], RSSI[0] = 'inav', 90; run(frames=100)          # 5 s of INAV: not yet (FC_GONE_S 8)
+    w = link_page()
+    assert 'ARDUPILOT' in w, 'switched too early: ' + w
+    run(frames=120)
+    w = link_page()
+    assert 'INAV/BF' in w and 'NO' in w, 'still on ArduPilot after the swap: ' + w
+    save('swap_link_%s.png' % tag)
+    while not any(t.startswith('ALT') for t, x, y in texts): run(G.EVT_VIRTUAL_ENTER, frames=2)
+    run(frames=10)
+    w = ' '.join(t for t, x, y in texts)
+    save('swap_main_%s.png' % tag)
+    assert 'ANGL' in w and 'FBWA' not in w, w
+    print('FC swap OK:', w[:100])
 print('Mono checks OK', tag)
 
 # SYS > Tools > OmniDeck Setup, on the same screen stubs

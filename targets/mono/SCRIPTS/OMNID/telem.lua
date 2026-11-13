@@ -771,6 +771,29 @@ local function crsfReady(raw)
 end
 
 local lastArmed = nil
+
+-- Flight controller swapped without restarting the script (ArduPilot powered off, an INAV craft
+-- on the same model, TX12 MK2 2026-11-13): everything stayed frozen on ArduPilot's last values,
+-- because once passthrough has been heard the native sensors only update the link figures.
+-- ArduPilot is taken as gone after the link has dropped (EdgeTX getRSSI() 0, or LQ 0) and come
+-- back with no passthrough for FC_GONE_S: longer than ArduPilot's slowest passthrough schedule
+-- (TBS 50 Hz, one frame every 3 s, SLOW_PT_S) so its own reconnect is never mistaken for it.
+-- A receiver left powered with the flight controller off keeps the link up: nothing changes then.
+local FC_GONE_S = 8
+local lostAt, backAt = nil, nil
+T.gen = 0      -- bumped on a reset; omnid.lua clears the map trail
+local function linkLost()
+  if not getRSSI then return false end
+  local ok, r = pcall(getRSSI)
+  return ok and r == 0
+end
+local function resetFc()
+  for k in pairs(s) do s[k] = nil end
+  for k, v in pairs(fresh()) do s[k] = v end
+  nativeHomeAlt, homeAltAt, altRelative, lastArmed = nil, nil, false, nil
+  lostAt, backAt = nil, nil
+  T.gen = T.gen + 1
+end
 -- Ethos: every RF module of the model switched off means no link at all
 local moduleCheckAt, modulesOff = -100, false
 -- Ethos's module API: model.getModule(i):enable(). EdgeTX has a model.getModule too, but it
@@ -850,12 +873,17 @@ local function readNative(kind)
   -- such flag, CRSF link quality 0 / FrSky RSSI exactly 0. Ethos keeps every sensor's last
   -- value, so nothing here is fresh then: lastRx is left alone and the link shows as lost.
   -- (No "values not changing" test: a craft sitting still reads the same values for minutes.)
-  if telemActive() == false
+  if telemActive() == false or linkLost()
      or (kind == "crsf" and lq ~= nil and lq <= 0) or (kind == "sport" and rssi ~= nil and rssi == 0) then
     s.lq, s.rssi = lq, rssi
+    if s.fc == "ArduPilot" then lostAt, backAt = t, nil end
     return
   end
   if rfOff() then return end
+  if s.fc == "ArduPilot" and lostAt and lostAt > s.lastPt then
+    backAt = backAt or t
+    if t - backAt >= FC_GONE_S then resetFc() end
+  end
   -- ArduPilot is read from passthrough; this runs only after 3 s without it, i.e. the link (or
   -- the flight controller) is gone. The radio's own sensors are then last values, and its
   -- flight mode text carries no disarmed "*" unless RC_OPTIONS CRSF_FM_DISARM_STAR is set, so
