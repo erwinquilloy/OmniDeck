@@ -150,7 +150,8 @@ IMPERIAL = '--imperial' in sys.argv
 ALLPAGES = '--pages' in sys.argv
 if IMPERIAL or ALLPAGES:
     with open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg'), 'w') as f:
-        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\n')
+        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\n')
+LOGON = IMPERIAL or ALLPAGES   # FLIGHT LOG defaults to OFF; these variants switch it on
 def sd_path(p, base):
     return os.path.join(base, *[x for x in str(p).split('/') if x])
 handles = {}
@@ -217,6 +218,7 @@ G.sportTelemetryPush = lambda *a: True
 RSSI = [90]
 G.getRSSI = lambda: RSSI[0]
 native = {}
+MODEL = ['Sim Plane']
 def get_value(name):
     if str(name) == 'tx-voltage': return 7.9   # radio battery (TX12 MK2: 2S Li-ion)
     v = native.get(str(name))
@@ -226,7 +228,7 @@ G.getValue = get_value
 G.getFieldInfo = lambda name: L.table_from({'name': str(name)}) if str(name) in native else None
 G.model = L.table_from({'getSensor': lambda i: None,
                         'getModule': lambda i: L.table_from({'Type': 5 if int(i) == 1 else 0, 'protocol': 0, 'subType': 0}),
-                        'getInfo': lambda *a: L.table_from({'name': 'Sim Plane'})})
+                        'getInfo': lambda *a: L.table_from({'name': MODEL[0]})})
 
 # instruction counting, as EdgeTX's hook does
 L.execute('''
@@ -369,10 +371,14 @@ words = ' '.join(t for t, x, y in texts)
 save('summary_%s.png' % tag)
 if not NATIVE:
   assert 'FLIGHT SUMMARY' in words and 'DIST FLOWN' in words and 'MAX AS/GS' in words, words
-  logs = os.listdir(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs'))
-  assert logs and logs[0].startswith('Sim Plane-2026-11-13'), logs
+  logs = [n for n in os.listdir(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs')) if n.endswith('.txt')]
   print('summary page OK:', words[:120])
-  print('log:', logs[0]); print(open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'logs', logs[0])).read()[:700])
+  if LOGON:
+    assert logs and logs[0].startswith('Sim Plane-2026-11-13') and 'LOG' in words.split(), logs
+    print('log:', logs[0])
+  else:
+    assert not logs and 'LOG' not in words.split(), ('FLIGHT LOG is OFF by default', logs)
+    print('no log written (FLIGHT LOG OFF)')
   run(G.EVT_VIRTUAL_ENTER)
   assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
 # voice: with Aria picked on first run, the welcome plays at once and the call-outs follow,
@@ -418,6 +424,19 @@ if not NATIVE and not SPORT:
     save('swap_main_%s.png' % tag)
     assert 'ANGL' in w and 'FBWA' not in w, w
     print('FC swap OK:', w[:100])
+
+# model switch = fresh start: everything loads again (welcome plays), flight time back to zero
+if not NATIVE:
+    n_greet = sum(1 for _, p in PLAYED if p.endswith('omniready.wav'))
+    MODEL[0] = 'Sim Quad'
+    run(frames=40)
+    while not any(t.startswith('ALT') for t, x, y in texts): run(G.EVT_VIRTUAL_ENTER, frames=2)
+    run(frames=4)
+    w = ' '.join(t for t, x, y in texts)
+    assert sum(1 for _, p in PLAYED if p.endswith('omniready.wav')) == n_greet + 1, 'no fresh start'
+    assert any(x in w for x in ('T 00:00', 'T 00:01', 'T 00:02')), w   # restarted (the sim craft is armed)
+    print('model switch OK:', w[:90])
+    MODEL[0] = 'Sim Plane'
 print('Mono checks OK', tag)
 
 # SYS > Tools > OmniDeck Setup, on the same screen stubs

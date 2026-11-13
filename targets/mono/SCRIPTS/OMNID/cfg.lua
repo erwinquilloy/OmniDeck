@@ -16,6 +16,7 @@ C.ITEMS = {
   { "altUnit", "ALT/DIST", { { 0, "METRIC" }, { 1, "FEET/MILES" } } },
   { "effUnit", "EFFICIENCY", { { 0, "WH/KM" }, { 1, "MAH/KM" }, { 2, "WH/MI" }, { 3, "MAH/MI" } } },
   { "sumAuto", "SUMMARY", { { 1, "ON DISARM" }, { 0, "OFF" } } },
+  { "logFlight", "FLIGHT LOG", { { 0, "OFF" }, { 1, "ON" } } },
   { "cells", "CELLS", { 0, 14, 1, "", 1 } },
   { "lowVolt", "LOW V/CELL", { 0, 450, 5, "V", 100 } },
   { "critVolt", "CRIT V/CELL", { 0, 450, 5, "V", 100 } },
@@ -25,9 +26,10 @@ C.ITEMS = {
   { "checkPage", "SENSOR PAGE", { { 0, "HIDE" }, { 1, "SHOW" } } },
   { "linkMode", "LINK", { { 0, "AUTO" }, { 1, "CRSF" }, { 2, "S.PORT" } } },
 }
-C.NOTE = { statsPage = "IN THE PAGE CYCLE", checkPage = "PAGE 5", cells = "0 = AUTO", lowVolt = "0 = OFF", critVolt = "0 = OFF", batCap = "INAV/BF ONLY, 0 = OFF" }
+C.NOTE = { statsPage = "IN THE PAGE CYCLE", checkPage = "PAGE 5", cells = "0 = AUTO", lowVolt = "0 = OFF", critVolt = "0 = OFF", batCap = "INAV/BF ONLY, 0 = OFF",
+           logFlight = "TEXT FILE IN OMNID/LOGS" }
 
-C.DEFAULTS = { voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, sumAuto = 1, cells = 0,
+C.DEFAULTS = { voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, sumAuto = 1, logFlight = 0, cells = 0,
                lowVolt = 0, critVolt = 0, batCap = 0, startPage = 1, statsPage = 0, checkPage = 0, linkMode = 0 }
 
 function C.path()

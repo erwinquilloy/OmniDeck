@@ -6,7 +6,9 @@
   Set it up as a telemetry screen: MODEL > DISPLAY > a screen > Script > omnid.
   ENTER: next page - main, map, messages (ArduPilot only), flight stats (Setup: STATS PAGE),
   link check, sensor check (Setup: SENSOR PAGE). The wheel or +/- scrolls messages and sensors.
-  The flight summary opens by itself at disarm (Setup: SUMMARY); ENTER leaves it.
+  The flight summary opens by itself at disarm (Setup: SUMMARY); ENTER leaves it. A text log of
+  each flight is written at landing only with Setup: FLIGHT LOG ON (default OFF).
+  Every start is a fresh one, and so is a model switch: nothing of the old model stays.
   Settings: SYS > Tools > OmniDeck Setup (per model; applied when the tool is left).
 
   Memory: EdgeTX gives a telemetry script about 127 KB of Lua memory on a TX12 MK2 (measured).
@@ -140,8 +142,34 @@ end
 -- read telemetry; voice and flight summary take turns, one per call (each still runs several
 -- times a second), so no call carries both inside EdgeTX's per-call Lua limit
 local turn = 0
+local init
+
+-- A model switch is a fresh start, as in the colour OmniDeck: telemetry, messages, trail, flight
+-- in progress and last flight, alarms, settings (they are per model) and the page all start
+-- again, by loading everything anew. Checked once a second; harmless where EdgeTX itself
+-- restarts the script on a model switch.
+local curModel, modelAt = nil, -100
+local function modelName()
+  local ok, info = pcall(model.getInfo)
+  return ok and type(info) == "table" and info.name or nil
+end
+local function freshStart()
+  page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
+  ctx.T, ctx.F, ctx.A = nil, nil, nil
+  ctx.flightT, ctx.trailE, ctx.trailN = 0, {}, {}
+  ctx.logName, ctx.wantSummary, ctx.wantStart = nil, nil, nil
+  trailStep, trailLat, trailLon, trailGen = TRAIL_STEP0, nil, nil, 0
+  collectgarbage()
+  init()
+end
+
 local function pump()
   E.tick()
+  if E.os.clock() - modelAt >= 1 then
+    modelAt = E.os.clock()
+    local n = modelName()
+    if n ~= curModel then freshStart() return end
+  end
   T.wakeup(cfg.linkMode)
   local s, now = T.s, E.os.clock()
   -- ArduPilot sends BATT_CAPACITY; INAV and Betaflight don't, so the pilot sets it
@@ -153,11 +181,14 @@ local function pump()
   else
     local ev = F.update(s, alive, now, T.distBrg)
     if ev == "done" then
-      local w = load("log.lua")
-      local ok, name = false, nil
-      if w then ok, name = pcall(w, s, F.last(), ctx.u, VERSION) end
-      ctx.logName = ok and name or nil
-      w = nil
+      ctx.logName = nil
+      if cfg.logFlight == 1 then
+        local w = load("log.lua")
+        local ok, name = false, nil
+        if w then ok, name = pcall(w, s, F.last(), ctx.u, VERSION) end
+        ctx.logName = ok and name or nil
+        w = nil
+      end
       if cfg.sumAuto == 1 then ctx.wantSummary = true end
     elseif ev == "armed" then
       ctx.logName = nil
@@ -170,7 +201,8 @@ end
 
 local function startPage() return cfg.startPage == 2 and 2 or 1 end
 
-local function init()
+init = function()
+  curModel, modelAt = modelName(), -100
   E = load("etx.lua")
   T = E.loadfile("telem.lua")()
   F = load("sum.lua")
