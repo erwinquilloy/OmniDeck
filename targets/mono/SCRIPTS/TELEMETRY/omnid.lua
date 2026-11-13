@@ -157,7 +157,7 @@ local function freshStart()
   page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
   ctx.T, ctx.F, ctx.A = nil, nil, nil
   ctx.flightT, ctx.trailE, ctx.trailN = 0, {}, {}
-  ctx.logName, ctx.wantSummary, ctx.wantStart = nil, nil, nil
+  ctx.logName, ctx.wantSummary, ctx.wantStart, ctx.wantLog = nil, nil, nil, nil
   trailStep, trailLat, trailLon, trailGen = TRAIL_STEP0, nil, nil, 0
   collectgarbage()
   init()
@@ -182,13 +182,7 @@ local function pump()
     local ev = F.update(s, alive, now, T.distBrg)
     if ev == "done" then
       ctx.logName = nil
-      if cfg.logFlight == 1 then
-        local w = load("log.lua")
-        local ok, name = false, nil
-        if w then ok, name = pcall(w, s, F.last(), ctx.u, VERSION) end
-        ctx.logName = ok and name or nil
-        w = nil
-      end
+      ctx.wantLog = cfg.logFlight == 1
       if cfg.sumAuto == 1 then ctx.wantSummary = true end
     elseif ev == "armed" then
       ctx.logName = nil
@@ -200,6 +194,22 @@ local function pump()
 end
 
 local function startPage() return cfg.startPage == 2 and 2 or 1 end
+
+-- the flight log, at landing: the page is unloaded first and the writer dropped before the
+-- summary page loads, so the three are never in memory together. Writing the log with the main
+-- page and the summary loaded took the TX12 MK2 past EdgeTX's Lua limit ("Lua disabled!", 2026-11-13).
+local function writeLog()
+  if not ctx.wantLog then return end
+  ctx.wantLog = false
+  page = nil
+  collectgarbage()
+  local w = load("log.lua")
+  local ok, name = false, nil
+  if w then ok, name = pcall(w, T.s, F.last(), ctx.u, VERSION) end
+  ctx.logName = ok and name or nil
+  w = nil
+  collectgarbage()
+end
 
 init = function()
   curModel, modelAt = modelName(), -100
@@ -220,12 +230,30 @@ init = function()
   loadPage(startPage())
 end
 
+-- EdgeTX stops all Lua ("Lua disabled!") once the script heap passes ~127 KB on a TX12 MK2, and
+-- it counts garbage not yet collected: Lua's own collector lets that pile up well past the live
+-- data before it runs (TX12 MK2, INAV, killed at disarm 2026-11-13). A full collection whenever
+-- the heap passes GC_KB keeps the garbage from ever reaching the limit.
+-- The trigger sits 12 KB above the live data (at least GC_KB, at most GC_MAX_KB), so a
+-- collection runs every few seconds rather than on every call when the live data is large.
+local GC_KB, GC_MAX_KB = OD_GC_KB or 100, OD_GC_MAX_KB or 118
+local gcAt = GC_KB
+local function gcGuard()
+  if collectgarbage("count") > gcAt then
+    collectgarbage()
+    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, collectgarbage("count") + 12))
+  end
+end
+
 local function background()
   pump()
+  writeLog()
+  gcGuard()
 end
 
 local function run(event)
   pump()
+  writeLog()
   if ctx.wantSummary then
     ctx.wantSummary = false
     loadPage(4, true)
@@ -235,12 +263,14 @@ local function run(event)
   elseif event == EVT_VIRTUAL_ENTER then
     if onSummary then loadPage(startPage()) else loadPage(nextPage()) end
   end
+  if page == nil and T then loadPage(pageN, onSummary) end   -- unloaded for the log
   lcd.clear()
   if page then
     page.draw(ctx, event)
   else
     lcd.drawText(1, 1, "OmniDeck: page missing", 0)
   end
+  gcGuard()
   return 0
 end
 

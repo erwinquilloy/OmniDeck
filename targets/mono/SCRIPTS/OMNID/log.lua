@@ -3,6 +3,8 @@
   /SCRIPTS/OMNID/logs/, named as the radio names its telemetry logs:
   <model>-<YYYY-MM-DD>-<HHMMSS>.txt (<model>-001.txt and up with no clock). Same contents as the
   colour build's log. Loaded only when a flight ends, then dropped, so it costs no memory in flight.
+  Written line by line: building the whole text first took the TX12 MK2 over EdgeTX's Lua memory
+  limit at landing ("Lua disabled!", empty log file, 2026-11-13).
 ]]
 
 local DIR = "/SCRIPTS/OMNID/"
@@ -65,8 +67,12 @@ return function(s, f, u, version)
     end
     eff = perKm and perKm * (string.find(u.effLbl, "MI", 1, true) and 1.609344 or 1)
   end
-  local L = {
-    "OmniDeck Mono " .. version .. " flight log",
+  local name = fileName(model, d)
+  local fh = io.open(LOG_DIR .. name, "w") or io.open(DIR .. name, "w")   -- no logs/ folder: next to the scripts
+  if not fh then return nil end
+  local function w(line) io.write(fh, line .. "\n") end
+  w("OmniDeck Mono " .. version .. " flight log")
+  for _, line in ipairs({
     "Model          " .. model,
     "Date           " .. (d and string.format("%04d-%02d-%02d %02d:%02d:%02d", d.year, d.mon, d.day, d.hour, d.min, d.sec) or "date unknown"),
     "FC             " .. tostring(s.fc or "?") .. ", link " .. tostring(s.link or "?"),
@@ -87,17 +93,13 @@ return function(s, f, u, version)
     "",
     "Home           " .. pos(s.homeLat, s.homeLon),
     "Last position  " .. pos(s.lat or f.lat, s.lon or f.lon),
-  }
+  }) do w(line) end
   local m = s.msgs
   if m and #m > 0 then
-    L[#L + 1] = ""
-    L[#L + 1] = "Messages (last " .. math.min(#m, LOG_MSGS) .. "):"
-    for i = math.max(1, #m - LOG_MSGS + 1), #m do L[#L + 1] = "  " .. tostring(m[i].text) end
+    w("")
+    w("Messages (last " .. math.min(#m, LOG_MSGS) .. "):")
+    for i = math.max(1, #m - LOG_MSGS + 1), #m do w("  " .. tostring(m[i].text)) end
   end
-  local name = fileName(model, d)
-  local fh = io.open(LOG_DIR .. name, "w") or io.open(DIR .. name, "w")   -- no logs/ folder: next to the scripts
-  if not fh then return nil end
-  io.write(fh, table.concat(L, "\n") .. "\n")
   io.close(fh)
   return name
 end

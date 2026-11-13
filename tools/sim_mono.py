@@ -233,10 +233,11 @@ G.model = L.table_from({'getSensor': lambda i: None,
 # instruction counting, as EdgeTX's hook does
 L.execute('''
 _N = 0
+_PEAK = 0
 local pack, unpack = table.pack, table.unpack
 function _CALL(f, ...)
   _N = 0
-  debug.sethook(function() _N = _N + 100 end, "", 100)
+  debug.sethook(function() _N = _N + 100 local m = collectgarbage("count") if m > _PEAK then _PEAK = m end end, "", 100)
   local r = pack(pcall(f, ...))
   debug.sethook()
   if not r[1] then error(r[2], 0) end
@@ -277,6 +278,8 @@ def feed():
             crsf_q.append((0x80, data))
 
 # ------------------------------------------------------------------ run
+# GC trigger for the 64-bit sim's bigger heap (the radio's 100 KB scaled: sim live data ~2.6x)
+G.OD_GC_KB, G.OD_GC_MAX_KB = MEM_BASE + 260, MEM_BASE + 310
 script = load_script('/SCRIPTS/TELEMETRY/omnid.lua')()
 worst = {'init': 0, 'run': 0, 'background': 0}
 CALL(script['init']); worst['init'] = G._N
@@ -365,8 +368,13 @@ assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER back to the main pa
 # has no arm state to clear, so that run stops here)
 if NATIVE:
     st.update(armed=True)
+L.execute('collectgarbage() _PEAK = 0'); _m0 = L.eval('(collectgarbage("count"))'); run(frames=60)
+print('cruise: peak +%.1f KB over 3 s of normal flight' % (G._PEAK - _m0))
+L.execute('collectgarbage() _PEAK = 0'); mem_flying = L.eval('(collectgarbage("count"))')
 st.update(armed=False)
 run(frames=60)
+print('landing: Lua memory %.1f KB in flight, peak %.1f KB (+%.1f) while the flight ends (64-bit sim)'
+      % (mem_flying - MEM_BASE, G._PEAK - MEM_BASE, G._PEAK - mem_flying))
 words = ' '.join(t for t, x, y in texts)
 save('summary_%s.png' % tag)
 if not NATIVE:
