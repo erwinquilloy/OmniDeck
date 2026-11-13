@@ -15,8 +15,7 @@ local function draw(ctx)
   local T = ctx.T
   local s = T.s
   lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
-  lcd.drawText(1, 1, "LINK CHECK", INVERS)
-  lcd.drawText(127, 1, "V" .. ctx.version, INVERS + RIGHT)
+  lcd.drawText(1, 1, "OmniDeck Mono v" .. ctx.version, INVERS)
   local now = ctx.clock()
   local pt = now - (s.lastPt or -100) <= 3
   row(10, "LINK", s.link and string.upper(s.link) or "---")

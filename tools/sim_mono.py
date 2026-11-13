@@ -339,7 +339,7 @@ if ALLPAGES:     # flight stats in the cycle, live
     print('stats page OK:', words[:120])
 run(G.EVT_VIRTUAL_ENTER, frames=5)
 words = ' '.join(t for t, x, y in texts)
-assert 'LINK CHECK' in words, words
+assert 'OmniDeck Mono v' in words, words
 if not NATIVE:
     assert 'ARDUPILOT' in words and 'YES' in words, words
 save('link_%s.png' % tag)
