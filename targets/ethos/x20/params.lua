@@ -445,11 +445,6 @@ end
 local MS = { state = "off", count = nil, stamp = nil, items = {}, next = 1, last = 0, checkAt = -100 }
 -- the downloaded mission for the editor (medit.lua): items when complete, and the state
 function P.missionItems() return MS.state == "done" and MS.items or nil, MS.state end
--- test builds: one line for the X20 map page's diagnostic (a photo of a frozen screen shows it)
-function P.diag()
-  return string.format("M %s %s/%s q%d tx%d rx%d %s", MS.state, tostring(MS.next), tostring(MS.count),
-    #out, P.stats.tx, P.stats.rx, tostring(link))
-end
 P.missionOn = false   -- ui.lua: "ArduPilot mission download" setting
 P.onMission = nil     -- function(list or nil)
 

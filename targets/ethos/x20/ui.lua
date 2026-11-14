@@ -47,7 +47,6 @@ MI.init(T)
 local PR = nil
 local paramsErr, paramsRetryAt = nil, 0   -- the last failed load of params.lua (see params())
 local perf = { p = 0, pAll = 0, w = 0, wAll = 0, at = 0 }   -- paint / wakeup ms (perfNote, page 5)
-local diagN = 0   -- test build: frames drawn on the map page
 local function params()
   -- params.txt (one shared file next to the widget) adds rows to the built-in list
   if not PR then
@@ -872,19 +871,6 @@ local function pageMap(w, W, H, s, u)
     lcd.color(COL.dim)
     lcd.drawText(cx, H - stripH + 3, "Lat --     Lon --")
   end
-  -- test build diagnostic (0.4.test, X20 freeze hunt): a photo of a frozen screen shows the
-  -- last frame drawn. Frame counter, worst paint / wakeup ms (10 s), Lua KB, Ethos limit hits,
-  -- the mission download and the editor. Nothing is written to the SD card.
-  diagN = diagN + 1
-  lcd.font(FONT_XS or fSmall)
-  local dg = string.format("#%d p%.0f w%.0f ms %.0fK L%d %s%s", diagN, perf.p, perf.w,
-    collectgarbage("count"), limitHits, PR and PR.diag and PR.diag() or "M -", (ED and ED.active) and " ED" or "")
-  local dw, dh = lcd.getTextSize(dg)
-  local dy = barH + ((ED and ED.active) and (ED.infoH or 0) + 2 or 2)
-  lcd.color(lcd.RGB(0, 0, 0))
-  lcd.drawFilledRectangle(W - dw - 8, dy, dw + 6, dh + 2)
-  lcd.color(COL.warn)
-  lcd.drawText(W - dw - 5, dy + 1, dg)
   -- overlay: home distance/bearing, altitude, speed (top-left of the map)
   lcd.font(fBig)
   local _, th = lcd.getTextSize("0")
