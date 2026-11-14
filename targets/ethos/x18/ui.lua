@@ -71,6 +71,17 @@ local function params()
   end
   return PR
 end
+-- X18: the PARAMS code (about 190 KB) leaves memory 10 s after the page is left, so it costs
+-- nothing until it is opened again (then it reloads, and the open tab is read again). Not while
+-- the ArduPilot mission download uses it on the other pages. The 10 s keep a quick pass through
+-- the page cycle from reloading the file every time.
+local PARAMS_UNLOAD_S = 10
+local function paramsRelease()
+  if not PR then return end
+  PR = nil
+  T.onMavlite, T.onMavEnv, T.mavUsedAt = nil, nil, nil   -- telem.lua's hooks into it
+  collectgarbage("collect")
+end
 -- the module, with this widget's "Edit in flight" choice (1 = gains and trim)
 local function paramsFor(w)
   local p = params()
@@ -1433,6 +1444,11 @@ local function wakeup(w)
     MI.setAp(nil)
     if PR then PR.missionReset() end
   end
+  if w.page == PAGE_PARAMS then w.paramsLeftAt = nil
+  elseif PR and not (w.apMission == 1 and s.fc == "ArduPilot") then
+    w.paramsLeftAt = w.paramsLeftAt or nowc
+    if nowc - w.paramsLeftAt >= PARAMS_UNLOAD_S then paramsRelease() w.paramsLeftAt = nil end
+  end
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
   rememberPos(s)
   if runAL then checkAlarms(w, s, nowc) end
@@ -1527,6 +1543,11 @@ local function event(w, category, value, x, y)
     if value == TOUCH_START then
       w.touchX, w.touchY, w.touchScroll, w.dragged = x, y, w.msgScroll or 0, false
       w.touchChk = w.chkScroll or 0
+      -- PARAMS page (X18 touch layout): the tab column and the row list follow a drag
+      if w.page == PAGE_PARAMS then
+        local ok, pm = pcall(paramsFor, w)
+        if ok and pm and pm.dragStart then pm.dragStart(x, y) end
+      end
       return true
     end
     if value == TOUCH_MOVE then
@@ -1542,6 +1563,10 @@ local function event(w, category, value, x, y)
         local rows = math.floor((w.touchY - y) / w.chkRowH + 0.5)
         w.chkScroll = math.max(0, math.min(w.chkMax or 0, (w.touchChk or 0) + rows))
         lcd.invalidate()
+      end
+      if w.dragged and w.page == PAGE_PARAMS then
+        local ok, pm = pcall(paramsFor, w)
+        if ok and pm and pm.drag then pm.drag(x, y) lcd.invalidate() end
       end
       return true
     end

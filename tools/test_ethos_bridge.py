@@ -106,7 +106,7 @@ for _ in range(int(90 / 0.05)):
         s = T.s
         s.fc = 'ArduPilot'          # (the passthrough above is minimal; the FC type is not under test)
         P.wakeup(s)
-    if filled_at[0] is None and 'idle' in P.debug() and P.stats.rx > 20: filled_at[0] = state['t']
+    if filled_at[0] is None and 'idle' in P.debug() and P.stats.rx > 5: filled_at[0] = state['t']
 
 if COUNT:
     c = sorted(COSTS)
@@ -120,7 +120,10 @@ check('the bridge frames reach params.lua (bridge counter %d)' % T.bridgeN, T.br
 check('params.lua talks MAVLink', 'MAVLINK' in dbg)
 check('GCS heartbeats sent to wake the bridge (%d)' % getattr(ap, 'hellos', 0), getattr(ap, 'hellos', 0) >= 10)
 nonq = [n for i, n in enumerate(names) if L.eval('function(L, i) return L[i][10] end')(LIST, i + 1) != 'q']
-check('PARAMS page filled: %d answers for %d rows' % (P.stats.rx, len(nonq)), P.stats.rx >= len(nonq) and 'idle' in dbg)
+flight = [n for i, n in enumerate(names) if L.eval('function(L, i) return L[i][1] end')(LIST, i + 1) == 'FLIGHT']
+fv = L.eval('function(P, n) return P.valueOf(n) end')
+check('open tab (FLIGHT) filled, then idle: %d/%d (%d answers)' % (sum(1 for n in flight if fv(P, n) is not None), len(flight), P.stats.rx),
+      all(fv(P, n) is not None for n in flight) and 'idle' in dbg)
 check('passthrough text still arrives (status text: %s)' % (T.s.msgs[len(T.s.msgs)].text if len(T.s.msgs) > 0 else None),
       len(T.s.msgs) > 0)
 # the mission editor's Send over the bridge (standard upload), then read back

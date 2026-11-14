@@ -429,7 +429,12 @@ local function bridgePop()
     T.bridgeInfo = "peek " .. table.concat(parts, " ")
     if ok and cmd == 0xAA and data then T.bridgeAt, T.bridgeN = t, T.bridgeN + 1 if T.onMavEnv then T.onMavEnv(data) end end
   end
-  for _ = 1, 3 do   -- ~1.3 kB/s on mLRS = about 30 frames a second (X18: 3 at most, its tighter limit)
+  -- while the PARAMS page or a mission uses the bridge (params.lua sets T.mavUsedAt) every frame
+  -- matters: the replies are mixed into the aircraft's whole stream (50 Hz mLRS at the recommended
+  -- rates: ~2.2 kB/s, 40+ frames a second, more than 3 per update keeps up with); else 3 is plenty
+  -- (Marcin, X18 + mLRS 2.4 GHz 50 Hz 2026-11-14: saves slow after raising the stream rates)
+  local busy = T.mavUsedAt and os.clock() - T.mavUsedAt < 2
+  for _ = 1, busy and 8 or 3 do
     local ok, cmd, data = pcall(bridgeSensor.popFrame, bridgeSensor, 0xAA, 0xAA)
     if not ok or cmd ~= 0xAA or data == nil then return end
     T.bridgeAt, T.bridgeN = now(), T.bridgeN + 1

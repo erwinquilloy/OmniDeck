@@ -4,7 +4,7 @@
 # One file for all models. It only ADDS rows to the built-in list (FLIGHT ... Q PID);
 # a name that is already listed is skipped. Restart the radio (or reselect the model) after editing.
 #
-#   [GROUP]              the rows below go to this tab. A built-in tab name (PID, TRIM, ...)
+#   [GROUP]              the rows below go to this tab. A built-in tab name (PID, TECS, LANDING, ...)
 #                        adds to that tab; a new name makes a new tab after the built-in ones
 #   [GROUP] flight       ...and these rows may be changed in flight (setting "Params: edit in
 #                        flight" = "Gains and trim"); other rows are view only while armed
@@ -26,7 +26,7 @@ TECS_SPDWEIGHT | Speed weight | 0.1
 TECS_TIME_CONST | Time constant | 0.5
 
 [NAV]
-NAVL1_PERIOD | L1 period | 1
+NAVL1_DAMPING | L1 damping | 0.05
 WP_RADIUS | WP radius | 5
 
 [SERVOS]

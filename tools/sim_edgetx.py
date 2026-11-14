@@ -828,7 +828,11 @@ if NATIVE:
     print('params page not offered for INAV/Betaflight OK')
 else:
     assert wd.page == 6, 'params page in the cycle for ArduPilot, page %s' % wd.page
-    for _ in range(120):
+    for _ in range(25):
+        _ap_pump(); step(0.05)
+    _ap_pump(); frame()
+    render('etx_params_reading_%s.png' % tag, 6)   # progress bar under the top bar
+    for _ in range(95):
         _ap_pump(); step(0.05)
     _ap_pump(); frame()
     render('etx_params_%s.png' % tag, 6)
@@ -855,6 +859,23 @@ else:
         print('params page S.Port: read, edit, save verified OK')
     frame(G.EVT_VIRTUAL_ENTER)
     assert wd.page == 1, 'ENTER with no row picked leaves the params page, page %s' % wd.page
+    if wd.apMission != 1:
+        # the PARAMS code leaves memory 10 s after the page is left, and comes back when opened
+        _memf = L.eval('function() collectgarbage("collect") return collectgarbage("count") end')
+        _mem = lambda: (lambda r: r[0] if isinstance(r, tuple) else r)(_memf())
+        _m_open = _mem()
+        for _ in range(100): _ap_pump(); step(0.05)    # 5 s on the main page: still loaded
+        _m5 = _mem()
+        for _ in range(140): _ap_pump(); step(0.05)    # past 10 s: unloaded
+        _m12 = _mem()
+        assert _m_open - _m12 > 100, ('params unloaded after 10 s', round(_m_open), round(_m5), round(_m12))
+        assert _m_open - _m5 < 50, ('params kept for 10 s', round(_m_open), round(_m5))
+        wd.page = 6
+        for _ in range(60): _ap_pump(); step(0.05)
+        _ap_pump(); frame()
+        render('etx_params_reopen_%s.png' % tag, 6)
+        print('params page: freed %d KB 10 s after leaving (%d -> %d KB), reopens OK' % (_m_open - _m12, _m_open, _m12))
+        wd.page = 1
 # ArduPilot mission download (Stratos firmware) onto the map, any page
 if SPORT and not NATIVE:
     _h = (st['lat'], st['lon'])

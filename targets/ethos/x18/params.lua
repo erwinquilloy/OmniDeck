@@ -718,6 +718,8 @@ end
 
 -- ---------------------------------------------------------------- page state
 local sel, top, grp = 0, 0, nil   -- selected row in vis (0 none), list scroll, group shown
+local tabTop, lastCur, lastSel = 0, nil, nil   -- X18 touch layout: tab column scroll; what the last paint followed
+local drag = nil                  -- a finger drag on the page: where it started and the scroll then
 local bitCur = 1
 local saveReq = nil
 local msgAt = 0
@@ -756,6 +758,7 @@ function P.reset()
   vals, vbytes, out, pend, qOn = {}, {}, {}, nil, nil
   edit, draft, editBase, phase, saveReq = nil, nil, nil, "", nil
   sel, top, grp, link, prev, rxSt = 0, 0, nil, nil, nil, nil
+  tabTop, lastCur, lastSel, drag = 0, nil, nil, nil
   mvSt, mvSkip = 0, 0
   if LIST then rebuild() end
 end
@@ -788,19 +791,24 @@ local function failedText(s, name)
   return false
 end
 
+-- the tab on screen; only its rows are read (Marcin 2026-11-14: the other tabs are read when opened,
+-- so the link is free again as soon as the open tab is in; values already read are kept)
+local function curGroup() return vis[sel] and vis[sel][1] or grp or groups[1] end
+
 local function nextRead(rowsShown)
   if qOn == nil then return "Q_ENABLE" end
   if edit then return nil end
+  local g = curGroup()
   local r = vis[sel]
   if r and vals[r[2]] == nil then return r[2] end
   for i = 1, #rowsShown do local n = rowsShown[i][2] if vals[n] == nil then return n end end
-  for _, x in ipairs(vis) do if vals[x[2]] == nil then return x[2] end end
+  for _, x in ipairs(vis) do if x[1] == g and vals[x[2]] == nil then return x[2] end end
   -- mLRS: answers get lost now and then, so an n/a row is asked again every 30 s
   if link == "MAVLINK" then
     local t = os.clock()
     for _, x in ipairs(vis) do
       local nm = x[2]
-      if vals[nm] == false and t - (naAt[nm] or 0) >= 30 then naAt[nm] = t return nm end
+      if x[1] == g and vals[nm] == false and t - (naAt[nm] or 0) >= 30 then naAt[nm] = t return nm end
     end
   end
   return nil
@@ -869,6 +877,7 @@ local function service(s, pageOpen)
   end
   -- mLRS with Tx Ser Port = cbridge: MAVLink through the bridge (any ArduPilot)
   MV.usedAt = os.clock()
+  if link == "MAVLINK" then T.mavUsedAt = MV.usedAt end   -- mLRS only: telem.lua reads more bridge frames per update while this is recent
   -- The mLRS module sends nothing over the bridge until the radio has sent it something
   -- (X20S + Nomad 2026-11-14: no 0xAA at all until the test widget's first request). So a GCS
   -- HEARTBEAT goes out every 2 s on CRSF, as Mission Planner sends one: it wakes the bridge, and
@@ -933,6 +942,10 @@ local function service(s, pageOpen)
     else send(MISSION_REQUEST_INT, { pend.seq % 256, math.floor(pend.seq / 256) }) end
     return
   end
+  -- a save goes first: a row read still waiting for its answer is dropped (only the open tab is
+  -- read now, so one is often waiting); it is asked again later, and a late answer is kept anyway.
+  -- Not a read of the row being saved: its old value would then look like the save's answer.
+  if saveReq and pend and pend.name and not pend.set and not pend.check and pend.name ~= saveReq.name then pend = nil end
   if pend then
     if not pend.at then pend.at = now end
     local name = pend.name
@@ -998,12 +1011,12 @@ local function service(s, pageOpen)
       -- link has room, so piling up requests on a full mLRS link loses answers (X20S 2026-11-14).
       -- Its answer fills in whenever it comes; a lost one is asked again later.
       if link == "MAVLINK" then
-        local now2, extra = os.clock(), 0
-        for _, rows in ipairs({ shown, vis }) do   -- rows on screen first, then the page's order
+        local now2, extra, g = os.clock(), 0, curGroup()
+        for _, rows in ipairs({ shown, vis }) do   -- rows on screen first, then the rest of the tab
           for _, r in ipairs(rows) do
             local nm = r[2]
             if extra >= (P.readAhead or 1) then break end
-            if nm ~= n and vals[nm] == nil and now2 - (prefAt[nm] or -10) >= 4 then
+            if r[1] == g and nm ~= n and vals[nm] == nil and now2 - (prefAt[nm] or -10) >= 4 then
               prefAt[nm] = now2
               send(REQ_READ, nameBytes(nm, {}))
               extra = extra + 1
@@ -1113,9 +1126,13 @@ local function drawEditor(W, H, y0, y1, s, ctx)
   lcd.drawText(bx + 8, by + 4, r[2])
   lcd.color(C.dim)
   lcd.drawText(bx + bw - 8, by + 4, r[3], RIGHT)
-  local bh2 = th + 8
+  -- X18 touch layout (option C, 2026-11-14): buttons about 8 mm tall; a number gets a second row
+  -- with -10 / +10 steps above Back / Save (44 to 100 m: 6 taps instead of 56)
+  local bh2 = math.max(th + 8, floor(H * 0.14))
+  local twoRows = r[10] ~= "bits"
   local btnY = by + bh - bh2 - 6
-  local stY = btnY - th - 4
+  local btn1Y = twoRows and (btnY - bh2 - 6) or btnY
+  local stY = btn1Y - th - 4
   local col = phaseCol == "ok" and C.ok or phaseCol == "bad" and C.bad or C.warn
   if r[10] == "bits" then
     local cur = draft
@@ -1163,16 +1180,23 @@ local function drawEditor(W, H, y0, y1, s, ctx)
   lcd.color(col)
   lcd.drawText(bx + bw / 2, stY, phase, CENTERED)
   -- buttons: wheel + ENTER walk them on the check list (cursor past the 18 checks)
-  local labels = r[10] == "bits" and { "All on", "Back", "Save" } or { "-", "+", "Back", "Save" }
-  local n = #labels
-  local gap = 8
-  local w1 = floor((bw - 16 - gap * (n - 1)) / n)
-  for i, l in ipairs(labels) do
-    local x = bx + 8 + (i - 1) * (w1 + gap)
-    local hot = r[10] == "bits" and bitCur == #BITS + i
-    button(x, btnY, w1, bh2, l, (l == "Save" and C.ok) or (hot and C.home) or C.dim, C)
-    if hot then lcd.color(C.home) lcd.drawRectangle(x - 1, btnY - 1, w1 + 2, bh2 + 2) end
-    box("btn", l, x, btnY, w1, bh2)
+  local function btnRow(labels, y)
+    local n = #labels
+    local gap = 8
+    local w1 = floor((bw - 16 - gap * (n - 1)) / n)
+    for i, l in ipairs(labels) do
+      local x = bx + 8 + (i - 1) * (w1 + gap)
+      local hot = r[10] == "bits" and bitCur == #BITS + i
+      button(x, y, w1, bh2, l, (l == "Save" and C.ok) or (hot and C.home) or C.dim, C)
+      if hot then lcd.color(C.home) lcd.drawRectangle(x - 1, y - 1, w1 + 2, bh2 + 2) end
+      box("btn", l, x, y, w1, bh2)
+    end
+  end
+  if twoRows then
+    btnRow(r[9] and { "-", "+" } or { "-10", "-", "+", "+10" }, btn1Y)
+    btnRow({ "Back", "Save" }, btnY)
+  else
+    btnRow({ "All on", "Back", "Save" }, btnY)
   end
 end
 
@@ -1199,35 +1223,69 @@ function P.paint(w, W, H, s, u, ctx)
   local botH = th + 6
   local y0, y1 = barH, H - botH
   -- left: the groups
-  local tabW = floor(W * 0.2)
+  -- X18 touch layout (option C, Marcin 2026-11-14): tabs and rows about 7 mm tall (38 px on the
+  -- 480x320 screen). When the tabs don't all fit, the tab column scrolls (drag it, or the wheel
+  -- walks into the next tab); the row list drags too.
+  local tabW = floor(W * 0.23)
   local cur = vis[sel] and vis[sel][1] or grp or groups[1]
-  local gh = floor((y1 - y0) / math.max(1, #groups))
-  lcd.font(gh < th + 2 and fSmall or fMid)
+  local gh = math.max(th + 8, floor(H * 0.12))
+  -- tabs that don't all fit: a strip of their own at the bottom of the column, up and down arrows
+  -- to tap (Marcin 2026-11-14: the arrow drawn inside the last tab looked like part of TECS)
+  local ah = (#groups * gh > y1 - y0) and gh or 0   -- as tall as a tab (user 2026-11-14)
+  local tfit = math.max(1, floor((y1 - y0 - ah) / gh))
+  local ci = 1
+  for i, g in ipairs(groups) do if g == cur then ci = i end end
+  if cur ~= lastCur then   -- the open tab changed: keep it in view
+    if ci <= tabTop then tabTop = ci - 1 end
+    if ci > tabTop + tfit then tabTop = ci - tfit end
+    lastCur = cur
+  end
+  tabTop = math.max(0, math.min(tabTop, #groups - tfit))
+  lcd.font(fMid)
   local _, gth = lcd.getTextSize("A")
-  for i, g in ipairs(groups) do
-    local gy = y0 + (i - 1) * gh
+  for k = tabTop + 1, math.min(#groups, tabTop + tfit) do
+    local g = groups[k]
+    local gy = y0 + (k - tabTop - 1) * gh
     if g == cur then
       lcd.color(C.tile) lcd.drawFilledRectangle(0, gy, tabW, gh)
       lcd.color(C.home) lcd.drawFilledRectangle(0, gy, 3, gh)
     end
     lcd.color(g == cur and C.txt or C.dim)
     lcd.drawText(8, gy + floor((gh - gth) / 2), g)
+    lcd.color(C.tile) lcd.drawFilledRectangle(0, gy + gh - 1, tabW, 1)
     box("grp", g, 0, gy, tabW, gh)
+  end
+  if ah > 0 then
+    -- left half: up (bright while there are tabs above), right half: down (while tabs below)
+    local sy, hw = y1 - ah, floor(tabW / 2)
+    lcd.color(C.bar) lcd.drawFilledRectangle(0, sy, tabW, ah)
+    lcd.color(C.tile) lcd.drawFilledRectangle(hw, sy + 4, 1, ah - 8)
+    local cy, s = sy + floor(ah / 2), math.max(5, floor(ah / 5))
+    lcd.color(tabTop > 0 and C.txt or C.tile)
+    lcd.drawFilledTriangle(floor(hw / 2) - s, cy + floor(s / 2), floor(hw / 2), cy - floor(s / 2), floor(hw / 2) + s, cy + floor(s / 2))
+    lcd.color(tabTop + tfit < #groups and C.txt or C.tile)
+    local dx = hw + floor(hw / 2)
+    lcd.drawFilledTriangle(dx - s, cy - floor(s / 2), dx, cy + floor(s / 2), dx + s, cy - floor(s / 2))
+    box("tabup", 0, 0, sy, hw, ah)
+    box("tabdn", 0, hw, sy, tabW - hw, ah)
   end
   lcd.color(C.tile)
   lcd.drawFilledRectangle(tabW, y0, 1, y1 - y0)
+  P.tabArea = { w = tabW, h = gh, rowH = 0 }
   -- right: the selected group's rows
   lcd.font(fMid)
-  local rowH = th + 8
+  local rowH = math.max(th + 8, floor(H * 0.12))
+  P.tabArea.rowH = rowH
   local rows = {}
   for i, r in ipairs(vis) do if r[1] == cur then rows[#rows + 1] = i end end
   local fit = math.max(1, floor((y1 - y0) / rowH))
   local selPos = 0
   for k, i in ipairs(rows) do if i == sel then selPos = k end end
-  if selPos > 0 then
+  if selPos > 0 and sel ~= lastSel then   -- follow the wheel; a drag moves the list freely
     if selPos <= top then top = selPos - 1 end
     if selPos > top + fit then top = selPos - fit end
   end
+  lastSel = sel
   top = math.max(0, math.min(top, #rows - fit))
   shown = {}
   local lx = tabW + 8
@@ -1241,12 +1299,12 @@ function P.paint(w, W, H, s, u, ctx)
     end
     local v = vals[r[2]]
     lcd.color(v == false and C.dim or C.txt)
-    lcd.drawText(lx, ry + 4, r[2])
+    lcd.drawText(lx, ry + floor((rowH - th) / 2), r[2])
     local vc = C.txt
     if v == nil or v == false then vc = C.dim
     elseif r[10] == "bits" then vc = v == 0 and C.ok or v == -1 and C.bad or C.warn end
     lcd.color(vc)
-    lcd.drawText(W - 8, ry + 4, fmtVal(r, v), RIGHT)
+    lcd.drawText(W - 8, ry + floor((rowH - th) / 2), fmtVal(r, v), RIGHT)
     box("row", i, tabW + 1, ry, W - tabW - 1, rowH)
     shown[#shown + 1] = r
   end
@@ -1256,8 +1314,11 @@ function P.paint(w, W, H, s, u, ctx)
   lcd.font(fSmall)
   local _, sh = lcd.getTextSize("A")
   local by = y1 + floor((botH - sh) / 2)
-  local got = 0
-  for _, r in ipairs(vis) do if vals[r[2]] ~= nil then got = got + 1 end end
+  -- the open tab only: the others are read when they are opened
+  local got, nTab = 0, 0
+  for _, r in ipairs(vis) do
+    if r[1] == cur then nTab = nTab + 1 if vals[r[2]] ~= nil then got = got + 1 end end
+  end
   if os.clock() - msgAt < 3 and status ~= "" then
     lcd.color(statusCol == "warn" and C.warn or C.txt)
     lcd.drawText(6, by, status)
@@ -1271,8 +1332,14 @@ function P.paint(w, W, H, s, u, ctx)
     if s.armed then hint = (P.flightEdit and "ARMED: gains/trim only   " or "ARMED: view only   ") .. hint end
     lcd.drawText(6, by, hint)
   end
-  lcd.color(got < #vis and C.warn or C.ok)
-  lcd.drawText(W - 6, by, got < #vis and string.format("reading %d/%d", got, #vis) or (#vis .. " read"), RIGHT)
+  lcd.color(got < nTab and C.warn or C.ok)
+  lcd.drawText(W - 6, by, got < nTab and string.format("reading %d/%d", got, nTab) or (nTab .. " read"), RIGHT)
+  -- while reading: a thin bar under the top bar, filled as far as the reading is
+  if got < nTab and nTab > 0 then
+    local pbH = math.max(3, floor(H * 0.012))
+    lcd.color(C.tile) lcd.drawFilledRectangle(0, y0, W, pbH)
+    if got > 0 then lcd.color(C.home) lcd.drawFilledRectangle(0, y0, floor(W * got / nTab), pbH) end
+  end
   if edit then drawEditor(W, H, y0, y1, s, ctx) end
 end
 
@@ -1307,8 +1374,9 @@ end
 function P.key(s, key)
   if blocked(s) then return key == "enter" and "next" or false end
   if edit then return editKey(s, key) end
-  if key == "right" then sel = math.min(#vis, sel + 1) return true end
-  if key == "left" then sel = math.max(0, sel - 1) return true end
+  -- the wheel keeps the tab it walks into (RTN then stays on it, and that tab is what is read)
+  if key == "right" then sel = math.min(#vis, sel + 1) if vis[sel] then grp = vis[sel][1] end return true end
+  if key == "left" then sel = math.max(0, sel - 1) if vis[sel] then grp = vis[sel][1] end return true end
   if key == "enter" then
     if sel == 0 then return "next" end
     openEdit(s)
@@ -1339,6 +1407,7 @@ function P.tap(s, x, y)
     if b.k == "bit" then bitCur = b.i toggleBit(b.i)
     elseif b.k == "btn" then
       if b.i == "-" then nudge(-1) elseif b.i == "+" then nudge(1)
+      elseif b.i == "-10" then nudge(-10) elseif b.i == "+10" then nudge(10)
       elseif b.i == "All on" then draft, phase = 0, ""
       elseif b.i == "Back" then edit = nil
       elseif b.i == "Save" then save(s) end
@@ -1346,6 +1415,8 @@ function P.tap(s, x, y)
     return true
   end
   if not b then return "next" end
+  if b.k == "tabup" then tabTop = math.max(0, tabTop - 1) return true end
+  if b.k == "tabdn" then tabTop = tabTop + 1 return true end   -- (the next paint keeps it in range)
   if b.k == "grp" then
     grp = b.i
     sel, top = 0, 0
@@ -1359,10 +1430,22 @@ function P.tap(s, x, y)
   return true
 end
 
+-- a finger drag (X18): the tab column or the row list follows it, one tab / row per row height
+function P.dragStart(x, y)
+  drag = (not edit) and { x = x, y = y, top = top, tabTop = tabTop } or nil
+end
+function P.drag(x, y)
+  local a = P.tabArea
+  if not (drag and a) then return end
+  if drag.x < a.w then tabTop = math.max(0, drag.tabTop + floor((drag.y - y) / a.h + 0.5))
+  else top = math.max(0, drag.top + floor((drag.y - y) / a.rowH + 0.5)) end
+end
+
 function P.editing() return edit ~= nil end
 function P.phase() return phase end
 function P.valueOf(name) return vals[name] end   -- test harness
 function P._draft() return draft, editBase, edit and edit[2] end
+function P._tab() return curGroup() end   -- test harness
 
 -- sensor check page line
 local function pendName()

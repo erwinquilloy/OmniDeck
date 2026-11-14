@@ -57,7 +57,7 @@ def run(sec, page=True, dt=0.05):
 
 names = [L.eval('function(L, i) return L[i][2] end')(LIST, i) for i in range(1, len(LIST) + 1)]
 # the aircraft has every row except two (they must end as n/a)
-MISSING = {'PTCH_TRIM_SPD3', 'PTCH_TRIM_OFS3'}
+MISSING = {'KFF_RDDRMIX', 'YAW2SRV_DAMP'}
 for n in names:
     if n not in MISSING: ap.p.setdefault(n, 1.0)
 def goto(name):
@@ -66,11 +66,61 @@ def goto(name):
     for _ in range(names.index(name) + 1): P.key(S, 'right')
     run(1)
 
+def tab_names():
+    """the page's tabs in order, from walking the wheel (Q tabs only when shown)"""
+    P.key(S, 'back')
+    for _ in range(200): P.key(S, 'left')
+    seen = []
+    for _ in range(200):
+        P.key(S, 'right'); t = P._tab()
+        if not seen or seen[-1] != t: seen.append(t)
+    P.key(S, 'back')
+    return seen
+def open_tab(tab):
+    """wheel to the first row of a tab, then RTN: the page stays on that tab"""
+    P.key(S, 'back')
+    for _ in range(200): P.key(S, 'left')
+    for _ in range(200):
+        P.key(S, 'right')
+        if P._tab() == tab: break
+    P.key(S, 'back')
+TAB_OF = {}
+def rows_of(tab):
+    if not TAB_OF:
+        for i in range(1, len(LIST) + 1):
+            TAB_OF.setdefault(L.eval('function(L, i) return L[i][1] end')(LIST, i), []).append(L.eval('function(L, i) return L[i][2] end')(LIST, i))
+    return TAB_OF.get(tab, [])
+def tab_done(tab):
+    return all(P.valueOf(n) is not None for n in rows_of(tab))
+def wait_tab(tab, sec=60):
+    for _ in range(int(sec)):
+        if tab_done(tab): return True
+        run(1)
+    return tab_done(tab)
+def read_tabs(per_tab=60):
+    """only the open tab is read: open each in turn and wait until every row has a value (or n/a)"""
+    for tab in tab_names():
+        open_tab(tab)
+        wait_tab(tab, per_tab)
+
 # 1 reading the page over the bridge, 25 % of the answers lost
 ap.loss = 0.15
-for _ in range(60):          # until every row is read (or n/a); the mLRS waits are long on purpose
-    run(5)
-    if 'idle' in P.debug(): break
+# 1a switching tabs while one is still reading: the new tab is read, the old one waits, nothing lost
+run(1.5)
+part = sum(1 for n in names if P.valueOf(n) is not None)
+open_tab('TECS')
+wait_tab('TECS')
+tecs = [n for i, n in enumerate(names) if L.eval('function(L, i) return L[i][1] end')(LIST, i + 1) == 'TECS']
+flight = [n for i, n in enumerate(names) if L.eval('function(L, i) return L[i][1] end')(LIST, i + 1) == 'FLIGHT']
+f_got = sum(1 for n in flight if P.valueOf(n) is not None)
+check('switch mid-read: TECS all read (%d/%d), FLIGHT kept what it had and waits (%d/%d, had %d)' % (
+      sum(1 for n in tecs if P.valueOf(n) is not None), len(tecs), f_got, len(flight), part),
+      all(P.valueOf(n) is not None for n in tecs) and part <= f_got < len(flight))
+open_tab('FLIGHT')
+wait_tab('FLIGHT')
+check('back on FLIGHT: the rest is read (%d/%d)' % (sum(1 for n in flight if P.valueOf(n) is not None), len(flight)),
+      all(P.valueOf(n) is not None for n in flight))
+read_tabs()                  # every tab in turn (the mLRS waits are long on purpose)
 vals = P.debug() if hasattr(P, 'debug') else ''
 check('mLRS bridge: the link is MAVLink', str(P.mav.sys) == '1')
 got = L.eval('function(P, n) return P.value and P.value(n) end')
@@ -83,12 +133,15 @@ check('rows read: %d answers for %d rows shown (Q rows hidden, 2 missing)' % (P.
 # 1b an answer lost several times in a row: the row goes n/a, then heals (asked again every 30 s)
 ap.loss = 0.0
 na = L.eval('function(P) return P._vals end')
-ap.drop_names = {'STAB_PITCH_DOWN': 4}   # all 4 first tries lost -> n/a; the 30 s retry gets it
+ap.drop_names = {'STAB_PITCH_DOWN': 99}  # every try lost -> n/a; then the link heals and the 30 s retry gets it
 P.reset()
-run(30)
-v1 = L.eval('function(P) return P.valueOf and P.valueOf("STAB_PITCH_DOWN") end')(P)
-run(45)
-v2 = L.eval('function(P) return P.valueOf and P.valueOf("STAB_PITCH_DOWN") end')(P)
+open_tab('TECS')                           # STAB_PITCH_DOWN is on TECS: only the open tab is read
+val = L.eval('function(P) return P.valueOf and P.valueOf("STAB_PITCH_DOWN") end')
+v1 = v2 = None
+for _ in range(120):                       # wait for n/a, then for the 30 s retry to heal it
+    run(1); v = val(P)
+    if v is False: v1 = False; ap.drop_names['STAB_PITCH_DOWN'] = 0
+    elif v1 is False and v is not None: v2 = v; break
 check('STAB_PITCH_DOWN: n/a after its answers were lost (%s), read again later (%s)' % (v1, v2), v1 is False and v2 == ap.p['STAB_PITCH_DOWN'])
 
 # 2 save AIRSPEED_CRUISE 18 -> 20 (4 steps of 0.5), read back

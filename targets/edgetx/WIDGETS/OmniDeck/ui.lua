@@ -72,6 +72,17 @@ local function params()
 end
 local ED = nil   -- mission editor (medit.lua), see editor() below COL
 
+-- the PARAMS code (about 210 KB) leaves memory 10 s after the page is left, so it costs nothing
+-- until it is opened again (then it reloads, and the open tab is read again). Not while the
+-- ArduPilot mission download or the mission editor uses it. The 10 s keep a quick pass through the
+-- page cycle from reloading the file every time.
+local PARAMS_UNLOAD_S = 10
+local function paramsRelease()
+  if not PR then return end
+  PR, ED = nil, nil   -- the mission editor holds the module too: it goes with it (not open here)
+  T.onMavlite, T.onMavEnv, T.mavUsedAt = nil, nil, nil   -- telem.lua's hooks into it
+  collectgarbage("collect")
+end
 -- the module, with this widget's "Edit in flight" choice (1 = gains and trim)
 local function paramsFor(w)
   local p = params()
@@ -1505,6 +1516,11 @@ local function wakeup(w)
     w.apMissionUsed = nil
     MI.setAp(nil)
     if PR then PR.missionReset() end
+  end
+  if w.page == PAGE_PARAMS or (ED and ED.active) then w.paramsLeftAt = nil
+  elseif PR and not (w.apMission == 1 and s.fc == "ArduPilot") then
+    w.paramsLeftAt = w.paramsLeftAt or nowc
+    if nowc - w.paramsLeftAt >= PARAMS_UNLOAD_S then paramsRelease() w.paramsLeftAt = nil end
   end
   -- the mission editor is ArduPilot only: another flight controller closes it (an unsent mission is dropped)
   if notAp and ED and ED.active then ED.stop()  end

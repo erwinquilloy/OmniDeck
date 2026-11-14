@@ -788,19 +788,24 @@ local function failedText(s, name)
   return false
 end
 
+-- the tab on screen; only its rows are read (Marcin 2026-11-14: the other tabs are read when opened,
+-- so the link is free again as soon as the open tab is in; values already read are kept)
+local function curGroup() return vis[sel] and vis[sel][1] or grp or groups[1] end
+
 local function nextRead(rowsShown)
   if qOn == nil then return "Q_ENABLE" end
   if edit then return nil end
+  local g = curGroup()
   local r = vis[sel]
   if r and vals[r[2]] == nil then return r[2] end
   for i = 1, #rowsShown do local n = rowsShown[i][2] if vals[n] == nil then return n end end
-  for _, x in ipairs(vis) do if vals[x[2]] == nil then return x[2] end end
+  for _, x in ipairs(vis) do if x[1] == g and vals[x[2]] == nil then return x[2] end end
   -- mLRS: answers get lost now and then, so an n/a row is asked again every 30 s
   if link == "MAVLINK" then
     local t = os.clock()
     for _, x in ipairs(vis) do
       local nm = x[2]
-      if vals[nm] == false and t - (naAt[nm] or 0) >= 30 then naAt[nm] = t return nm end
+      if x[1] == g and vals[nm] == false and t - (naAt[nm] or 0) >= 30 then naAt[nm] = t return nm end
     end
   end
   return nil
@@ -933,6 +938,10 @@ local function service(s, pageOpen)
     else send(MISSION_REQUEST_INT, { pend.seq % 256, math.floor(pend.seq / 256) }) end
     return
   end
+  -- a save goes first: a row read still waiting for its answer is dropped (only the open tab is
+  -- read now, so one is often waiting); it is asked again later, and a late answer is kept anyway.
+  -- Not a read of the row being saved: its old value would then look like the save's answer.
+  if saveReq and pend and pend.name and not pend.set and not pend.check and pend.name ~= saveReq.name then pend = nil end
   if pend then
     if not pend.at then pend.at = now end
     local name = pend.name
@@ -998,12 +1007,12 @@ local function service(s, pageOpen)
       -- link has room, so piling up requests on a full mLRS link loses answers (X20S 2026-11-14).
       -- Its answer fills in whenever it comes; a lost one is asked again later.
       if link == "MAVLINK" then
-        local now2, extra = os.clock(), 0
-        for _, rows in ipairs({ shown, vis }) do   -- rows on screen first, then the page's order
+        local now2, extra, g = os.clock(), 0, curGroup()
+        for _, rows in ipairs({ shown, vis }) do   -- rows on screen first, then the rest of the tab
           for _, r in ipairs(rows) do
             local nm = r[2]
             if extra >= (P.readAhead or 1) then break end
-            if nm ~= n and vals[nm] == nil and now2 - (prefAt[nm] or -10) >= 4 then
+            if r[1] == g and nm ~= n and vals[nm] == nil and now2 - (prefAt[nm] or -10) >= 4 then
               prefAt[nm] = now2
               send(REQ_READ, nameBytes(nm, {}))
               extra = extra + 1
@@ -1256,8 +1265,11 @@ function P.paint(w, W, H, s, u, ctx)
   lcd.font(fSmall)
   local _, sh = lcd.getTextSize("A")
   local by = y1 + floor((botH - sh) / 2)
-  local got = 0
-  for _, r in ipairs(vis) do if vals[r[2]] ~= nil then got = got + 1 end end
+  -- the open tab only: the others are read when they are opened
+  local got, nTab = 0, 0
+  for _, r in ipairs(vis) do
+    if r[1] == cur then nTab = nTab + 1 if vals[r[2]] ~= nil then got = got + 1 end end
+  end
   if os.clock() - msgAt < 3 and status ~= "" then
     lcd.color(statusCol == "warn" and C.warn or C.txt)
     lcd.drawText(6, by, status)
@@ -1271,8 +1283,14 @@ function P.paint(w, W, H, s, u, ctx)
     if s.armed then hint = (P.flightEdit and "ARMED: gains/trim only   " or "ARMED: view only   ") .. hint end
     lcd.drawText(6, by, hint)
   end
-  lcd.color(got < #vis and C.warn or C.ok)
-  lcd.drawText(W - 6, by, got < #vis and string.format("reading %d/%d", got, #vis) or (#vis .. " read"), RIGHT)
+  lcd.color(got < nTab and C.warn or C.ok)
+  lcd.drawText(W - 6, by, got < nTab and string.format("reading %d/%d", got, nTab) or (nTab .. " read"), RIGHT)
+  -- while reading: a thin bar under the top bar, filled as far as the reading is
+  if got < nTab and nTab > 0 then
+    local pbH = math.max(3, floor(H * 0.012))
+    lcd.color(C.tile) lcd.drawFilledRectangle(0, y0, W, pbH)
+    if got > 0 then lcd.color(C.home) lcd.drawFilledRectangle(0, y0, floor(W * got / nTab), pbH) end
+  end
   if edit then drawEditor(W, H, y0, y1, s, ctx) end
 end
 
@@ -1307,8 +1325,9 @@ end
 function P.key(s, key)
   if blocked(s) then return key == "enter" and "next" or false end
   if edit then return editKey(s, key) end
-  if key == "right" then sel = math.min(#vis, sel + 1) return true end
-  if key == "left" then sel = math.max(0, sel - 1) return true end
+  -- the wheel keeps the tab it walks into (RTN then stays on it, and that tab is what is read)
+  if key == "right" then sel = math.min(#vis, sel + 1) if vis[sel] then grp = vis[sel][1] end return true end
+  if key == "left" then sel = math.max(0, sel - 1) if vis[sel] then grp = vis[sel][1] end return true end
   if key == "enter" then
     if sel == 0 then return "next" end
     openEdit(s)
@@ -1363,6 +1382,7 @@ function P.editing() return edit ~= nil end
 function P.phase() return phase end
 function P.valueOf(name) return vals[name] end   -- test harness
 function P._draft() return draft, editBase, edit and edit[2] end
+function P._tab() return curGroup() end   -- test harness
 
 -- sensor check page line
 local function pendName()

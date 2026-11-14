@@ -68,9 +68,48 @@ for v in vals:
     if abs(back - exp) > abs(exp) * 1e-7 + 1e-45: bad += 1; print('  b2f', v, back, exp) if bad < 5 else None
 check('float32 encode/decode byte-exact on %d values' % len(vals), bad == 0)
 
+def tab_names():
+    """the page's tabs in order, from walking the wheel (Q tabs only when shown)"""
+    P.key(S, 'back')
+    for _ in range(200): P.key(S, 'left')
+    seen = []
+    for _ in range(200):
+        P.key(S, 'right'); t = P._tab()
+        if not seen or seen[-1] != t: seen.append(t)
+    P.key(S, 'back')
+    return seen
+def open_tab(tab):
+    """wheel to the first row of a tab, then RTN: the page stays on that tab"""
+    P.key(S, 'back')
+    for _ in range(200): P.key(S, 'left')
+    for _ in range(200):
+        P.key(S, 'right')
+        if P._tab() == tab: break
+    P.key(S, 'back')
+TAB_OF = {}
+def rows_of(tab):
+    if not TAB_OF:
+        for i in range(1, len(LIST) + 1):
+            TAB_OF.setdefault(L.eval('function(L, i) return L[i][1] end')(LIST, i), []).append(L.eval('function(L, i) return L[i][2] end')(LIST, i))
+    return TAB_OF.get(tab, [])
+def tab_done(tab):
+    return all(P.valueOf(n) is not None for n in rows_of(tab))
+def wait_tab(tab, sec=60):
+    for _ in range(int(sec)):
+        if tab_done(tab): return True
+        run(1)
+    return tab_done(tab)
+def read_tabs(per_tab=60):
+    """only the open tab is read: open each in turn and wait until every row has a value (or n/a)"""
+    for tab in tab_names():
+        open_tab(tab)
+        wait_tab(tab, per_tab)
+
 # 2 Q_ENABLE then the list reads; missing params become n/a without hanging
 state['busy'] = True
 run(40)
+check('only the open tab is read: FLIGHT done, TECS untouched', tab_done('FLIGHT') and all(P.valueOf(n) is None for n in rows_of('TECS')))
+read_tabs()
 v = L.eval('function(P) return P end')(P)
 got = L.eval('function(P, n) return nil end')
 check('read AIRSPEED_CRUISE over MAVlite', abs(P.stats.rx) > 0)
@@ -193,7 +232,7 @@ EXTRA_TOP
 YAW_RATE_P | Yaw P | 0.005
 RLL_RATE_P
 [NAV]
-NAVL1_PERIOD
+NAVL1_DAMPING
 WP_RADIUS | WP radius |
 Q_TAILSIT_MOT | Tail | 1
 bad name here
@@ -203,7 +242,7 @@ SERVO2_TRIM | Elev trim | -1
 """
 tmp = os.path.join(tempfile.mkdtemp(), 'params.txt')
 open(tmp, 'w').write(txt)
-ap.p.update({'YAW_RATE_P': 0.2, 'NAVL1_PERIOD': 1.0, 'WP_RADIUS': 5.0, 'EXTRA_TOP': 0.0123, 'Q_ENABLE': 0.0})
+ap.p.update({'YAW_RATE_P': 0.2, 'NAVL1_DAMPING': 0.75, 'WP_RADIUS': 5.0, 'EXTRA_TOP': 0.0123, 'Q_ENABLE': 0.0})
 P2 = L.execute(open(os.path.join(DIR, 'params.lua'), encoding='utf-8').read())
 LIST2 = L.execute(open(os.path.join(DIR, 'plist.lua'), encoding='utf-8').read())
 P2.init(T, LIST2, tmp)
@@ -220,7 +259,8 @@ dbg = P2.debug(); print('  ', dbg)
 check('sensor check line reports params.txt', 'params.txt +5 skipped 5 (line 10)' in dbg)
 P = P2
 ap.texts.clear()
-run(60)
+LIST = LIST2; TAB_OF.clear()   # the helpers walk P2's tabs (OTHER and NAV from params.txt included)
+read_tabs()
 check('free row read: EXTRA_TOP auto step 0.0001 (about 1 % of 0.0123)', abs(rows['EXTRA_TOP'][7] - 0.0001) < 1e-12 and rows['EXTRA_TOP'][8] == 4)
 check('free whole-number row: WP_RADIUS step 1', rows['WP_RADIUS'][7] == 1)
 P2.key(S, 'back')
@@ -235,7 +275,7 @@ for _ in range(120):
 check('wheel order: YAW_RATE_P at the end of the PID tab (after PTCH_RATE_FF, the last PID row this FC has)',
       'YAW_RATE_P' in seen and seen[seen.index('YAW_RATE_P') - 1] == 'PTCH_RATE_FF')
 check('wheel order: new tabs after the built-in ones (NAV after PID rows)',
-      'NAVL1_PERIOD' in seen and seen.index('NAVL1_PERIOD') > seen.index('YAW_RATE_P'))
+      'NAVL1_DAMPING' in seen and seen.index('NAVL1_DAMPING') > seen.index('YAW_RATE_P'))
 def goto2(name):
     for _ in range(200): P2.key(S, 'left')
     for k in range(200):
@@ -316,6 +356,7 @@ P3.key(SC, 'back')
 for _ in range(100): P3.key(SC, 'left')
 _qrows = sum(1 for i in range(1, CRUISE_ROW) if L.eval('function(L, i) return L[i][10] end')(LIST3, i) == 'q')
 for _ in range(CRUISE_ROW - _qrows): P3.key(SC, 'right')     # (Q rows hidden: Q_ENABLE 0)
+runc(3)                       # its tab (TECS) is read now, the selected row first
 P3.key(SC, 'enter'); runc(2)
 b0 = ap.p['AIRSPEED_CRUISE']
 P3.key(SC, 'right'); P3.key(SC, 'enter'); runc(3)

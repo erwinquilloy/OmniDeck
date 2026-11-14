@@ -1959,6 +1959,21 @@ else:
     _pg0 = widget.page
     _r = wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
     assert widget.page == 1, ('ENTER with no row picked leaves the params page', _pg0, widget.page, _r)
+    if widget.apMission != 1:
+        # the PARAMS code leaves memory 10 s after the page is left, and comes back when opened
+        _mem = lambda: L.eval('function() collectgarbage("collect") return collectgarbage("count") end')()
+        _m_open = _mem()
+        for _ in range(25): step(0.2)          # 5 s on the main page: still loaded
+        _m5 = _mem()
+        for _ in range(35): step(0.2)          # past 10 s: unloaded
+        _m12 = _mem()
+        assert _m_open - _m12 > 100, ('params unloaded after 10 s', round(_m_open), round(_m5), round(_m12))
+        assert _m_open - _m5 < 50, ('params kept for 10 s', round(_m_open), round(_m5))
+        widget.page = 6
+        for _ in range(25): step(0.2)
+        render('params_reopen_%s.png' % tag, 6)
+        print('params page: freed %d KB 10 s after leaving (%d -> %d KB), reopens OK' % (_m_open - _m12, _m_open, _m12))
+        widget.page = 1
 # ---- ArduPilot mission download + editor: editor on the X20 family only (X18: none)
 if SPORT and not NATIVE:
     _ap.mission = [(16, 0, 0.0, 0.0, 0.0, 0.0, 0.0), (22, 3, st['lat'] + 0.001, st['lon'] + 0.001, 40.0, 0.0, 0.0)]
