@@ -971,6 +971,27 @@ if SPORT and not NATIVE:
     _sp = [x for x in m if x[0] == 178][-1]
     assert abs(_sp[7] - 19) < 1e-6 and _sp[2] == 0, ('speed item on the aircraft, 19 m/s in param2, no position', _sp)
     render('etx_medit_sent_%s.png' % tag, 2)
+    # editing centres the map on the selected item (ED.focus)
+    _getMAP = L.execute('return function(f) for i = 1, 300 do local n, v = debug.getupvalue(f, i) if n == nil then break end if n == "MAP" then return v end end end')
+    _MAPm = _getMAP(ED.paint)
+    def _free_spot():
+        _d = ED._draft()[0]
+        pts = []
+        for _i in range(1, len(_d) + 1):
+            if _d[_i].lat and (_d[_i].lat != 0 or _d[_i].lon != 0):
+                pts.append(_MAPm.toScreen(_d[_i].lat, _d[_i].lon))
+        for fy in (0.40, 0.50, 0.60, 0.70, 0.32):
+            for fx in (0.15, 0.30, 0.45, 0.60, 0.75):
+                x, y = W * fx, H * fy
+                if all((x - px) ** 2 + (y - py) ** 2 > 45 ** 2 for px, py in pts): return x, y
+        raise AssertionError('no free spot on the map')
+    for _ in range(80): _tap(10, ED.infoY + 2)
+    _tap(W - 10, ED.infoY + 2)                       # item 2
+    frame()
+    _d, _s2, _ = ED._draft()
+    if _d[_s2].lat and (_d[_s2].lat != 0 or _d[_s2].lon != 0):
+        assert abs(_MAPm.view.lat - _d[_s2].lat) < 1e-7 and abs(_MAPm.view.lon - _d[_s2].lon) < 1e-7, ('map centred on the selected item', _MAPm.view.lat, _d[_s2].lat)
+        print('editing: map centred on the selected waypoint OK')
     # Del on item k selects item k-1, and a tap then re-inserts at position k (replace a waypoint)
     _dk = 3
     for _ in range(80): _tap(10, ED.infoY + 2)
@@ -980,7 +1001,7 @@ if SPORT and not NATIVE:
     _btn('Del')
     assert ED._draft()[1] == _dk - 1 and len(ED._draft()[0]) == _n - 1, ('Del selects the item before', ED._draft()[1])
     frame()
-    _tap(W * 0.62, H * 0.70)
+    _tap(*_free_spot())
     assert ED._draft()[1] == _dk and len(ED._draft()[0]) == _n and ED._draft()[0][_dk + 1].cmd == _next, 'the new point takes the place of the deleted one'
     print('Del + tap replaces a waypoint in place OK')
     # Del on the takeoff twice: a new mission (takeoff only)

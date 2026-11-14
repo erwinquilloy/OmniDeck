@@ -283,7 +283,9 @@ function M.draw(x, y, w, h, s, o)
   -- tiles and range rings still show; the aircraft itself is not drawn then
   local lat, lon = s.lat, s.lon
   local fallback = false
-  if o.home then lat, lon = o.home[1], o.home[2]             -- home-centred view
+  -- mission editor: centred on the selected item (o.focus); the aircraft and home where they are
+  if o.focus then lat, lon = o.focus[1], o.focus[2]
+  elseif o.home then lat, lon = o.home[1], o.home[2]         -- home-centred view
   elseif lat == nil and o.center then lat, lon, fallback = o.center[1], o.center[2], true end
   local cx, cy = x + w / 2, y + h / 2
   local radiusPx = math.min(w, h) / 2 - (o.mini and 4 or 8)
@@ -492,6 +494,13 @@ function M.draw(x, y, w, h, s, o)
   lcd.font(o.mini and FONT_S or (h >= 350 and FONT_L or FONT_STD))
   if o.home then
     homeBadge(cx, cy, o.mini and 6 or 9, nil, x, y, w, h, true)
+  elseif o.focus and s.homeLat then
+    -- the editor's view: home from its own position, not from the aircraft (which is off centre)
+    local hx, hy = scr((s.homeLon - lon) * 111320 * math.cos(math.rad(lat)), (s.homeLat - lat) * 111320)
+    local m = o.mini and 6 or 10
+    if hx >= x + m and hx <= x + w - m and hy >= y + m and hy <= y + h - m then
+      homeBadge(hx, hy, o.mini and 6 or 9, nil, x, y, w, h, true)
+    end
   elseif s.homeDist and s.homeBrg and not fallback then
     local b = math.rad(s.homeBrg)
     local hx, hy = scr(math.sin(b) * s.homeDist, math.cos(b) * s.homeDist)

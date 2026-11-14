@@ -645,7 +645,8 @@ local function mapOpts(w, mini)
   local mis = MI.current()
   return { level = w.level, orient = ORIENT[w.orient] or "north", mini = mini, trail = w.trail == 1,
            homeView = w.zoomMode == 1, windScale = units(w).k,
-           home = (w.zoomMode == 1 and T.s.homeLat) and { T.s.homeLat, T.s.homeLon } or nil,
+           home = (w.zoomMode == 1 and T.s.homeLat and not (ED and ED.active)) and { T.s.homeLat, T.s.homeLon } or nil,
+           focus = (ED and ED.active) and ED.focus() or nil,   -- editing: centred on the selected item
            tiles = ts and TL or nil, tz = ts and w.tz or nil,
            mission = (not (ED and ED.active)) and mis or nil, activeWp = T.s.wpNum, center = mapCenter() }
 end

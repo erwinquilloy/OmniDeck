@@ -104,6 +104,7 @@ end
 
 function ED.stop() ED.active, draft = false, nil end
 
+
 -- the last real waypoint's altitude before i: not the takeoff's, not a landing's (0 m)
 local function lastAlt(i)
   for k = i, 1, -1 do
@@ -120,6 +121,17 @@ local function lastPos(i)
   end
   return draft[1] and draft[1].lat or 0, draft[1] and draft[1].lon or 0
 end
+-- where the map centres while editing: the selected item, or for one without a position (speed,
+-- jump, RTL, ...) the nearest item before it that has one; nil = the map's usual centre
+function ED.focus()
+  if not draft or not draft[sel] then return nil end
+  local it = draft[sel]
+  if onMap(it) then return { it.lat, it.lon } end
+  local la, lo = lastPos(sel)
+  if la and (la ~= 0 or lo ~= 0) then return { la, lo } end
+  return nil
+end
+
 
 local function addAt(lat, lon)
   if #draft >= MAX_ITEMS then status, statusCol = "At most " .. MAX_ITEMS .. " items", "warn" return end
