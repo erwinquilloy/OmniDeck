@@ -13,9 +13,10 @@ local _ENV = OD_ENV or _ENV
               (setting "Messages page": Auto = ArduPilot only, On, Off)
     4 SUMMARY - last flight; opens on disarm. In the cycle only with "Flight stats page" On
     5 CHECK - sensor check; in the cycle only with "Sensor check page" On
+    6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "0.3.0"
+local VERSION = "0.4.test"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -41,10 +42,47 @@ end
 local FS = need("summary.lua")
 local AU = need("audio.lua")
 MI.init(T)
+-- PARAMS page: params.lua and its list are loaded the first time the page is opened, so a
+-- radio that never uses it carries none of it
+local PR = nil
+local paramsErr, paramsRetryAt = nil, 0   -- the last failed load of params.lua (see params())
+local function params()
+  -- params.txt (one shared file next to the widget) adds rows to the built-in list
+  if not PR then
+    -- kept only once it is fully set up: a load or init that fails (a file, the radio's Lua
+    -- memory) is tried again next time and shows its own error, not a half-made module's
+    -- (X20S 2026-11-14: "params.lua:770 attempt to index a nil value (upvalue 'T')")
+    -- A failure is kept and raised again (shown on the red error line by the page that asked)
+    -- and the load is tried again only every 10 s: reloading a large file on every update
+    -- could stall the radio.
+    if paramsErr and os.clock() < paramsRetryAt then error(paramsErr, 0) end
+    local ok, p = pcall(function()
+      local m = need("params.lua")
+      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt")
+      m.onMission = MI.setAp   -- ArduPilot mission download (Stratos firmware) -> the map
+      return m
+    end)
+    if not ok then
+      paramsErr, paramsRetryAt = "params load: " .. tostring(p), os.clock() + 10
+      error(paramsErr, 0)
+    end
+    p.readAhead = 1   -- mLRS: one row asked ahead (the default; kept here: more costs the X18 ~2k Lua steps per update)
+    PR, paramsErr = p, nil
+  end
+  return PR
+end
+-- the module, with this widget's "Edit in flight" choice (1 = gains and trim)
+local function paramsFor(w)
+  local p = params()
+  p.flightEdit = w.flightEdit == 1
+  p.missionOn = w.apMission == 1
+  return p
+end
 
 local PAGE_SUMMARY = 4
 local SUM_SHOW_S = 15    -- the flight summary opened by the disarm closes to main after this
 local PAGE_CHECK = 5     -- sensor check: what each telemetry lookup returns on this radio
+local PAGE_PARAMS = 6    -- parameters (S.Port / F.Port to ArduPilot)
 local ORIENT = { [0] = "north", [1] = "heading" }
 
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
@@ -175,7 +213,7 @@ local function create()
     tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
     logoFile = "omnideck.png",   -- the logo file for top-right panel 4 (test41)
     topPanel = 3,                -- main page top-right panel: see panelMode() (test42)
-    msgPage = 0, statsPage = 0, checkPage = 0,   -- page cycle (test42): see pageOn()
+    msgPage = 0, statsPage = 0, checkPage = 0, paramsPage = 0, flightEdit = 0, apMission = 0,   -- page cycle (test42): see pageOn()
     lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
@@ -946,6 +984,11 @@ local function pageCheck(w, W, H, s, u)
     lcd.drawText(4, y, d1) y = y + th
     if d2 then lcd.drawText(4, y, d2) y = y + th end
   end
+  if PR then
+    lcd.color(COL.home)
+    lcd.drawText(4, y, PR.debug())   -- includes "mission: …" when the download is on
+    y = y + th
+  end
   -- INAV mission download: what the flight controller reported and what arrived
   if MSPC.state() ~= "off" then
     lcd.color(COL.home)
@@ -1154,7 +1197,9 @@ freshStart = function(w)
   FS.reset()
   MI.clearLearned()
   MI.setInav(nil)
+  MI.setAp(nil)
   MSPC.restart()
+  if PR then PR.reset() end
   alarm.lowSince, alarm.critSince, alarm.voltStage, alarm.voltSaid = nil, nil, 0, -100
   alarm.altArmed, alarm.altSaid, alarm.cells = false, -100, 0
   flightClock.sec, flightClock.txt = nil, "--"
@@ -1211,6 +1256,9 @@ local function lostFrame(W, H)
   lcd.drawFilledRectangle(W - LOST_EDGE, 0, LOST_EDGE, H)
 end
 
+-- what the PARAMS page borrows from this file
+local PR_CTX = { COL = COL, fontFor = fontFor, topBar = topBar }
+
 local function paint(w)
   local t0 = os.clock()
   local W, H = lcd.getWindowSize()
@@ -1230,6 +1278,7 @@ local function paint(w)
   elseif w.page == 3 then safe("msgs", pageMsgs, w, W, H, s, u)
   elseif w.page == PAGE_SUMMARY then safe("summary", pageSummary, w, W, H, s, u)
   elseif w.page == PAGE_CHECK then safe("check", pageCheck, w, W, H, s, u)
+  elseif w.page == PAGE_PARAMS then safe("params", function() paramsFor(w).paint(w, W, H, s, u, PR_CTX) end)
   else safe("main", pageMain, w, W, H, s, u) end
   lostFrame(W, H)
   errorBanner(W, H)
@@ -1367,6 +1416,23 @@ local function wakeup(w)
   else
     w.linkUpAt = nil
   end
+  if w.page == PAGE_PARAMS then
+    -- ArduPilot only: another flight controller (INAV / Betaflight) leaves the page
+    if s.fc and s.fc ~= "ArduPilot" then w.page = 1 lcd.invalidate()
+    else paramsFor(w).wakeup(s) end
+  elseif w.apMission == 1 and s.fc == "ArduPilot" and T.alive() then
+    -- ArduPilot mission download (Stratos firmware, MAVlite) on every other page
+    paramsFor(w).missionWakeup(s)
+    w.apMissionUsed = true
+  end
+  -- setting switched Off: the downloaded mission leaves the map (a mission file shows again)
+  -- ... and so does a flight controller other than ArduPilot (INAV / Betaflight after a swap)
+  local notAp = s.fc ~= nil and s.fc ~= "ArduPilot"
+  if (w.apMission ~= 1 or notAp) and w.apMissionUsed then
+    w.apMissionUsed = nil
+    MI.setAp(nil)
+    if PR then PR.missionReset() end
+  end
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
   rememberPos(s)
   if runAL then checkAlarms(w, s, nowc) end
@@ -1402,12 +1468,14 @@ local function pageOn(w, p)
   end
   if p == PAGE_SUMMARY then return w.statsPage == 1 end   -- On: always, in flight too (live)
   if p == PAGE_CHECK then return w.checkPage == 1 end
+  -- ArduPilot only (MAVlite); before the FC is known it stays out of the cycle too
+  if p == PAGE_PARAMS then return w.paramsPage == 1 and T.s.fc == "ArduPilot" end
   return true
 end
 local function nextPage(w)
   local p = w.page
-  for _ = 1, PAGE_CHECK do
-    p = p % PAGE_CHECK + 1
+  for _ = 1, PAGE_PARAMS do
+    p = p % PAGE_PARAMS + 1
     if pageOn(w, p) then break end
   end
   w.page = p
@@ -1490,8 +1558,23 @@ local function event(w, category, value, x, y)
     if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
       w.msgScroll = 0 lcd.invalidate() return true
     end
+    if w.page == PAGE_PARAMS then
+      local r = paramsFor(w).tap(T.s, x, y)
+      lcd.invalidate()
+      if r ~= "next" then return true end
+    end
     nextPage(w)
     return true
+  end
+  if category == EVT_KEY and w.page == PAGE_PARAMS then
+    local k = (value == KEY_ENTER_BREAK and "enter") or (value == KEY_ROTARY_LEFT and "left")
+      or (value == KEY_ROTARY_RIGHT and "right") or (KEY_RTN_BREAK and value == KEY_RTN_BREAK and "back") or nil
+    if k then
+      local r = paramsFor(w).key(T.s, k)
+      lcd.invalidate()
+      if r == "next" then nextPage(w) return true end
+      return r == true
+    end
   end
   if category == EVT_KEY then
     if value == KEY_ENTER_BREAK then

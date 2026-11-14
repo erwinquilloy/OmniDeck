@@ -5,7 +5,8 @@ local _ENV = OD_ENV or _ENV
   OmniDeck mission overlay.
 
   ArduPilot's passthrough telemetry carries no mission download, only the
-  active waypoint (0x500D: number, distance, bearing). Two ways to show it:
+  active waypoint (0x500D: number, distance, bearing). Stratos firmware can send the whole
+  mission over MAVlite (params.lua, setting "ArduPilot mission download"). Otherwise two ways:
 
     file    - a Mission Planner / QGC ".waypoints" file (QGC WPL 110) copied to
               /scripts/omnideck/missions/ on the SD card and picked in the settings
@@ -137,8 +138,25 @@ function MI.setInav(wps)
   inavList = #out > 0 and out or nil
 end
 
+-- ---------------------------------------------------------------- ArduPilot (MAVlite download)
+-- items from params.lua (Stratos firmware): { seq, cmd, frame, lat, lon, alt, p1, p3 }; the same
+-- positions and labels as a mission file
+local apList = nil
+function MI.setAp(items)
+  if not items or #items == 0 then apList = nil return end
+  local out = {}
+  for _, it in ipairs(items) do
+    if NAV[it.cmd] and (it.lat ~= 0 or it.lon ~= 0) then
+      local l = NAV[it.cmd]
+      out[#out + 1] = { lat = it.lat, lon = it.lon, alt = it.alt, num = it.seq, label = l ~= "" and (l .. it.seq) or tostring(it.seq) }
+    end
+  end
+  apList = #out > 0 and out or nil
+end
+
 -- ---------------------------------------------------------------- what the map draws
 function MI.current()
+  if apList then return apList, "ardupilot" end
   if inavList then return inavList, "inav" end
   if fileList and #fileList > 0 then return fileList, "file" end
   local l = learnedList()

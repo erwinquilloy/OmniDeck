@@ -238,7 +238,7 @@ G.Bitmap = L.table_from({'open': bitmap_open, 'getSize': bitmap_size})
 for k, v in {'LCD_W': W, 'LCD_H': H, 'CUSTOM_COLOR': CUSTOM, 'SOLID': 0, 'SMLSIZE': 0x200, 'MIDSIZE': 0x300,
              'DBLSIZE': 0x400, 'XXLSIZE': 0x500, 'TINSIZE': 0x600, 'VALUE': 1, 'BOOL': 2, 'CENTER': 0x10000, 'RIGHT': 0x20000,
              'EVT_TOUCH_FIRST': 0x1001, 'EVT_TOUCH_BREAK': 0x1002, 'EVT_TOUCH_SLIDE': 0x1003, 'EVT_TOUCH_TAP': 0x1004,
-             'EVT_VIRTUAL_ENTER': 0x2001, 'EVT_VIRTUAL_NEXT': 0x2002, 'EVT_VIRTUAL_PREV': 0x2003}.items():
+             'EVT_VIRTUAL_ENTER': 0x2001, 'EVT_VIRTUAL_NEXT': 0x2002, 'EVT_VIRTUAL_PREV': 0x2003, 'EVT_VIRTUAL_EXIT': 0x2004}.items():
     G[k] = v
 
 # ------------------------------------------------------------------ radio services
@@ -790,6 +790,260 @@ frame(G.EVT_VIRTUAL_ENTER)
 assert wd.page == (3 if NATIVE else 1), 'messages page On (INAV) / Off (ArduPilot), page %s' % wd.page
 wd.msgPage = 0
 print('test42 page cycle OK')
+
+# ---- PARAMS page (6): ArduPilot only, S.Port / F.Port (MAVlite to a copy of ArduPilot's code)
+from fake_mavlite import FakeAP
+
+def _plist_row(name, qon, path):
+    # the row number (1-based) of a parameter on the PARAMS page, from plist.lua (Q rows hidden when not qon)
+    import re as _re
+    n = 0
+    for _l in open(path, encoding='utf-8'):
+        m = _re.match(r'\s*\{ "[^"]+", "([A-Z0-9_]+)"', _l)
+        if not m: continue
+        if not qon and '"q" }' in _l: continue
+        n += 1
+        if m.group(1) == name: return n
+    raise KeyError(name)
+_PL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'targets', 'edgetx', 'WIDGETS', 'OmniDeck', 'plist.lua')
+_ap = FakeAP({'Q_ENABLE': 0.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
+              'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
+              'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'RLL_RATE_P': 0.08}, dup=True)
+def _push(*a):
+    if len(a) >= 4 and a[1] == 0x30: _ap.uplink(int(a[2]), int(a[3]))
+    return True
+def _ap_pump():
+    while _ap.down:
+        appid, val = _ap.down.pop(0)
+        sport_q.append((0x1B, 0x32, appid, val))
+    for t in _ap.texts: send_text(t, 4)
+    _ap.texts.clear()
+G.sportTelemetryPush = _push
+assert wd.paramsPage == 0, 'params page off by default'
+wd.paramsPage = 1
+wd.page = 3 if not NATIVE else 2
+frame(G.EVT_VIRTUAL_ENTER)
+if NATIVE:
+    assert wd.page != 6, 'params page: ArduPilot only, page %s' % wd.page
+    print('params page not offered for INAV/Betaflight OK')
+else:
+    assert wd.page == 6, 'params page in the cycle for ArduPilot, page %s' % wd.page
+    for _ in range(120):
+        _ap_pump(); step(0.05)
+    _ap_pump(); frame()
+    render('etx_params_%s.png' % tag, 6)
+    if SPORT:
+        for _ in range(_plist_row('AIRSPEED_CRUISE', False, _PL)): frame(G.EVT_VIRTUAL_NEXT)
+        for _ in range(60): _ap_pump(); step(0.05)   # the selected row is read first
+        frame(G.EVT_VIRTUAL_ENTER)         # editor
+        for _ in range(20): _ap_pump(); step(0.05)
+        for _ in range(4): frame(G.EVT_VIRTUAL_NEXT)
+        render('etx_params_edit_%s.png' % tag, 6)
+        frame(G.EVT_VIRTUAL_ENTER)         # save
+        for _ in range(60): _ap_pump(); step(0.05)
+        assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('saved', _ap.p['AIRSPEED_CRUISE'])
+        render('etx_params_saved_%s.png' % tag, 6)
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+        for _ in range(_plist_row('ARMING_SKIPCHK', False, _PL)): frame(G.EVT_VIRTUAL_NEXT)   # (Q rows hidden: Q_ENABLE 0)
+        for _ in range(30): _ap_pump(); step(0.05)
+        frame(G.EVT_VIRTUAL_ENTER)
+        for _ in range(20): _ap_pump(); step(0.05)
+        render('etx_params_skipchk_%s.png' % tag, 6)
+        assert abs(_ap.p['ARMING_SKIPCHK'] - 512.0) < 1e-6
+        print('ARMING_SKIPCHK editor opened (value 512 = Airspeed skipped)')
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+        print('params page S.Port: read, edit, save verified OK')
+    frame(G.EVT_VIRTUAL_ENTER)
+    assert wd.page == 1, 'ENTER with no row picked leaves the params page, page %s' % wd.page
+# ArduPilot mission download (Stratos firmware) onto the map, any page
+if SPORT and not NATIVE:
+    _h = (st['lat'], st['lon'])
+    _ap.mission = [(16, 0, 0.0, 0.0, 0.0, 0.0, 0.0), (22, 3, _h[0] + 0.0010, _h[1] + 0.0010, 40.0, 0.0, 0.0)]
+    for _i in range(5):
+        _ap.mission.append((16, 3, _h[0] + 0.003 * (_i + 1), _h[1] + 0.002 * (_i % 2) - 0.001, 60.0, 0.0, 0.0))
+    _ap.mission.append((21, 3, _h[0] - 0.001, _h[1], 0.0, 0.0, 0.0))
+    wd.apMission = 1
+    wd.page = 2
+    for _ in range(80):
+        _ap_pump(); step(0.05)
+    render('etx_map_apmission_%s.png' % tag, 2)
+    _pr = None
+    print('ArduPilot mission download on the map page OK')
+    # ---- mission editor (EdgeTX TX16S / MK3): EDIT, tap to add, Type, +10, Send, Done
+    def _tap(x, y):
+        frame(G.EVT_TOUCH_FIRST, {'x': int(x), 'y': int(y)})
+        frame(G.EVT_TOUCH_BREAK, {'x': int(x), 'y': int(y)})
+    frame()
+    eb = wd.editBtn
+    assert eb, 'EDIT button on the map page (mission download On, ArduPilot)'
+    _tap(eb.x + eb.w / 2, eb.y + eb.h / 2)
+    ED = UIm.editor()
+    assert ED and ED.active, 'EDIT opens the editor'
+    d0, s0, _f0 = ED._draft()
+    n0 = len(d0)
+    assert wd.page == 2
+    frame()
+    tx, ty = W * 0.75, H * 0.40
+    la_want, lo_want = UIm.MAP.toLatLon(tx, ty)     # the view the tap lands on
+    frame(G.EVT_TOUCH_FIRST, {'x': int(tx), 'y': int(ty)})
+    la_want, lo_want = UIm.MAP.toLatLon(int(tx), int(ty))
+    frame(G.EVT_TOUCH_BREAK, {'x': int(tx), 'y': int(ty)})
+    d1, s1, _f1 = ED._draft()
+    assert len(d1) == n0 + 1 and s1 == s0 + 1, ('tap on the map adds a waypoint after the selected one', len(d1), s1)
+    new = d1[s1]
+    assert abs(new.lat - la_want) < 1e-9 and abs(new.lon - lo_want) < 1e-9 and new.cmd == 16, ('new point at the tapped spot', new.lat, la_want, new.lon, lo_want)
+    assert new.alt == 60, ('a new waypoint takes the last waypoint altitude (60 m), not the landing 0 m', new.alt)
+    frame()
+    _bl = ED._boxes()
+    bx = {}
+    for _i in range(1, len(_bl) + 1):
+        _k = _bl[_i].k
+        bx[_k.decode() if isinstance(_k, bytes) else str(_k)] = _bl[_i]
+    assert 'Type' in bx and 'Send' in bx, ('editor buttons drawn', list(bx))
+    def _btn(k): b = bx[k]; _tap(b.x + b.w / 2, b.y + b.h / 2)
+    alt0 = new.alt
+    _btn('Type')
+    d1, s1, f1 = ED._draft()
+    assert d1[s1].cmd == 17 and d1[s1].p3 == 0, ('Type -> LOITER UNLIM, radius 0 (WP_LOITER_RAD)', d1[s1].cmd)
+    _btn('Field'); _btn('+'); _btn('+')
+    assert ED._draft()[0][s1].p3 == 20, ('loiter unlimited: Field -> radius, + + = 20 m', ED._draft()[0][s1].p3)
+    _btn('Type'); _btn('+')
+    d2, s2, f2 = ED._draft()
+    assert d2[s2].cmd == 18 and d2[s2].p1 == 3 and d2[s2].alt == alt0 + 10, ('Type -> Loiter turns 3, + = altitude +10 m', d2[s2].cmd, d2[s2].alt)
+    _btn('Field'); _btn('+'); _btn('Field'); _btn('+'); _btn('+')
+    d2, s2, f2 = ED._draft()
+    assert d2[s2].p1 == 4 and d2[s2].p3 == 20 and f2 == 3, ('Field: turns 3 -> 4, radius 0 -> 20 m', d2[s2].p1, d2[s2].p3, f2)
+    # a speed change after it: add a waypoint, Type x6 -> SPEED (no position), + -> 19 m/s
+    frame()
+    _tap(W * 0.30, H * 0.62)
+    for _ in range(6): _btn('Type')
+    d3, s3, f3 = ED._draft()
+    assert d3[s3].cmd == 178 and d3[s3].p2 == 18, ('Type x6 -> SPEED 18 m/s', d3[s3].cmd, d3[s3].p2)
+    _btn('+')
+    assert ED._draft()[0][s3].p2 == 19
+    for _ in range(19): _btn('-')                   # 19 -> 1 m/s, then one more: -1 = no change
+    assert ED._draft()[0][s3].p2 == -1, ('speed: one step below 1 m/s is -1 (no change)', ED._draft()[0][s3].p2)
+    _btn('+')
+    assert ED._draft()[0][s3].p2 == 1, ('speed: one step up from -1 is 1 m/s', ED._draft()[0][s3].p2)
+    for _ in range(18): _btn('+')                   # back to 19
+    # DO_JUMP: a jump item after it, Type x8 from Waypoint (16 17 18 19 21 20 178 189 177)
+    _sel_before = ED._draft()[1]
+    frame()
+    _n0 = len(ED._draft()[0])
+    _tap(W * 0.18, H * 0.55)
+    assert len(ED._draft()[0]) == _n0 + 1, 'a new point for the jump'
+    for _ in range(8): _btn('Type')
+    dj, sj, fj = ED._draft()
+    assert dj[sj].cmd == 177 and dj[sj].p1 == 2 and dj[sj].p2 == 1, ('Type x8 -> JUMP to #2, once', dj[sj].cmd, dj[sj].p1, dj[sj].p2)
+    _btn('Field'); _btn('-'); _btn('-')
+    assert ED._draft()[0][sj].p2 == -1, ('jump repeat 1 -> 0 -> -1 (forever)', ED._draft()[0][sj].p2)
+    _btn('Field')
+    for _ in range(99): _btn('+')
+    assert ED._draft()[0][sj].p1 == len(ED._draft()[0]), ('jump target stops at the last item', ED._draft()[0][sj].p1)
+    for _ in range(99): _btn('-')
+    assert ED._draft()[0][sj].p1 == 1
+    _btn('+')
+    _btn('Del')                                     # (the rest of the flow expects no jump item)
+    print('mission editor -1: speed "no change", JUMP repeat forever, target within the list OK')
+    # info line: left third = previous item (the loiter), right third = back to the speed item
+    _bl0 = ED.infoY
+    _tap(10, _bl0 + 2)
+    assert ED._draft()[1] == s3 - 1, ('info line left: previous item', ED._draft()[1])
+    _tap(W - 10, _bl0 + 2)
+    assert ED._draft()[1] == s3
+    # move the speed item one earlier (before the loiter), then back
+    _btn('<')
+    assert ED._draft()[0][s3 - 1].cmd == 178 and ED._draft()[1] == s3 - 1, '< moves it earlier'
+    _btn('>')
+    assert ED._draft()[0][s3].cmd == 178
+    d2, s2 = ED._draft()[0], s3
+    render('etx_medit_%s.png' % tag, 2)
+    nsent = len(d2)
+    _btn('Send')
+    for _ in range(160):
+        _ap_pump(); step(0.05)
+    frame()
+    snd = UIm.editor() and None
+    m = _ap.mission
+    assert len(m) == nsent + 1, ('the aircraft holds the edited mission (+home)', len(m), nsent)
+    _lo = [x for x in m if x[0] == 18][-1]
+    assert abs(_lo[2] - la_want) < 2e-6 and abs(_lo[4] - (alt0 + 10)) < 1e-3 and _lo[5] == 4 and _lo[6] == 20, ('loiter turns item on the aircraft', _lo)
+    _sp = [x for x in m if x[0] == 178][-1]
+    assert abs(_sp[7] - 19) < 1e-6 and _sp[2] == 0, ('speed item on the aircraft, 19 m/s in param2, no position', _sp)
+    render('etx_medit_sent_%s.png' % tag, 2)
+    # Del on item k selects item k-1, and a tap then re-inserts at position k (replace a waypoint)
+    _dk = 3
+    for _ in range(80): _tap(10, ED.infoY + 2)
+    for _ in range(_dk - 1): _tap(W - 10, ED.infoY + 2)
+    assert ED._draft()[1] == _dk
+    _n = len(ED._draft()[0]); _next = ED._draft()[0][_dk + 1].cmd
+    _btn('Del')
+    assert ED._draft()[1] == _dk - 1 and len(ED._draft()[0]) == _n - 1, ('Del selects the item before', ED._draft()[1])
+    frame()
+    _tap(W * 0.62, H * 0.70)
+    assert ED._draft()[1] == _dk and len(ED._draft()[0]) == _n and ED._draft()[0][_dk + 1].cmd == _next, 'the new point takes the place of the deleted one'
+    print('Del + tap replaces a waypoint in place OK')
+    # Del on the takeoff twice: a new mission (takeoff only)
+    for _ in range(80): P_ = ED._draft(); _tap(10, ED.infoY + 2)
+    assert ED._draft()[1] == 1
+    _btn('Del')
+    assert len(ED._draft()[0]) > 1, 'one Del on the takeoff only asks'
+    _btn('Del')
+    assert len(ED._draft()[0]) == 1 and ED._draft()[0][1].cmd == 22, 'Del twice on the takeoff: new mission'
+    _btn('Done')
+    assert not ED.active and wd.page == 2, 'Done leaves the editor, stays on the map'
+    # ---- VTOL items on a quadplane (Q_ENABLE 1): VTOL takeoff, VTOL land, transitions
+    _ap.p['Q_ENABLE'] = 1.0
+    frame()
+    _tap(wd.editBtn.x + wd.editBtn.w / 2, wd.editBtn.y + wd.editBtn.h / 2)
+    for _ in range(60): _ap_pump(); step(0.05)
+    assert UIm.editor().active
+    PRm = UIm.editor() and None
+    frame()
+    _bl = ED._boxes(); bx = {}
+    for _i in range(1, len(_bl) + 1):
+        _k = _bl[_i].k; bx[_k.decode() if isinstance(_k, bytes) else str(_k)] = _bl[_i]
+    for _ in range(80): _tap(10, ED.infoY + 2)      # back to item 1, the takeoff
+    assert ED._draft()[1] == 1
+    assert UIm.editor() and True
+    _btn('Del'); _btn('Del')                         # Del twice on the takeoff: a new mission
+    dv = ED._draft()[0]
+    assert len(dv) == 1 and dv[1].cmd == 84, ('quadplane: a new mission starts with a VTOL takeoff', dv[1].cmd)
+    _btn('Type')
+    assert ED._draft()[0][1].cmd == 22, 'Type on the first item: VTOL takeoff -> Takeoff'
+    _btn('Type')
+    assert ED._draft()[0][1].cmd == 84, '... and back to VTOL takeoff'
+    frame()
+    _tap(W * 0.70, H * 0.45)                         # WP after the takeoff
+    for _ in range(8): _btn('Type')                  # 16 17 18 19 21 85 20 178 3000 -> transition
+    dv, sv, fv = ED._draft()
+    assert dv[sv].cmd == 3000 and dv[sv].p1 == 4, ('Type x8 -> TRANSITION to FW', dv[sv].cmd, dv[sv].p1)
+    _btn('+')
+    assert ED._draft()[0][sv].p1 == 3, '+ toggles the transition: to VTOL'
+    _btn('+')
+    frame()
+    _tap(W * 0.30, H * 0.65)                         # a point after the transition
+    for _ in range(5): _btn('Type')                  # 16 17 18 19 21 85 -> VTOL land
+    dv, sv, fv = ED._draft()
+    assert dv[sv].cmd == 85, ('Type x5 -> VTOL LAND', dv[sv].cmd)
+    render('etx_medit_vtol_%s.png' % tag, 2)
+    assert not any('Sent and verified' in t for t, c in [(str(x[0]), 0) for x in texts_drawn()]) if 'texts_drawn' in globals() else True
+    _btn('Send')
+    for _ in range(160): _ap_pump(); step(0.05)
+    assert [x[0] for x in _ap.mission[1:]] == [84, 3000, 85] and _ap.mission[2][5] == 4, ('the aircraft holds the VTOL mission', [x[0] for x in _ap.mission])
+    _btn('Done')
+    _ap.p['Q_ENABLE'] = 0.0
+    print('mission editor VTOL: VTOL takeoff, transition to FW / to VTOL, VTOL land, Send OK')
+    _tap(W * 0.5, H * 0.5)
+    assert wd.page != 2, 'after Done a tap on the map turns the page again'
+    wd.page = 2
+    print('mission editor: EDIT, add, Type, +10, Send (written + verified), Done OK')
+    wd.apMission = 0
+    step(0.2)
+    assert UIm.MI.current()[1] != 'ardupilot', 'setting Off clears the downloaded mission'
+    print('mission download Off: the downloaded mission leaves the map OK')
+wd.paramsPage = 0
+G.sportTelemetryPush = lambda *a: True
 wd.page = 2
 lv = wd.level
 frame(G.EVT_VIRTUAL_NEXT)

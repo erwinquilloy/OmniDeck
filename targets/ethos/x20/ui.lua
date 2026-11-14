@@ -13,9 +13,10 @@ local _ENV = OD_ENV or _ENV
               (setting "Messages page": Auto = ArduPilot only, On, Off)
     4 SUMMARY - last flight; opens on disarm. In the cycle only with "Flight stats page" On
     5 CHECK - sensor check; in the cycle only with "Sensor check page" On
+    6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "0.3.0"
+local VERSION = "0.4.test"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -41,10 +42,50 @@ end
 local FS = need("summary.lua")
 local AU = need("audio.lua")
 MI.init(T)
+-- PARAMS page: params.lua and its list are loaded the first time the page is opened, so a
+-- radio that never uses it carries none of it
+local PR = nil
+local paramsErr, paramsRetryAt = nil, 0   -- the last failed load of params.lua (see params())
+local perf = { p = 0, pAll = 0, w = 0, wAll = 0, at = 0 }   -- paint / wakeup ms (perfNote, page 5)
+local diagN = 0   -- test build: frames drawn on the map page
+local function params()
+  -- params.txt (one shared file next to the widget) adds rows to the built-in list
+  if not PR then
+    -- kept only once it is fully set up: a load or init that fails (a file, the radio's Lua
+    -- memory) is tried again next time and shows its own error, not a half-made module's
+    -- (X20S 2026-11-14: "params.lua:770 attempt to index a nil value (upvalue 'T')")
+    -- A failure is kept and raised again (shown on the red error line by the page that asked)
+    -- and the load is tried again only every 10 s: reloading a large file on every update
+    -- could stall the radio.
+    if paramsErr and os.clock() < paramsRetryAt then error(paramsErr, 0) end
+    local ok, p = pcall(function()
+      local m = need("params.lua")
+      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt")
+      m.onMission = MI.setAp   -- ArduPilot mission download (Stratos firmware) -> the map
+      return m
+    end)
+    if not ok then
+      paramsErr, paramsRetryAt = "params load: " .. tostring(p), os.clock() + 10
+      error(paramsErr, 0)
+    end
+    PR, paramsErr = p, nil
+  end
+  return PR
+end
+local ED = nil   -- mission editor (medit.lua), see editor() below COL
+
+-- the module, with this widget's "Edit in flight" choice (1 = gains and trim)
+local function paramsFor(w)
+  local p = params()
+  p.flightEdit = w.flightEdit == 1
+  p.missionOn = w.apMission == 1
+  return p
+end
 
 local PAGE_SUMMARY = 4
 local SUM_SHOW_S = 15    -- the flight summary opened by the disarm closes to main after this
 local PAGE_CHECK = 5     -- sensor check: what each telemetry lookup returns on this radio
+local PAGE_PARAMS = 6    -- parameters (S.Port / F.Port to ArduPilot)
 local ORIENT = { [0] = "north", [1] = "heading" }
 
 -- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
@@ -178,7 +219,7 @@ local function create()
     tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
     logoFile = "omnideck.png",   -- main page logo (test41)
     topPanel = 0,                -- main page top-right panel: see panelMode() (test42)
-    msgPage = 0, statsPage = 0, checkPage = 0,   -- page cycle (test42): see pageOn()
+    msgPage = 0, statsPage = 0, checkPage = 0, paramsPage = 0, flightEdit = 0, apMission = 0,   -- page cycle (test42): see pageOn()
     lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
@@ -561,6 +602,16 @@ local function mapCenter()
   return nil
 end
 
+-- mission editor (medit.lua): EdgeTX TX16S / MK3 and the X20 family only (big touch screens),
+-- loaded the first time EDIT is tapped
+local function editor()
+  if not ED then ED = need("medit.lua") ED.init(MAP, params(), COL) end
+  return ED
+end
+local function editAllowed(w, W, H)
+  return w.apMission == 1 and T.s.fc == "ArduPilot" and W >= 480 and H >= 272
+end
+
 local function mapOpts(w, mini)
   local ts = activeTileSet(w)
   local mis = MI.current()
@@ -568,7 +619,7 @@ local function mapOpts(w, mini)
            homeView = w.zoomMode == 1, windScale = units(w).k,
            home = (w.zoomMode == 1 and T.s.homeLat) and { T.s.homeLat, T.s.homeLon } or nil,
            tiles = ts and TL or nil, tz = ts and w.tz or nil,
-           mission = mis, activeWp = T.s.wpNum, center = mapCenter() }
+           mission = (not (ED and ED.active)) and mis or nil, activeWp = T.s.wpNum, center = mapCenter() }
 end
 
 -- A Lua error in paint() leaves the screen half drawn (Ethos shows nothing else). Each part runs
@@ -763,8 +814,36 @@ local function pageMap(w, W, H, s, u)
   local _, ch = lcd.getTextSize("0")
   local stripH = ch + 6
   local mapH = H - barH - stripH
+  -- editing: the map (and its zoom buttons) ends above the editor's tall button bar
+  if ED and ED.active then mapH = H - barH - (math.max(ch + 10, math.floor(H * 0.14)) + 4) end
   w.btns = MAP.draw(0, barH, W, mapH, s, mapOpts(w, false))
   topBar(w, 0, 0, W, barH, s, u, H)
+  if ED and ED.active then
+    ED.paint(W, H, barH, s, u, fMid, fSmall)
+    return
+  end
+  w.editBtn = nil
+  if editAllowed(w, W, H) then
+    lcd.font(fMid)
+    local tw, th = lcd.getTextSize("EDIT")
+    local bw, bh = tw + 20, th + 10
+    -- left of the zoom buttons and clear of their enlarged tap area (a quarter of their size)
+    local zx = (w.btns and w.btns.minus) and (w.btns.minus.x - math.floor(w.btns.minus.w / 4) - 6) or (W - 8)
+    local bx, by = zx - bw, H - stripH - bh - 6
+    lcd.color(COL.tile)
+    lcd.drawFilledRectangle(bx, by, bw, bh)
+    lcd.color(COL.home)
+    lcd.drawRectangle(bx, by, bw, bh)
+    lcd.drawText(bx + 10, by + 5, "EDIT")
+    w.editBtn = { x = bx, y = by, w = bw, h = bh }
+    if w.editMsg and os.clock() - (w.editMsgAt or 0) < 4 then
+      local mw = lcd.getTextSize(w.editMsg)
+      lcd.color(COL.panel)
+      lcd.drawFilledRectangle(W - mw - 16, by - th - 8, mw + 12, th + 6)
+      lcd.color(COL.warn)
+      lcd.drawText(W - mw - 10, by - th - 5, w.editMsg)
+    end
+  end
   -- the aircraft's position in decimal degrees (about 0.1 m), for finding it after a landing
   -- out of sight; with no fix, the last good one, marked LAST
   lcd.color(COL.bar)
@@ -792,6 +871,19 @@ local function pageMap(w, W, H, s, u)
     lcd.color(COL.dim)
     lcd.drawText(cx, H - stripH + 3, "Lat --     Lon --")
   end
+  -- test build diagnostic (0.4.test, X20 freeze hunt): a photo of a frozen screen shows the
+  -- last frame drawn. Frame counter, worst paint / wakeup ms (10 s), Lua KB, Ethos limit hits,
+  -- the mission download and the editor. Nothing is written to the SD card.
+  diagN = diagN + 1
+  lcd.font(FONT_XS or fSmall)
+  local dg = string.format("#%d p%.0f w%.0f ms %.0fK L%d %s%s", diagN, perf.p, perf.w,
+    collectgarbage("count"), limitHits, PR and PR.diag and PR.diag() or "M -", (ED and ED.active) and " ED" or "")
+  local dw, dh = lcd.getTextSize(dg)
+  local dy = barH + ((ED and ED.active) and (ED.infoH or 0) + 2 or 2)
+  lcd.color(lcd.RGB(0, 0, 0))
+  lcd.drawFilledRectangle(W - dw - 8, dy, dw + 6, dh + 2)
+  lcd.color(COL.warn)
+  lcd.drawText(W - dw - 5, dy + 1, dg)
   -- overlay: home distance/bearing, altitude, speed (top-left of the map)
   lcd.font(fBig)
   local _, th = lcd.getTextSize("0")
@@ -901,7 +993,6 @@ end
 -- value and unit code. For testers: a photo of this page shows what the telemetry code reads.
 -- Ethos: how long paint() and wakeup() take (ms), worst in the last 10 s and since power-up, for
 -- page 5: a tester can tell how close the radio runs to its limit instead of waiting for it
-local perf = { p = 0, pAll = 0, w = 0, wAll = 0, at = 0 }
 local function perfNote(isPaint, t0)
   local now = os.clock()
   local ms = (now - t0) * 1000
@@ -948,6 +1039,11 @@ local function pageCheck(w, W, H, s, u)
     lcd.color(COL.home)
     lcd.drawText(4, y, d1) y = y + th
     if d2 then lcd.drawText(4, y, d2) y = y + th end
+  end
+  if PR then
+    lcd.color(COL.home)
+    lcd.drawText(4, y, PR.debug())   -- includes "mission: …" when the download is on
+    y = y + th
   end
   -- INAV mission download: what the flight controller reported and what arrived
   if MSPC.state() ~= "off" then
@@ -1157,7 +1253,10 @@ freshStart = function(w)
   FS.reset()
   MI.clearLearned()
   MI.setInav(nil)
+  MI.setAp(nil)
+  if ED then ED.stop() end
   MSPC.restart()
+  if PR then PR.reset() end
   alarm.lowSince, alarm.critSince, alarm.voltStage, alarm.voltSaid = nil, nil, 0, -100
   alarm.altArmed, alarm.altSaid, alarm.cells = false, -100, 0
   flightClock.sec, flightClock.txt = nil, "--"
@@ -1214,6 +1313,9 @@ local function lostFrame(W, H)
   lcd.drawFilledRectangle(W - LOST_EDGE, 0, LOST_EDGE, H)
 end
 
+-- what the PARAMS page borrows from this file
+local PR_CTX = { COL = COL, fontFor = fontFor, topBar = topBar }
+
 local function paint(w)
   local t0 = os.clock()
   local W, H = lcd.getWindowSize()
@@ -1233,6 +1335,7 @@ local function paint(w)
   elseif w.page == 3 then safe("msgs", pageMsgs, w, W, H, s, u)
   elseif w.page == PAGE_SUMMARY then safe("summary", pageSummary, w, W, H, s, u)
   elseif w.page == PAGE_CHECK then safe("check", pageCheck, w, W, H, s, u)
+  elseif w.page == PAGE_PARAMS then safe("params", function() paramsFor(w).paint(w, W, H, s, u, PR_CTX) end)
   else safe("main", pageMain, w, W, H, s, u) end
   lostFrame(W, H)
   errorBanner(W, H)
@@ -1370,6 +1473,25 @@ local function wakeup(w)
   else
     w.linkUpAt = nil
   end
+  if w.page == PAGE_PARAMS then
+    -- ArduPilot only: another flight controller (INAV / Betaflight) leaves the page
+    if s.fc and s.fc ~= "ArduPilot" then w.page = 1 lcd.invalidate()
+    else paramsFor(w).wakeup(s) end
+  elseif w.apMission == 1 and s.fc == "ArduPilot" and T.alive() then
+    -- ArduPilot mission download (Stratos firmware, MAVlite) on every other page
+    paramsFor(w).missionWakeup(s)
+    w.apMissionUsed = true
+  end
+  -- setting switched Off: the downloaded mission leaves the map (a mission file shows again)
+  -- ... and so does a flight controller other than ArduPilot (INAV / Betaflight after a swap)
+  local notAp = s.fc ~= nil and s.fc ~= "ArduPilot"
+  if (w.apMission ~= 1 or notAp) and w.apMissionUsed then
+    w.apMissionUsed = nil
+    MI.setAp(nil)
+    if PR then PR.missionReset() end
+  end
+  -- the mission editor is ArduPilot only: another flight controller closes it (an unsent mission is dropped)
+  if notAp and ED and ED.active then ED.stop() lcd.invalidate() end
   if s.lat then MAP.addTrail(s.lat, s.lon, MAP.LEVELS[w.level]) end
   rememberPos(s)
   if runAL then checkAlarms(w, s, nowc) end
@@ -1405,12 +1527,14 @@ local function pageOn(w, p)
   end
   if p == PAGE_SUMMARY then return w.statsPage == 1 end   -- On: always, in flight too (live)
   if p == PAGE_CHECK then return w.checkPage == 1 end
+  -- ArduPilot only (MAVlite); before the FC is known it stays out of the cycle too
+  if p == PAGE_PARAMS then return w.paramsPage == 1 and T.s.fc == "ArduPilot" end
   return true
 end
 local function nextPage(w)
   local p = w.page
-  for _ = 1, PAGE_CHECK do
-    p = p % PAGE_CHECK + 1
+  for _ = 1, PAGE_PARAMS do
+    p = p % PAGE_PARAMS + 1
     if pageOn(w, p) then break end
   end
   w.page = p
@@ -1485,16 +1609,52 @@ local function event(w, category, value, x, y)
     local sx, sy = w.touchX, w.touchY
     w.touchX, w.touchY, w.dragged = nil, nil, false
     if dragged then return true end
+    if w.page == 2 and ED and ED.active and ED.onButton(x, y) then
+      ED.tap(T.s, x, y, (lcd.getWindowSize()))   -- the editor's buttons first (Done sits near zoom -)
+      lcd.invalidate()
+      return true
+    end
     if w.page == 2 and w.btns then
       -- where the finger pressed counts first, then where it lifted
       local d = zoomBtnAt(w.btns, sx, sy) or zoomBtnAt(w.btns, x, y)
       if d then zoomStep(w, d) lcd.invalidate() return true end
     end
+    if w.page == 2 and ED and ED.active then
+      ED.tap(T.s, x, y, (lcd.getWindowSize()))
+      lcd.invalidate()
+      return true   -- while editing a tap never turns the page (Done leaves the editor)
+    end
+    if w.page == 2 and inBox(w.editBtn, x, y) then
+      local ok, why = editor().start(T.s)
+      if not ok then w.editMsg, w.editMsgAt = why, os.clock() end
+      lcd.invalidate()
+      return true
+    end
     if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
       w.msgScroll = 0 lcd.invalidate() return true
     end
+    if w.page == PAGE_PARAMS then
+      local r = paramsFor(w).tap(T.s, x, y)
+      lcd.invalidate()
+      if r ~= "next" then return true end
+    end
     nextPage(w)
     return true
+  end
+  if category == EVT_KEY and w.page == 2 and ED and ED.active then
+    local k = (value == KEY_ENTER_BREAK and "enter") or (value == KEY_ROTARY_LEFT and "left")
+      or (value == KEY_ROTARY_RIGHT and "right") or (KEY_RTN_BREAK and value == KEY_RTN_BREAK and "back") or nil
+    if k then ED.key(T.s, k) lcd.invalidate() return true end
+  end
+  if category == EVT_KEY and w.page == PAGE_PARAMS then
+    local k = (value == KEY_ENTER_BREAK and "enter") or (value == KEY_ROTARY_LEFT and "left")
+      or (value == KEY_ROTARY_RIGHT and "right") or (KEY_RTN_BREAK and value == KEY_RTN_BREAK and "back") or nil
+    if k then
+      local r = paramsFor(w).key(T.s, k)
+      lcd.invalidate()
+      if r == "next" then nextPage(w) return true end
+      return r == true
+    end
   end
   if category == EVT_KEY then
     if value == KEY_ENTER_BREAK then
@@ -1523,6 +1683,7 @@ return {
   VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage,
   exportPanel = exportPanel, exportHud = exportHud,
   T = T, MAP = MAP, TL = TL, MI = MI, MSPC = MSPC, AU = AU, FS = FS, logoFiles = logoFiles,
+  editor = function() return ED end,   -- test harness: the mission editor, once opened
   -- the settings list the tile sets on the card; the pages use the same list
   scanTiles = function() tileSets = TL.scan() return tileSets end,
 }

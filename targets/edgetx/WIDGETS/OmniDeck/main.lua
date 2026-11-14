@@ -23,14 +23,15 @@ local UI = E.loadfile("ui.lua")()
 local CFG = loadScript(ROOT .. "cfg.lua")()
 -- One option per widget instance (as Yaapu's screen option): the page this OmniDeck shows, so
 -- several telemetry screens can each show a different one. Everything else is in OmniDeck Setup.
--- 0 = the Start page from OmniDeck Setup, 1 Main, 2 Map, 3 Messages, 4 Flight summary, 5 Sensor check
-local options = { { "Page", VALUE, 0, 0, 5 } }
+-- 0 = the Start page from OmniDeck Setup, 1 Main, 2 Map, 3 Messages, 4 Flight summary, 5 Sensor check,
+-- 6 Params
+local options = { { "Page", VALUE, 0, 0, 6 } }
 -- queued CRSF frames are read after drawing until this much of the Lua limit is used: one
 -- frame costs a few percent, the simulator's 88 % margin must hold
 local DRAIN_PCT = 75
 local function fixedPage(opt)
   local p = opt and opt.Page
-  return (type(p) == "number" and p >= 1 and p <= 5) and p or nil
+  return (type(p) == "number" and p >= 1 and p <= 6) and p or nil
 end
 
 local function apply(w)
@@ -106,6 +107,9 @@ local function event(w, evt, touch)
     UI.event(w, E.EVT_KEY, E.KEY_ROTARY_RIGHT)
   elseif evt == EVT_VIRTUAL_PREV then
     UI.event(w, E.EVT_KEY, E.KEY_ROTARY_LEFT)
+  elseif EVT_VIRTUAL_EXIT and evt == EVT_VIRTUAL_EXIT then
+    -- short RTN (long RTN leaves full screen): only the PARAMS page uses it
+    UI.event(w, E.EVT_KEY, E.KEY_RTN_BREAK)
   end
 end
 

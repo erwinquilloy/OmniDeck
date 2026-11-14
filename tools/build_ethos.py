@@ -42,6 +42,9 @@ def version(tree):
 def files():
     """(path in the zip, bytes) for everything in targets/ethos"""
     out = [(DST + 'main.lua', open(os.path.join(SRC, 'main.lua'), 'rb').read())]
+    # PARAMS page: an example params.txt (the pilot renames it; never params.txt itself, so an
+    # update never overwrites the pilot's own rows)
+    out.append((DST + 'params_example.txt', open(os.path.join(SRC, 'params_example.txt'), 'rb').read()))
     for sub in CODE + ('tones', 'logos'):
         base = os.path.join(SRC, sub)
         for root, _, names in os.walk(base):

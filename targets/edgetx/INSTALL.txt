@@ -1,10 +1,72 @@
-OmniDeck 0.3.0 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.4.test for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.4.test (test build, after 0.4.0)
+- PARAMS page over ELRS and TBS Crossfire (150 Hz), not only S.Port / F.Port. Needs ArduPlane
+  Stratos firmware with "MAVlite over CRSF" (v2.2.1 or the test builds). Upstream ArduPilot and
+  ELRS MAVLink mode get the page "The flight controller doesn't answer". TBS at 50 Hz is too
+  slow for it for now: use 150 Hz.
+- mLRS: the PARAMS page, the ArduPilot mission download and the mission editor's Send work over
+  mLRS with ANY ArduPilot (no Stratos firmware needed). In the mLRS Lua (Tx section) set
+  "Tx Ser Port" = cbridge, then store / reboot the module. The mLRS module then passes MAVLink
+  between the radio and the aircraft and OmniDeck talks to ArduPilot directly; telemetry on the
+  screens stays as before. ("Tx Ser Port2" offers no cbridge in mLRS 1.4; it can stay on wbridge
+  for Mission Planner over WiFi.) The bridge was checked on a RadioMaster Nomad with mLRS 1.4.04.
+  Over mLRS the editor's Send uses ArduPilot's normal upload (as Mission Planner); OmniDeck still
+  refuses it while armed.
+- ArduPilot mission download (setting "ArduPilot mission download", Off by default): the mission
+  on the aircraft is shown on the map, takeoff and land marked (T / L). Needs the Stratos mission
+  test firmware (or mLRS with cbridge, see above). Checked every 10 s while disarmed and downloaded again when it changed (a new
+  upload from Mission Planner). The Sensor check page shows "mission: N items". Read only.
+- Switching the setting Off takes the downloaded mission off the map again.
+- Mission editor (TX16S MK2 / MK3 and other EdgeTX colour radios 480x272 or bigger): on the map page, EDIT (shown with "ArduPilot mission download" On and
+  an ArduPilot flight controller). Make or change the mission on the radio and send it to the
+  aircraft. Needs the Stratos mission test firmware, or mLRS with cbridge.
+  - It starts from the downloaded mission, or a new one (a takeoff at home).
+  - Tap the map: a waypoint after the selected item. Tap a point: select it. Tap the left / right
+    third of the info line (top): the previous / next item, also those not on the map (speed
+    change, land start, RTL, transition).
+  - Type: Waypoint, Loiter (unlimited), Loiter turns, Loiter time, Land, RTL, Speed change, Land start; on a quadplane
+    (Q_ENABLE 1) also VTOL land and Transition, and Type on the first item switches Takeoff /
+    VTOL takeoff.
+  - Field picks what - / + change: altitude, loiter turns, loiter radius, loiter time, speed,
+    transition direction (to FW / to VTOL). A timed loiter has no radius: ArduPilot uses
+    WP_LOITER_RAD for it.
+  - < / > move the item earlier / later (the takeoff stays first). Del deletes it and selects the
+    item before it, so a tap on the map puts a new point in its place (to move a waypoint: Del,
+    then tap where it should be). Del twice on the takeoff starts a new mission. The wheel changes
+    the field, ENTER selects the next item.
+  - Send (disarmed only): the mission is cleared, written item by item and read back: "Sent and
+    verified". "Refused: aircraft armed" / "Refused: ..." show ArduPilot's reason.
+  - A downloaded mission with commands the editor can't keep (servo, camera, ...) is not opened:
+    it would lose them. Del twice on the takeoff for a new one, or edit it in a GCS.
+  - Done leaves the editor (an unsent mission is dropped).
+
+WHAT'S NEW IN 0.4.0
+- PARAMS page (ArduPilot only, S.Port / F.Port): read and change ArduPlane parameters from the
+  radio, over ArduPilot's own FrSky passthrough uplink (no firmware change). Switch it on with
+  "ArduPilot params page" (Off by default); it then joins the page cycle when the flight controller is
+  ArduPilot. Over Crossfire, ELRS and mLRS the page says it needs S.Port or F.Port.
+  - Tabs: FLIGHT, LAUNCH, RETURN, FAILSAFE, ARMING, TECS, TRIM, PID, VTOL, Q PID (VTOL and
+    Q PID only with Q_ENABLE 1). Values are read one by one while the page is open.
+  - Wheel: pick a row. ENTER: open the editor (with no row picked, ENTER turns the page as
+    always). In the editor the wheel changes the value, ENTER saves, RTN goes back. Touch: tap a
+    tab or a row; the editor has - + Back Save buttons.
+  - ARMING_SKIPCHK opens as a list of checks, each CHECK or SKIP.
+  - A save is sent once and shows "Saved and verified" only when the value read back from the
+    flight controller matches. It is never repeated by itself; "No answer" means check the value
+    in a GCS.
+  - Armed: view only. Setting "ArduPilot params: edit in flight" = "Gains and trim" lets the PID, Q PID and
+    TRIM rows be changed in flight (one wheel click at a time, with height to spare).
+  - A parameter the flight controller doesn't have shows "n/a".
+- params.txt: your own rows, added to the built-in list (one file for all models). See
+  params_example.txt next to the widget for the rules; rename it to params.txt to use it.
+- Sensor check page: a "Params:" line (MAVlite frames sent / received / bad, params.txt rows).
 
 WHAT'S NEW IN 0.3.0 (after 0.3b)
 - Sensor check page: when the rows don't all fit (480x272 screens), they scroll under the header
@@ -83,6 +145,9 @@ Pages (tap, ENTER or the page switch)
 - "Flight stats page" (Off by default): On puts the last flight's summary in the cycle. The
   summary still opens by itself on disarm ("Flight summary on disarm").
 - "Sensor check page" (Off by default): On puts the sensor check page in the cycle.
+- OmniDeck Setup "ArduPilot params page" (Off by default): On puts the PARAMS page in the cycle (ArduPilot only).
+  "ArduPilot params: edit in flight": Off, or "Gains and trim" (PID, Q PID and TRIM rows while armed).
+- "ArduPilot mission download" (Off by default): the aircraft's mission on the map (Stratos firmware).
 Fixes
 - Betaflight with airmode on (permanently or by switch): the mode shows AIR and is spoken "Air
   mode"; with airmode off it shows ACRO. It used to show ACRO for both. (Over S.Port Betaflight

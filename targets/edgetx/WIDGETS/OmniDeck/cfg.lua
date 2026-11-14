@@ -44,12 +44,18 @@ C.ITEMS = {
   { "msgPage", "Messages page", { { 0, "Auto (ArduPilot only)" }, { 1, "On" }, { 2, "Off" } } },
   { "statsPage", "Flight stats page", { { 0, "Off" }, { 1, "On" } } },
   { "checkPage", "Sensor check page", { { 0, "Off" }, { 1, "On" } } },
+  -- ArduPlane parameters over S.Port / F.Port (params.lua)
+  { "paramsPage", "ArduPilot params page", { { 0, "Off" }, { 1, "On" } } },
+  -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
+  { "flightEdit", "ArduPilot params: edit in flight", { { 0, "Off" }, { 1, "Gains and trim" } } },
+  -- Stratos firmware: the whole mission over MAVlite onto the map (S.Port, F.Port, ELRS, Crossfire)
+  { "apMission", "ArduPilot mission download", { { 0, "Off" }, { 1, "On" } } },
 }
 
 C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, orient = 0,
                zoomMode = 0, zoomSrc = "", tileSet = "*", trail = 1, startPage = 1, pageSwitch = "", pageSwMode = 0, sumAuto = 1, batCap = 0, lowVolt = 0, critVolt = 0,
                cells = 0, lowAlt = 0, inavWp = 0, panel = -1, topPanel = -1, msgPage = 0, statsPage = 0,
-               checkPage = 0 }
+               checkPage = 0, paramsPage = 0, flightEdit = 0, apMission = 0 }
 
 -- EdgeTX: io.read(f, n) / io.write(f, s); standard Lua (simulator): f:read / f:write
 local function fread(f)

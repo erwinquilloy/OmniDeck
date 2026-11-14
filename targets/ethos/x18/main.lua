@@ -140,6 +140,18 @@ local function configure(w)
   line = form.addLine("Sensor check page")
   form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
     function() return w.checkPage end, function(v) w.checkPage = v end)
+  -- ArduPlane parameters over S.Port / F.Port (ArduPilot only)
+  line = form.addLine("ArduPilot params page")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.paramsPage end, function(v) w.paramsPage = v end)
+  -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
+  -- Stratos firmware: the whole mission over MAVlite onto the map (S.Port, F.Port, ELRS, Crossfire)
+  line = form.addLine("ArduPilot mission download")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.apMission end, function(v) w.apMission = v end)
+  line = form.addLine("ArduPilot params: edit in flight")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "Gains and trim", 1 } },
+    function() return w.flightEdit end, function(v) w.flightEdit = v end)
   if form.addTextButton then
     line = form.addLine("Clear trail + learned WPs")
     form.addTextButton(line, nil, "Clear", function() MAP.resetTrail() MI.clearLearned() return true end)
@@ -166,6 +178,10 @@ local SETTINGS = {
   { "logoFile", "s", "omnideck.png" },
   -- added in 0.2.0-test42, at the end: -1 = not saved yet (taken from the older settings)
   { "topPanel", "n", -1 }, { "msgPage", "n", 0 }, { "statsPage", "n", 0 }, { "checkPage", "n", 0 },
+  -- added for the PARAMS page, at the end for the same reason
+  { "paramsPage", "n", 0 }, { "flightEdit", "n", 0 },
+  -- added for the ArduPilot mission download, at the end for the same reason
+  { "apMission", "n", 0 },
 }
 
 local function isSource(v) return type(v) == "userdata" end

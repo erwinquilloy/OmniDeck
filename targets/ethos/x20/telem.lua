@@ -373,7 +373,8 @@ local function flushPt(maxSlow)
 end
 T.flushPt = flushPt
 
-local function crsfPop()
+-- the one CRSF sensor of this module, made on first use
+local function crsfOpen()
   if crsfSensor == nil then
     if crsf == nil then return false end
     if crsf.getSensor then
@@ -383,10 +384,69 @@ local function crsfPop()
       crsfSensor = { popFrame = function() return crsf.popFrame() end }
     end
   end
-  if not crsfSensor then return false end
+  return crsfSensor
+end
+
+-- PARAMS page (params.lua): its requests go out through this same sensor. A second
+-- crsf.getSensor() object is never made: on Ethos it may take part of the incoming frames
+-- (X20S + ELRS: telemetry dropped in and out with the CRSF params build, 2026-11-13)
+function T.crsfPush(cmd, data)
+  local sn = crsfOpen()
+  if not sn or not sn.pushFrame then return false end
+  return sn:pushFrame(cmd, data)
+end
+
+-- mLRS "cbridge" (mLRS setting Tx Ser Port = cbridge): the aircraft's MAVLink stream in CRSF frames
+-- 0xAA (chunk byte, size, up to 58 MAVLink bytes). Passed to params.lua (T.onMavEnv), which speaks
+-- MAVLink through it for the PARAMS page and the ArduPilot mission; nothing else reads it.
+-- T.bridgeAt: when the last one came (os.clock), so params.lua knows the bridge is on.
+T.bridgeAt, T.bridgeN = nil, 0
+-- Ethos: a reader of its own, as mspclient.lua has. Each crsf.getSensor() object gets every frame,
+-- and a pop with a type range drops the frames outside it on the way: the passthrough reader above
+-- (0x7F-0x80) would eat these 0xAA frames first (mLRS + X20S 2026-11-14: the PARAMS page got none)
+local bridgeSensor = nil
+local function bridgePop()
+  if bridgeSensor == nil then
+    bridgeSensor = false
+    if crsf and crsf.getSensor then
+      local ok, sn = pcall(crsf.getSensor)
+      if ok and sn then bridgeSensor = sn end
+    end
+  end
+  if not bridgeSensor then T.bridgeInfo = "no reader" return end
+  -- test build diagnostic (mLRS 2026-11-14: no 0xAA reached OmniDeck): every 2 s one frame of
+  -- any type from this reader, counted by type, shown on the Sensor check page
+  local t = now()
+  if t - (T.bridgePeekAt or -10) >= 2 then
+    T.bridgePeekAt = t
+    local ok, cmd, data = pcall(bridgeSensor.popFrame, bridgeSensor)
+    local k = ok and (cmd and string.format("%02X", cmd) or "none") or "err"
+    T.bridgeSeen = T.bridgeSeen or {}
+    T.bridgeSeen[k] = (T.bridgeSeen[k] or 0) + 1
+    local parts = {}
+    for key, n in pairs(T.bridgeSeen) do parts[#parts + 1] = key .. ":" .. n end
+    table.sort(parts)
+    T.bridgeInfo = "peek " .. table.concat(parts, " ")
+    if ok and cmd == 0xAA and data then T.bridgeAt, T.bridgeN = t, T.bridgeN + 1 if T.onMavEnv then T.onMavEnv(data) end end
+  end
+  for _ = 1, 4 do   -- ~1.3 kB/s on mLRS = about 1 frame per update
+    local ok, cmd, data = pcall(bridgeSensor.popFrame, bridgeSensor, 0xAA, 0xAA)
+    if not ok or cmd ~= 0xAA or data == nil then return end
+    T.bridgeAt, T.bridgeN = now(), T.bridgeN + 1
+    if T.onMavEnv then T.onMavEnv(data) end
+  end
+end
+
+local function crsfPop()
+  if not crsfOpen() then return false end
   -- only the passthrough frame types; MSP replies (0x7B) are left for mspclient.lua
   local ok, cmd, data = pcall(crsfSensor.popFrame, crsfSensor, 0x7F, 0x80)   -- no closure per pop
   if not ok or cmd == nil or data == nil then return false end
+  if (cmd == 0x80 or cmd == 0x7F) and data[1] == 0xF4 then
+    -- MAVlite reply (ArduPlane Stratos over ELRS / Crossfire) for the PARAMS page (params.lua)
+    if T.onMavlite then T.onMavlite(data) end
+    return true
+  end
   if (cmd == 0x80 or cmd == 0x7F) and data[1] == 0xF1 and #data >= 3 then
     -- ArduPilot status text: severity, then the text up to a 0
     s.link = "CRSF"
@@ -1179,6 +1239,7 @@ function T.wakeup(linkMode)
   lookupBudget = LOOKUPS_PER_WAKEUP
   if linkMode ~= LINK_SPORT then
     for _ = 1, OD_MAX_CRSF or 20 do if not crsfPop() then break end got = true end
+    bridgePop()
     -- with what the last update's drain collected (nothing pending on S.Port: skipped)
     if pendN > 0 or gpsLat or gpsLon then flushPt(2) end
   end

@@ -103,6 +103,7 @@ E.CATEGORY_SYSTEM, E.MAIN_VOLTAGE = 1001, 1002
 E.EVT_TOUCH, E.EVT_KEY = 1, 2
 E.TOUCH_START, E.TOUCH_MOVE, E.TOUCH_END = 1, 2, 3
 E.KEY_ENTER_BREAK, E.KEY_ROTARY_LEFT, E.KEY_ROTARY_RIGHT = 1, 2, 3
+E.KEY_RTN_BREAK = 4   -- PARAMS page: leave the editor / unselect
 -- telemetry units: the numbers of EdgeTX's TelemetryUnit list; ones EdgeTX lacks are never matched
 E.UNIT_KNOT, E.UNIT_FOOT_PER_SECOND, E.UNIT_KILOMETER_PER_HOUR, E.UNIT_MILE_PER_HOUR = 4, 6, 7, 8
 E.UNIT_FOOT, E.UNIT_RADIAN, E.UNIT_KILOMETER = 10, 21, 28
@@ -558,6 +559,7 @@ end
 -- newest PASS_MAX; older ones are dropped (and counted) if the screen falls behind.
 local PASS_MAX = 24
 local crsfPass, crsfMsp = {}, {}
+local crsfEnv = {}   -- mLRS cbridge frames (0xAA), newest 16 kept
 -- OpenTX keeps only the newest few passthrough frames (it has no catch-up after drawing, so a
 -- long queue would show values a second old), in a ring of 4 that is overwritten in place, so
 -- emptying a backlog after a pause costs a few steps per frame, not a table each. Status text
@@ -573,6 +575,9 @@ local function crsfFill(want)
     ST.raw = ST.raw + 1
     if cmd == 0x7B then
       if #crsfMsp < 8 then crsfMsp[#crsfMsp + 1] = { cmd, data } end
+    elseif cmd == 0xAA then
+      if #crsfEnv >= 16 then table.remove(crsfEnv, 1) end
+      crsfEnv[#crsfEnv + 1] = { cmd, data }
     elseif cmd == 0x80 or cmd == 0x7F then
       ST.pass = ST.pass + 1
       got = true
@@ -596,7 +601,7 @@ end
 local crsfSensor = {
   popFrame = function(self, lo, hi)
     crsfFill(lo)
-    if OTX and lo ~= 0x7B then
+    if OTX and lo == 0x7F then   -- (0x7B MSP and 0xAA bridge: the queues below)
       if #otxText > 0 then return 0x80, table.remove(otxText, 1) end   -- texts first, in order
       if ringN == 0 then return nil end
       local c, d = ringC[ringHead], ringD[ringHead]
@@ -604,7 +609,7 @@ local crsfSensor = {
       ringHead, ringN = ringHead % RING + 1, ringN - 1
       return c, d
     end
-    local q = lo == 0x7B and crsfMsp or crsfPass
+    local q = (lo == 0x7B and crsfMsp) or (lo == 0xAA and crsfEnv) or crsfPass
     local f = table.remove(q, 1)
     if not f then return nil end
     return f[1], f[2]

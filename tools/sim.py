@@ -75,6 +75,7 @@ def font_of(f): return fonts.get(FONTS_BY_ID.get(int(f)), fonts['FONT_STD'])
 FONTS_BY_ID = {}
 consts = {'LEFT': 0, 'CENTERED': 1, 'RIGHT': 2, 'EVT_TOUCH': 100, 'EVT_KEY': 101, 'TOUCH_END': 2,
           'TOUCH_START': 1, 'TOUCH_MOVE': 3, 'KEY_ENTER_BREAK': 32, 'KEY_ROTARY_LEFT': 4100, 'KEY_ROTARY_RIGHT': 4101,
+          'KEY_RTN_BREAK': 33,
           'OPTION_LATITUDE': 1, 'OPTION_LONGITUDE': 2, 'CATEGORY_SYSTEM': 400, 'MAIN_VOLTAGE': 401,
           'CATEGORY_TELEMETRY_SENSOR': 500, 'CATEGORY_SYSTEM_EVENT': 600, 'TELEMETRY_ACTIVE': 601}
 for i, k in enumerate(FONT_PX): consts[k] = 200 + i; FONTS_BY_ID[200 + i] = k
@@ -256,6 +257,7 @@ function _mkcrsf(q)
   return { getSensor = function() return {
       pushFrame = function(self, cmd, data) return _CRSFPUSH(cmd, data) end,
       popFrame = function(self, lo, hi)
+        if lo == 0xAA then return nil end   -- no mLRS bridge in this simulator
         if lo == 0x7B then
           local f = _POPMSPCRSF(); if f == nil then return nil end
           local t = {} for i = 1, #f do t[i] = f[i] end
@@ -496,11 +498,57 @@ if os.environ.get('OD_PANEL'): widget.topPanel = int(os.environ['OD_PANEL'])
 if os.environ.get('OD_LOGO'): widget.logoFile = os.environ['OD_LOGO']   # e.g. stratos_title.png
 
 HOME = (43.49323, 142.88785)
+if os.environ.get('OD_HOME'): HOME = tuple(float(v) for v in os.environ['OD_HOME'].split(','))
 st = dict(lat=HOME[0], lon=HOME[1], hlat=HOME[0], hlon=HOME[1], mode=5, armed=True, thr=55, sats=14, hdop=0.8,
           altmsl=160, volt=15.8, curr=12.3, mah=0, alt=0, vs=0, **{'as': 17.0}, gs=18.5, yaw=0, roll=0, pitch=0,
           wdir=270, wspd=4.2, wpn=0, wpd=0, wpb=0)
 
 PAINT = [False]
+# OD_COUNT=1: count the Lua instructions of every wakeup() / paint() / event() (what Ethos's
+# per-call "Max instructions count reached" limit counts) and print the worst per page at exit
+COUNT = os.environ.get('OD_COUNT') == '1'
+CNT = {}
+DIST = {}
+WORST = {}
+if COUNT:
+    _cnt = L.execute('''PROF = {} PROF_ON = false
+    return function(f, ...)
+        local n = 0
+        CALL = {}
+        if PROF_ON then
+          debug.sethook(function()
+            n = n + 25
+            local i = debug.getinfo(2, "Sl")
+            if i then local k = i.short_src:match("[^/]+$") .. ":" .. i.currentline PROF[k] = (PROF[k] or 0) + 25 CALL[k] = (CALL[k] or 0) + 25 end
+          end, "", 25)
+        else
+          debug.sethook(function() n = n + 1 end, "", 1)
+        end
+        local ok, e = pcall(f, ...)
+        debug.sethook()
+        if not ok then error(e, 0) end
+        return n end''')
+    def _counted(name, f):
+        def g(*a):
+            n = _cnt(f, *a)
+            DIST.setdefault('%s p%s' % (name, widget.page), []).append(n)
+            k0 = '%s p%s' % (name, widget.page)
+            if n > WORST.get(k0, (0, None))[0]:
+                c = L.eval('CALL')
+                WORST[k0] = (n, sorted(((str(k), int(v)) for k, v in c.items()), key=lambda kv: -kv[1])[:25])
+            if name == 'paint': MEM[0] = max(MEM[0], float(L.eval('collectgarbage("count")')))
+            k = '%s p%s' % (name, widget.page)
+            CNT[k] = max(CNT.get(k, 0), n)
+        return g
+    import atexit
+    atexit.register(lambda: print('INSTRUCTIONS worst per call:', sorted(CNT.items(), key=lambda kv: -kv[1])))
+    _mem = L.eval('function() collectgarbage("collect") return collectgarbage("count") end')
+    MEM = [0.0]
+    atexit.register(lambda: print('LUA MEMORY KB now %.0f, peak seen %.0f' % (_mem(), MEM[0])))
+if COUNT:
+    wt['event0'], wt['wakeup0'], wt['paint0'] = wt['event'], wt['wakeup'], wt['paint']
+    for _k in ('wakeup', 'paint', 'event'):
+        wt[_k] = _counted(_k, wt[_k])
 def step(dt=0.2):
     global cv
     sim_time[0] += dt
@@ -590,7 +638,7 @@ getS = L.execute('''
 return function()
   local p = package.loaded
   for i = 1, 200 do
-    local n, v = debug.getupvalue(_W.wakeup, i)
+    local n, v = debug.getupvalue(_W.wakeup0 or _W.wakeup, i)
     if n == nil then break end
     if n == "T" then return v.s end
   end
@@ -625,7 +673,7 @@ def render(name, page, **kw):
 
 tag = ('native' if NATIVE else ('sport' if SPORT else 'crsf')) + '_' + RES
 if INAV:
-    getU = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup, i)
+    getU = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
         if n == nil then break end if n == name then return v end end end''')
     MSPC = getU(wt, 'MSPC'); MIm = getU(wt, 'MI')
     print('  msp state', MSPC.state(), 'variant', MSPC.variant(), 'count', MSPC.count(), 'active', MSPC.active())
@@ -661,7 +709,7 @@ if INAV:
     print('INAV checks OK')
     sys.exit(0)
 if TILES:
-    getMI = L.execute('''return function(W) for i = 1, 200 do local n, v = debug.getupvalue(W.wakeup, i)
+    getMI = L.execute('''return function(W) for i = 1, 200 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
         if n == nil then break end if n == "MI" then return v end end end''')
     MIm = getMI(wt)
     cur, kind = MIm.current(); print("  mission source", kind)
@@ -677,7 +725,7 @@ if TILES:
     print('  tile zoom', widget.tz, 'loads', stats['loads'])
     # test43: the map page asks for a bigger window than the minimap; the loader fills it (and
     # its ring of one tile) within a few wakeups - the render shows the result, not the first frame
-    getTL = L.execute('''return function(W) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup, i)
+    getTL = L.execute('''return function(W) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
         if n == nil then break end if n == "TL" then return v end end end''')
     TLm = getTL(wt)
     widget.page = 2
@@ -825,8 +873,9 @@ os.remove(os.path.join(OUT, '_tmp.png'))
 MAPmod = L.execute(open(os.path.join('x18' if W <= 480 else 'x20', 'map.lua'), encoding='utf8').read())   # the copy the loader picked
 print('input checks OK')
 
+
 # ------------------------------------------------------------------ flight summary
-getV = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup, i)
+getV = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
     if n == nil then break end if n == name then return v end end end''')
 FS = getV(wt, 'FS')
 wt_alive = getV(wt, 'T').alive
@@ -1822,3 +1871,184 @@ for _ in range(100): step(0.2)
 assert widget.page == 2, 'left the summary by hand: no jump back to main'
 widget.statsPage = 0
 print('flight stats page OK')
+
+# ---- PARAMS page (6): ArduPilot only, S.Port / F.Port (MAVlite to a copy of ArduPilot's code)
+sys.path.insert(0, HERE)
+from fake_mavlite import FakeAP
+
+def _plist_row(name, qon, path):
+    # the row number (1-based) of a parameter on the PARAMS page, from plist.lua (Q rows hidden when not qon)
+    import re as _re
+    n = 0
+    for _l in open(path, encoding='utf-8'):
+        m = _re.match(r'\s*\{ "[^"]+", "([A-Z0-9_]+)"', _l)
+        if not m: continue
+        if not qon and '"q" }' in _l: continue
+        n += 1
+        if m.group(1) == name: return n
+    raise KeyError(name)
+_PL = os.path.join(SRC, 'x20' if W > 480 else 'x18', 'plist.lua')
+_ap = FakeAP({'Q_ENABLE': 1.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
+              'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
+              'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'Q_A_RAT_RLL_P': 0.135}, dup=True)
+def _ap_push(t):
+    if int(t['primId']) == 0x30: _ap.uplink(int(t['appId']), int(t['value']))
+    return True
+def _ap_pop():
+    for tx in _ap.texts: send_text(tx, 4) if 'send_text' in globals() else None
+    _ap.texts.clear()
+    if not _ap.down: return None
+    return L.table_from(list(_ap.down.pop(0)))
+_old = (G._SPORTPUSH, G._POPMSPSPORT)
+G._SPORTPUSH, G._POPMSPSPORT = _ap_push, _ap_pop
+KEY = lambda k: wt['event'](widget, consts['EVT_KEY'], consts[k], 0, 0)
+assert widget.paramsPage == 0, 'params page off by default'
+widget.paramsPage = 1; widget.page = 2 if NATIVE else 3
+wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+if NATIVE:
+    assert widget.page != 6, 'params page: ArduPilot only, page %s' % widget.page
+    print('params page not offered for INAV/Betaflight OK')
+else:
+    assert widget.page == 6, 'params page in the cycle for ArduPilot: %s' % widget.page
+    _gets = [0]
+    _orig_crsf = G.crsf
+    G.crsf = L.eval('function(c, count) return { getSensor = function(...) count() return c.getSensor(...) end } end')(_orig_crsf, lambda: _gets.__setitem__(0, _gets[0] + 1))
+    for _ in range(40): step(0.2)
+    G.crsf = _orig_crsf
+    if not SPORT:
+        assert _gets[0] == 0, 'params page over CRSF made %d CRSF sensor(s) of its own' % _gets[0]
+        print('params page over CRSF: no second CRSF sensor (sends through telem.lua) OK')
+    render('params_%s.png' % tag, 6)
+    if SPORT:
+        _armed0, _sum0 = st['armed'], widget.sumAuto
+        widget.sumAuto = 0     # no flight summary on the disarm below (the sim never draws it, so it keeps opening)
+        st['armed'] = True; step(0.2)
+        for _ in range(_plist_row('AIRSPEED_CRUISE', True, _PL)): KEY('KEY_ROTARY_RIGHT')
+        for _ in range(40): step(0.2)   # the selected row is read first
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        for _ in range(4): KEY('KEY_ROTARY_RIGHT')
+        render('params_armed_%s.png' % tag, 6)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        assert _ap.sets == 0, 'armed: nothing written'
+        st['armed'] = False
+        for _ in range(3): step(0.2)
+        widget.page = 6        # the disarm opened the flight summary (summary on disarm)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        for _ in range(4): KEY('KEY_ROTARY_RIGHT')
+        render('params_edit_%s.png' % tag, 6)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(10): step(0.2)
+        assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('saved', _ap.p['AIRSPEED_CRUISE'])
+        render('params_saved_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        for _ in range(_plist_row('ARMING_SKIPCHK', True, _PL)): KEY('KEY_ROTARY_RIGHT')
+        for _ in range(10): step(0.2)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        render('params_skipchk_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        for _ in range(60): step(0.2)                         # the rest, Q rows included (Q_ENABLE 1)
+        render('params_q_%s.png' % tag, 6, )
+        st['armed'], widget.sumAuto = _armed0, _sum0
+        for _ in range(3): step(0.2)
+        print('params page S.Port: armed view-only, read, edit, save verified OK')
+    if not NATIVE: widget.page = 6   # (the re-arm above can open the flight summary first)
+    _pg0 = widget.page
+    _r = wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+    assert widget.page == 1, ('ENTER with no row picked leaves the params page', _pg0, widget.page, _r)
+# ---- ArduPilot mission download + editor: editor on the X20 family only (X18: none)
+if SPORT and not NATIVE:
+    _ap.mission = [(16, 0, 0.0, 0.0, 0.0, 0.0, 0.0), (22, 3, st['lat'] + 0.001, st['lon'] + 0.001, 40.0, 0.0, 0.0)]
+    for _i in range(4):
+        _ap.mission.append((16, 3, st['lat'] + 0.003 * (_i + 1), st['lon'] + 0.002 * (_i % 2) - 0.001, 60.0, 0.0, 0.0))
+    _ap.mission.append((21, 3, st['lat'] - 0.001, st['lon'], 0.0, 0.0, 0.0))
+    if os.environ.get('OD_WPFILE'):   # a QGC WPL 110 file instead (item 0 = home)
+        _ap.mission = []
+        for _ln in open(os.environ['OD_WPFILE'], encoding='utf-8').read().splitlines()[1:]:
+            _f = _ln.split('	')
+            if len(_f) >= 12:
+                _ap.mission.append((int(_f[3]), int(_f[2]), float(_f[8]), float(_f[9]), float(_f[10]), float(_f[4]), float(_f[6]), float(_f[5])))
+        print('  mission from', os.environ['OD_WPFILE'], len(_ap.mission), 'items')
+    _ap.mstamp += 1000
+    widget.apMission, widget.page, widget.sumAuto = 1, 2, 0
+    for _ in range(30): step(0.2)
+    render('map_apmission_%s.png' % tag, 2)
+    if os.environ.get('OD_PROFILE'):
+        # where the instructions go with the mission downloaded: main page, then map page,
+        # flying the circle, 30 s each (sampled every 25 instructions)
+        import statistics
+        PAINT[0] = True
+        st['armed'] = True
+        for _pg in (1, 2):
+            widget.page = _pg
+            for _ in range(10): step(0.2)
+            CNT.clear(); DIST.clear(); WORST.clear()
+            L.execute('PROF = {} PROF_ON = true')
+            _calls = {'paint': [], 'wakeup': []}
+            _old_counted = {}
+            _nsteps = int(os.environ.get('OD_PROFILE_STEPS', '60'))
+            _win = []
+            for _k in range(_nsteps):
+                _before = {k: len(v) for k, v in DIST.items()}
+                step(0.2)
+                if _k % 25 == 24:   # every 5 s of flight: the worst call in that window
+                    _win.append({k: max(v[-100:]) for k, v in DIST.items()})
+            print('   per 5 s window (worst call):'); [print('     t=%3ds %s' % ((i + 1) * 5, w)) for i, w in enumerate(_win)]
+            L.execute('PROF_ON = false')
+            prof = L.eval('PROF')
+            items = sorted(((str(k), int(v)) for k, v in prof.items()), key=lambda kv: -kv[1])
+            tot = sum(v for _, v in items)
+            print('==== page %d: worst per call %s, sampled total %d' % (_pg, {k: v for k, v in CNT.items()}, tot))
+            for k, v in DIST.items():
+                v2 = sorted(v); print('   %s: calls %d median %d p95 %d max %d' % (k, len(v2), v2[len(v2)//2], v2[int(len(v2)*0.95)], v2[-1]))
+            for k, (n, lines) in WORST.items():
+                print('   -- worst %s (%d):' % (k, n)); [print('        %6d %s' % (c, l)) for l, c in lines[:18]]
+            DIST.clear(); WORST.clear()
+            for k, v in items[:30]: print('   %6d %5.1f%%  %s' % (v, 100.0 * v / tot, k))
+        raise SystemExit(0)
+    TE = consts['EVT_TOUCH']
+    def _tap(x, y):
+        wt['event'](widget, TE, consts['TOUCH_START'], int(x), int(y))
+        wt['event'](widget, TE, consts['TOUCH_END'], int(x), int(y))
+    eb = widget.editBtn
+    if W <= 480:
+        assert not eb, 'X18: no EDIT button (mission editor is X20 / TX16S only)'
+        assert not os.path.exists(os.path.join(SRC, 'x18', 'medit.lua')), 'X18 copy carries no editor'
+        print('X18: mission download yes, editor none OK')
+    else:
+        assert eb, 'X20: EDIT button on the map page'
+        _tap(eb.x + eb.w / 2, eb.y + eb.h / 2)
+        _getE = L.execute('''return function(W) for i = 1, 300 do local n, v = debug.getupvalue(W.event0 or W.event, i)
+            if n == nil then break end if n == 'ED' then return v end end end''')
+        ED = _getE(wt)
+        assert ED and ED.active, 'X20: EDIT opens the editor'
+        cv = Canvas(); wt['paint'](widget)
+        d0 = ED._draft()[0]; n0 = len(d0)
+        _tap(W * 0.72, H * 0.40)
+        d1, s1 = ED._draft()[0], ED._draft()[1]
+        assert len(d1) == n0 + 1 and d1[s1].alt == 60, ('X20: tap adds a waypoint at 60 m', len(d1), d1[s1].alt)
+        cv = Canvas(); wt['paint'](widget)
+        bl = ED._boxes(); bx = {str(bl[i].k): bl[i] for i in range(1, len(bl) + 1)}
+        def _btn(k): b = bx[k]; _tap(b.x + b.w / 2, b.y + b.h / 2)
+        _btn('Type')
+        assert ED._draft()[0][ED._draft()[1]].cmd == 17, 'X20: Type -> LOITER UNLIM'
+        _btn('Type'); _btn('Type'); _btn('Type'); _btn('+')
+        d2, s2 = ED._draft()[0], ED._draft()[1]
+        assert d2[s2].cmd == 21, ('X20: Type x4 -> Land', d2[s2].cmd)
+        render('medit_%s.png' % tag, 2)
+        _btn('Send')
+        for _ in range(40): step(0.2)
+        assert len(_ap.mission) == len(d2) + 1 and _ap.mission[s2][0] == 21, ('X20: the aircraft holds the edited mission', len(_ap.mission))
+        render('medit_sent_%s.png' % tag, 2)
+        cv = Canvas(); wt['paint'](widget)
+        bl = ED._boxes(); bx = {str(bl[i].k): bl[i] for i in range(1, len(bl) + 1)}
+        _btn('Done')
+        assert not ED.active and widget.page == 2, 'X20: Done leaves the editor'
+        print('X20 mission editor: EDIT, add, Type, +10, Send (written + verified), Done OK')
+    widget.apMission = 0
+    step(0.2)
+widget.paramsPage, widget.page = 0, 1
+G._SPORTPUSH, G._POPMSPSPORT = _old

@@ -263,6 +263,22 @@ end
 --   home={lat,lon} (centre on home), center={lat,lon} (stand-in centre with no fix),
 --                          tiles=TL module, tz=tile zoom (nil = vector map), mission={wp...}, activeWp= }
 -- returns button hit boxes for the full map
+-- the last map page view, for the mission editor (medit.lua): screen <-> lat/lon with the same
+-- centre, scale and rotation as the drawing (one table, reused)
+M.view = { ok = false }
+function M.toScreen(la, lo)
+  local v = M.view
+  local de, dn = (lo - v.lon) * 111320 * v.coslat, (la - v.lat) * 111320
+  local ex, ny = de * v.cr - dn * v.sr, de * v.sr + dn * v.cr
+  return v.cx + ex * v.ppm, v.cy - ny * v.ppm
+end
+function M.toLatLon(px, py)
+  local v = M.view
+  local ex, ny = (px - v.cx) / v.ppm, (v.cy - py) / v.ppm
+  local de, dn = ex * v.cr + ny * v.sr, -ex * v.sr + ny * v.cr
+  return v.lat + dn / 111320, v.lon + de / (111320 * v.coslat)
+end
+
 function M.draw(x, y, w, h, s, o)
   -- no position yet (no GPS fix): centre on o.center (last known position, or home) so the
   -- tiles and range rings still show; the aircraft itself is not drawn then
@@ -290,6 +306,11 @@ function M.draw(x, y, w, h, s, o)
   local rr = math.rad(-rot)
   local sr, cr = math.sin(rr), math.cos(rr)
 
+  if not o.mini and lat ~= nil then
+    local v = M.view
+    v.ok, v.lat, v.lon, v.coslat, v.cx, v.cy, v.ppm, v.sr, v.cr = true, lat, lon, math.cos(math.rad(lat)), cx, cy, ppm, sr, cr
+    v.x, v.y, v.w, v.h = x, y, w, h
+  end
   -- east/north offset (m) from the aircraft -> screen
   local function scr(de, dn)
     local ex, ny = de * cr - dn * sr, de * sr + dn * cr

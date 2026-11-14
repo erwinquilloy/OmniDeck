@@ -1,0 +1,34 @@
+# OmniDeck PARAMS page: your own rows (an example - rename this file to params.txt to use it)
+#
+# EdgeTX: /WIDGETS/OmniDeck/params.txt      Ethos: /scripts/omnideck/params.txt
+# One file for all models. It only ADDS rows to the built-in list (FLIGHT ... Q PID);
+# a name that is already listed is skipped. Restart the radio (or reselect the model) after editing.
+#
+#   [GROUP]              the rows below go to this tab. A built-in tab name (PID, TRIM, ...)
+#                        adds to that tab; a new name makes a new tab after the built-in ones
+#   [GROUP] flight       ...and these rows may be changed in flight (setting "Params: edit in
+#                        flight" = "Gains and trim"); other rows are view only while armed
+#   NAME                 an ArduPilot parameter name, 16 characters at most
+#   NAME | label | step  optional: the text shown in the editor and the wheel step
+#
+# Rows before any [GROUP] go to a tab called OTHER. Q_ names only show when Q_ENABLE is 1.
+# A row from this file has no range of its own (ArduPilot keeps its own limits). Without a
+# step the wheel moves 1 for whole numbers, otherwise about 1 % of the value.
+# At most 100 rows and 14 tabs; lines that can't be read are skipped (Sensor check page
+# shows how many, and the first line number).
+
+[PID] flight
+YAW_RATE_P | Yaw P | 0.005
+YAW_RATE_I | Yaw I | 0.01
+
+[TECS]
+TECS_SPDWEIGHT | Speed weight | 0.1
+TECS_TIME_CONST | Time constant | 0.5
+
+[NAV]
+NAVL1_PERIOD | L1 period | 1
+WP_RADIUS | WP radius | 5
+
+[SERVOS]
+SERVO1_TRIM | Aileron trim | 1
+SERVO2_TRIM | Elevator trim | 1
