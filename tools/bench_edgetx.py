@@ -41,7 +41,11 @@ W, H = 480, 272
 
 SD = tempfile.mkdtemp(prefix='bench_etx_')
 if WHO == 'omnideck':
-    build_edgetx.build(SD)
+    if '--zip' in args:   # a released package instead of the current source (regression vs a release)
+        import zipfile
+        zipfile.ZipFile(args[args.index('--zip') + 1]).extractall(SD)
+    else:
+        build_edgetx.build(SD)
     MAIN = '/WIDGETS/OmniDeck/main.lua'
     # OmniDeck Setup: link CRSF (Auto finds it too; set so both start alike); --panel N: the
     # main page's top-right panel (0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo)
