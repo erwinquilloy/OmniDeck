@@ -2061,6 +2061,16 @@ if SPORT and not NATIVE:
         _btn('Type'); _btn('Type'); _btn('Type'); _btn('+')
         d2, s2 = ED._draft()[0], ED._draft()[1]
         assert d2[s2].cmd == 21, ('X20: Type x4 -> Land', d2[s2].cmd)
+        # a point far above the map: its legs must stop at the map edge, not cross the top bar
+        # (X20S 2026-11-15: route lines over DISARMED / the info line)
+        _bar = int(H * 0.09)
+        cv = Canvas(); wt['paint'](widget); _top0 = cv.img.crop((0, 0, W, _bar)).tobytes()
+        _lat0 = d2[s2].lat; d2[s2].lat = _lat0 + 0.02
+        cv = Canvas(); wt['paint'](widget); _top1 = cv.img.crop((0, 0, W, _bar)).tobytes()
+        render('medit_offmap_%s.png' % tag, 2)
+        d2[s2].lat = _lat0
+        assert _top0 == _top1, 'X20 editor: a leg to a point off the map is drawn over the top bar'
+        print('X20 mission editor: route clipped to the map (point 2 km off the top) OK')
         render('medit_%s.png' % tag, 2)
         _btn('Send')
         for _ in range(40): step(0.2)

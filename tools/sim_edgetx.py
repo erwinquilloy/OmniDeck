@@ -986,6 +986,17 @@ if SPORT and not NATIVE:
     _btn('>')
     assert ED._draft()[0][s3].cmd == 178
     d2, s2 = ED._draft()[0], s3
+    # a point far above the map: its legs must stop at the map edge, not cross the top bar
+    # (TX16S 2026-11-15: route lines over the info line and the top bar)
+    _bar = int(H * 0.09)
+    _k = max(k for k in range(1, len(d2) + 1) if d2[k].cmd == 16)
+    wd.page = 2; frame(); _top0 = cv.img.crop((0, 0, W, _bar)).tobytes()
+    _lat0 = d2[_k].lat; d2[_k].lat = _lat0 + 0.02
+    frame(); _top1 = cv.img.crop((0, 0, W, _bar)).tobytes()
+    render('etx_medit_offmap_%s.png' % tag, 2)
+    d2[_k].lat = _lat0
+    assert _top0 == _top1, 'EdgeTX editor: a leg to a point off the map is drawn over the top bar'
+    print('mission editor: route clipped to the map (point 2 km off the top) OK')
     render('etx_medit_%s.png' % tag, 2)
     nsent = len(d2)
     _btn('Send')

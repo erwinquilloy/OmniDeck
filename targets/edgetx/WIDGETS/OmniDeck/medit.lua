@@ -286,6 +286,9 @@ function ED.paint(W, H, barH, s, u, fMid, fSmall)
   if v.ok then
     local px, py
     lcd.color(COL.warn)
+    -- the route stays inside the map: a leg to a point off the map would cross the top bar
+    -- (X20S and TX16S 2026-11-15); the map page clips the same way
+    lcd.setClipping(floor(v.x), floor(v.y), floor(v.w), floor(v.h))
     for _, it in ipairs(draft) do
       if onMap(it) then
         local x, y = MAP.toScreen(it.lat, it.lon)
@@ -293,6 +296,7 @@ function ED.paint(W, H, barH, s, u, fMid, fSmall)
         px, py = x, y
       end
     end
+    lcd.setClipping(0, 0, W, H)
     lcd.font(fSmall)
     local r = H >= 400 and 7 or 5
     for i, it in ipairs(draft) do
