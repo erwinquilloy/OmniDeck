@@ -1,4 +1,4 @@
-OmniDeck 0.4.test for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 0.4.0e for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
@@ -6,7 +6,7 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
-WHAT'S NEW IN 0.4.test (test build, after 0.4.0)
+WHAT'S NEW IN 0.4.0e (after 0.4.0)
 - PARAMS page over ELRS and TBS Crossfire (150 Hz), not only S.Port / F.Port. Needs ArduPlane
   Stratos firmware with "MAVlite over CRSF" (v2.2.1 or the test builds). Upstream ArduPilot and
   ELRS MAVLink mode get the page "The flight controller doesn't answer". TBS at 50 Hz is too
@@ -387,15 +387,15 @@ controller's failsafes as your safety net. Do not rely on it, or on its voice ca
 
 INSTALL
 Two packages, the same OmniDeck: pick one.
-  OmniDeck_Ethos_Suite_0.4.test.zip   install with Ethos Suite (A)
-  OmniDeck_Ethos_0.4.test.zip         copy by hand (B)
+  OmniDeck_Ethos_Suite_0.4.0e.zip   install with Ethos Suite (A)
+  OmniDeck_Ethos_0.4.0e.zip         copy by hand (B)
 Both put OmniDeck in scripts/omnideck/. On radios with built-in storage (X18, X20 Pro/R/RS)
 that is the internal drive unless the radio uses an SD card; wherever these steps say "card",
 read the drive that holds the scripts folder.
 
 A. With Ethos Suite
 1. Connect the radio to the PC by USB and start Ethos Suite.
-2. Lua Library > Install from local .zip > pick OmniDeck_Ethos_Suite_0.4.test.zip.
+2. Lua Library > Install from local .zip > pick OmniDeck_Ethos_Suite_0.4.0e.zip.
    The Suite installs to scripts/omnideck/ on the radio's storage.
 3. If scripts/omnideck/missions/ is not there afterwards, make it for ArduPilot .waypoints
    files. The logs folder appears with the first flight log.

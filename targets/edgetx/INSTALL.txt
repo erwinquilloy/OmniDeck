@@ -1,4 +1,4 @@
-OmniDeck 0.4.test for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.4.0e for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
@@ -6,7 +6,7 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
-WHAT'S NEW IN 0.4.test (test build, after 0.4.0)
+WHAT'S NEW IN 0.4.0e (after 0.4.0)
 - PARAMS page over ELRS and TBS Crossfire (150 Hz), not only S.Port / F.Port. Needs ArduPlane
   Stratos firmware with "MAVlite over CRSF" (v2.2.1 or the test builds). Upstream ArduPilot and
   ELRS MAVLink mode get the page "The flight controller doesn't answer". TBS at 50 Hz is too
