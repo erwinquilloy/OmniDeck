@@ -7,6 +7,12 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 WHAT'S NEW IN 0.4.0f (after 0.4.0)
+- PARAMS page keys (Marcin's suggestions): the page has two columns. The wheel on the group tabs
+  (left) only moves a highlight, nothing is opened or read; ENTER opens the group and puts the
+  cursor on its first row; the wheel then stays inside that group. RTN goes back to the tabs, and
+  RTN on the tabs goes to the next page. A "< BACK" button in the lower right does the same as
+  RTN. When a group has more rows than fit, up / down arrows in the bottom row (left of BACK)
+  scroll it; groups that fit show none. On the "doesn't answer" screen RTN also turns the page.
 - PARAMS page over ELRS and TBS Crossfire (150 Hz), not only S.Port / F.Port. Needs ArduPlane
   Stratos firmware with "MAVlite over CRSF" (v2.2.1 or the test builds). Upstream ArduPilot and
   ELRS MAVLink mode get the page "The flight controller doesn't answer". TBS at 50 Hz is too

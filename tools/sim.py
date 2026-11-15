@@ -1888,6 +1888,29 @@ def _plist_row(name, qon, path):
         if m.group(1) == name: return n
     raise KeyError(name)
 _PL = os.path.join(SRC, 'x20' if W > 480 else 'x18', 'plist.lua')
+NEWNAV = True   # two-column PARAMS page on X20 and X18 (Marcin 2026-11-15)
+
+def _plist_pos(name, qon, path):
+    # (tab number, row in that tab), both 0-based, on the two-column PARAMS page (X20 / EdgeTX)
+    import re as _re
+    tabs, rows = [], {}
+    for _l in open(path, encoding='utf-8'):
+        m = _re.match(r'\s*\{ "([^"]+)", "([A-Z0-9_]+)"', _l)
+        if not m: continue
+        if not qon and '"q" }' in _l: continue
+        if m.group(1) not in rows: tabs.append(m.group(1)); rows[m.group(1)] = []
+        rows[m.group(1)].append(m.group(2))
+        if m.group(2) == name: return tabs.index(m.group(1)), rows[m.group(1)].index(name)
+    raise KeyError(name)
+def _goto(name, qon):
+    if not NEWNAV:
+        for _ in range(_plist_row(name, qon, _PL)): KEY('KEY_ROTARY_RIGHT')
+        return
+    t, r = _plist_pos(name, qon, _PL)
+    for _ in range(20): KEY('KEY_ROTARY_LEFT')
+    for _ in range(t): KEY('KEY_ROTARY_RIGHT')
+    KEY('KEY_ENTER_BREAK')
+    for _ in range(r): KEY('KEY_ROTARY_RIGHT')
 _ap = FakeAP({'Q_ENABLE': 1.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
               'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
               'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'Q_A_RAT_RLL_P': 0.135}, dup=True)
@@ -1919,11 +1942,21 @@ else:
         assert _gets[0] == 0, 'params page over CRSF made %d CRSF sensor(s) of its own' % _gets[0]
         print('params page over CRSF: no second CRSF sensor (sends through telem.lua) OK')
     render('params_%s.png' % tag, 6)
+    if NEWNAV:
+        for _ in range(_plist_pos('TECS_CLMB_MAX', True, _PL)[0]): KEY('KEY_ROTARY_RIGHT')
+        step(0.2)
+        render('params_tabhi_%s.png' % tag, 6)       # TECS highlighted, FLIGHT still open
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(30): step(0.2)
+        for _ in range(20): KEY('KEY_ROTARY_RIGHT')   # stops at the last TECS row
+        step(0.2)
+        render('params_tecs_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK')                          # rows -> tab column
     if SPORT:
         _armed0, _sum0 = st['armed'], widget.sumAuto
         widget.sumAuto = 0     # no flight summary on the disarm below (the sim never draws it, so it keeps opening)
         st['armed'] = True; step(0.2)
-        for _ in range(_plist_row('AIRSPEED_CRUISE', True, _PL)): KEY('KEY_ROTARY_RIGHT')
+        _goto('AIRSPEED_CRUISE', True)
         for _ in range(40): step(0.2)   # the selected row is read first
         wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
         for _ in range(5): step(0.2)
@@ -1944,7 +1977,7 @@ else:
         assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('saved', _ap.p['AIRSPEED_CRUISE'])
         render('params_saved_%s.png' % tag, 6)
         KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
-        for _ in range(_plist_row('ARMING_SKIPCHK', True, _PL)): KEY('KEY_ROTARY_RIGHT')
+        _goto('ARMING_SKIPCHK', True)
         for _ in range(10): step(0.2)
         wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
         for _ in range(5): step(0.2)
@@ -1965,8 +1998,8 @@ else:
         print('params page S.Port: armed view-only, read, edit, save verified OK')
     if not NATIVE: widget.page = 6   # (the re-arm above can open the flight summary first)
     _pg0 = widget.page
-    _r = wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-    assert widget.page == 1, ('ENTER with no row picked leaves the params page', _pg0, widget.page, _r)
+    _r = wt['event'](widget, consts['EVT_KEY'], consts['KEY_RTN_BREAK' if NEWNAV else 'KEY_ENTER_BREAK'], 0, 0)
+    assert widget.page == 1, ('RTN in the tab column (X18: ENTER, no row) leaves the params page', _pg0, widget.page, _r)
     if widget.apMission != 1:
         # the PARAMS code leaves memory 10 s after the page is left, and comes back when opened
         _mem = lambda: L.eval('function() collectgarbage("collect") return collectgarbage("count") end')()

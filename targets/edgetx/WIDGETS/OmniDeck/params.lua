@@ -718,6 +718,9 @@ end
 
 -- ---------------------------------------------------------------- page state
 local sel, top, grp = 0, 0, nil   -- selected row in vis (0 none), list scroll, group shown
+-- two columns (Marcin 2026-11-15): the cursor is on the tabs (the wheel moves a highlight, nothing
+-- is opened or read until ENTER) or on the open tab's rows (the wheel stays inside that tab)
+local focus, tabCur, lastSel = "tabs", nil, nil
 local bitCur = 1
 local saveReq = nil
 local msgAt = 0
@@ -756,6 +759,7 @@ function P.reset()
   vals, vbytes, out, pend, qOn = {}, {}, {}, nil, nil
   edit, draft, editBase, phase, saveReq = nil, nil, nil, "", nil
   sel, top, grp, link, prev, rxSt = 0, 0, nil, nil, nil, nil
+  focus, tabCur, lastSel = "tabs", nil, nil
   mvSt, mvSkip = 0, 0
   if LIST then rebuild() end
 end
@@ -1206,12 +1210,20 @@ function P.paint(w, W, H, s, u, ctx)
   end
   lcd.font(fMid)
   local _, th = lcd.getTextSize("A")
-  local botH = th + 6
-  local y0, y1 = barH, H - botH
+  lcd.font(fSmall)
+  local _, sh = lcd.getTextSize("A")
+  lcd.font(fMid)
+  -- bottom: a thin hint line; above it, under the rows only, one touch-high row with the row arrows
+  -- and BACK (Marcin 2026-11-15). The tab column runs down to the hint line.
+  local hintH = sh + 6
+  local botH = math.max(th + 10, floor(H * 0.1))
+  local hy = H - hintH
+  local y0, y1 = barH, hy - botH
   -- left: the groups
   local tabW = floor(W * 0.2)
   local cur = vis[sel] and vis[sel][1] or grp or groups[1]
-  local gh = floor((y1 - y0) / math.max(1, #groups))
+  local hiTab = focus == "tabs" and (tabCur or cur) or nil   -- the wheel's highlight on the tabs
+  local gh = floor((hy - y0) / math.max(1, #groups))
   lcd.font(gh < th + 2 and fSmall or fMid)
   local _, gth = lcd.getTextSize("A")
   for i, g in ipairs(groups) do
@@ -1220,24 +1232,30 @@ function P.paint(w, W, H, s, u, ctx)
       lcd.color(C.tile) lcd.drawFilledRectangle(0, gy, tabW, gh)
       lcd.color(C.home) lcd.drawFilledRectangle(0, gy, 3, gh)
     end
-    lcd.color(g == cur and C.txt or C.dim)
+    if g == hiTab then
+      lcd.color(C.home) lcd.drawRectangle(1, gy + 1, tabW - 2, gh - 2)
+      lcd.drawRectangle(2, gy + 2, tabW - 4, gh - 4)
+    end
+    lcd.color((g == cur or g == hiTab) and C.txt or C.dim)
     lcd.drawText(8, gy + floor((gh - gth) / 2), g)
     box("grp", g, 0, gy, tabW, gh)
   end
   lcd.color(C.tile)
-  lcd.drawFilledRectangle(tabW, y0, 1, y1 - y0)
+  lcd.drawFilledRectangle(tabW, y0, 1, hy - y0)
   -- right: the selected group's rows
   lcd.font(fMid)
   local rowH = th + 8
   local rows = {}
   for i, r in ipairs(vis) do if r[1] == cur then rows[#rows + 1] = i end end
   local fit = math.max(1, floor((y1 - y0) / rowH))
+  local hidden = #rows > fit   -- rows that don't all fit: up / down arrows in the bottom row
   local selPos = 0
   for k, i in ipairs(rows) do if i == sel then selPos = k end end
-  if selPos > 0 then
+  if selPos > 0 and sel ~= lastSel then   -- follow the wheel; the arrows move the list freely
     if selPos <= top then top = selPos - 1 end
     if selPos > top + fit then top = selPos - fit end
   end
+  lastSel = sel
   top = math.max(0, math.min(top, #rows - fit))
   shown = {}
   local lx = tabW + 8
@@ -1260,12 +1278,37 @@ function P.paint(w, W, H, s, u, ctx)
     box("row", i, tabW + 1, ry, W - tabW - 1, rowH)
     shown[#shown + 1] = r
   end
-  -- bottom: what the keys do, or the last notice; how far the reading is
-  lcd.color(C.bar)
-  lcd.drawFilledRectangle(0, y1, W, botH)
+  -- bottom row (row column): BACK at the right end; left of it, only when rows are hidden, the up
+  -- (left half) and down (right half) arrows, split like the X18 tab strip, bright while rows are hidden
+  lcd.color(C.bar) lcd.drawFilledRectangle(tabW + 1, y1, W - tabW - 1, botH)
+  local bw = floor(W * 0.16)
+  local bx = W - bw - 4
+  lcd.color(C.tile) lcd.drawFilledRectangle(bx, y1 + 4, bw, botH - 8)
+  lcd.color(C.home) lcd.drawRectangle(bx, y1 + 4, bw, botH - 8)
+  lcd.font(fMid)
+  lcd.drawText(bx + floor(bw / 2), y1 + floor((botH - th) / 2), "< BACK", CENTERED)
+  box("back", 0, bx, y1, bw + 4, botH)
+  if hidden then
+    local rx = tabW + 1
+    local rw = bx - 4 - rx
+    local hw = floor(rw / 2)
+    lcd.color(C.tile)
+    lcd.drawFilledRectangle(rx + hw, y1 + 4, 1, botH - 8)
+    lcd.drawFilledRectangle(bx - 3, y1 + 4, 1, botH - 8)
+    local cy, sz = y1 + floor(botH / 2), math.max(5, floor(botH / 5))
+    local ux, dx = rx + floor(hw / 2), rx + hw + floor(hw / 2)
+    lcd.color(top > 0 and C.txt or C.tile)
+    lcd.drawFilledTriangle(ux - sz, cy + floor(sz / 2), ux, cy - floor(sz / 2), ux + sz, cy + floor(sz / 2))
+    lcd.color(top + fit < #rows and C.txt or C.tile)
+    lcd.drawFilledTriangle(dx - sz, cy - floor(sz / 2), dx, cy + floor(sz / 2), dx + sz, cy - floor(sz / 2))
+    box("rowup", 0, rx, y1, hw, botH)
+    box("rowdn", #rows - fit, rx + hw, y1, rw - hw, botH)   -- i = the largest top
+  end
+  -- hint line: what the keys do, or the last notice; how far the reading is
+  lcd.color(C.bar) lcd.drawFilledRectangle(0, hy, W, hintH)
+  lcd.color(C.tile) lcd.drawFilledRectangle(0, hy, W, 1)
   lcd.font(fSmall)
-  local _, sh = lcd.getTextSize("A")
-  local by = y1 + floor((botH - sh) / 2)
+  local by = hy + floor((hintH - sh) / 2)
   -- the open tab only: the others are read when they are opened
   local got, nTab = 0, 0
   for _, r in ipairs(vis) do
@@ -1276,7 +1319,7 @@ function P.paint(w, W, H, s, u, ctx)
     lcd.drawText(6, by, status)
   else
     lcd.color(C.dim)
-    local hint = sel == 0 and "Wheel: pick a row   ENTER: next page" or "ENTER: edit   RTN: unselect"
+    local hint = focus == "tabs" and "Wheel: pick group   ENTER: open   RTN: next page" or "ENTER: edit   RTN: groups"
     if edit then
       hint = edit[10] == "bits" and "Wheel: move   ENTER: CHECK/SKIP or button   RTN: back"
         or "Wheel: change   ENTER: save   RTN: back"
@@ -1292,7 +1335,7 @@ function P.paint(w, W, H, s, u, ctx)
     lcd.color(C.tile) lcd.drawFilledRectangle(0, y0, W, pbH)
     if got > 0 then lcd.color(C.home) lcd.drawFilledRectangle(0, y0, floor(W * got / nTab), pbH) end
   end
-  if edit then drawEditor(W, H, y0, y1, s, ctx) end
+  if edit then drawEditor(W, H, y0, hy, s, ctx) end
 end
 
 -- ---------------------------------------------------------------- input
@@ -1323,19 +1366,59 @@ local function editKey(s, key)
   return true
 end
 
--- key: "left" | "right" | "enter" | "back"; returns true (used), false (not), or "next" (turn the page)
-function P.key(s, key)
-  if blocked(s) then return key == "enter" and "next" or false end
-  if edit then return editKey(s, key) end
-  -- the wheel keeps the tab it walks into (RTN then stays on it, and that tab is what is read)
-  if key == "right" then sel = math.min(#vis, sel + 1) if vis[sel] then grp = vis[sel][1] end return true end
-  if key == "left" then sel = math.max(0, sel - 1) if vis[sel] then grp = vis[sel][1] end return true end
-  if key == "enter" then
-    if sel == 0 then return "next" end
-    openEdit(s)
+-- the open tab's rows as vis indexes
+local function rowsOf(g)
+  local t = {}
+  for i, r in ipairs(vis) do if r[1] == g then t[#t + 1] = i end end
+  return t
+end
+
+-- open a tab: its rows get the cursor, first row selected (and only now is it read)
+local function openTab(g)
+  grp, tabCur, top = g, g, 0
+  local rs = rowsOf(g)
+  if rs[1] then sel, focus = rs[1], "rows" else sel, focus = 0, "tabs" end
+end
+
+-- RTN / BACK: rows -> the tab column (highlight on the open tab), tab column -> next page
+local function goBack()
+  if focus == "rows" then
+    grp = curGroup()
+    focus, tabCur, sel = "tabs", grp, 0
     return true
   end
-  if key == "back" and sel > 0 then sel = 0 return true end
+  return "next"
+end
+
+-- key: "left" | "right" | "enter" | "back"; returns true (used), false (not), or "next" (turn the page)
+function P.key(s, key)
+  -- "doesn't answer" and the like: ENTER or RTN turns the page
+  if blocked(s) then return (key == "enter" or key == "back") and "next" or false end
+  if edit then return editKey(s, key) end
+  local d = key == "right" and 1 or key == "left" and -1 or 0
+  if focus == "tabs" then
+    -- the wheel only moves the highlight: nothing is opened or read until ENTER
+    local cur = tabCur or curGroup()
+    if d ~= 0 then
+      for i, g in ipairs(groups) do
+        if g == cur then tabCur = groups[math.max(1, math.min(#groups, i + d))] break end
+      end
+      return true
+    end
+    if key == "enter" then openTab(tabCur or curGroup()) return true end
+    if key == "back" then return goBack() end
+    return false
+  end
+  -- rows: the wheel stays inside the open tab
+  if d ~= 0 then
+    local rs = rowsOf(curGroup())
+    for k, i in ipairs(rs) do
+      if i == sel then sel = rs[math.max(1, math.min(#rs, k + d))] break end
+    end
+    return true
+  end
+  if key == "enter" then openEdit(s) return true end
+  if key == "back" then return goBack() end
   return false
 end
 
@@ -1368,13 +1451,12 @@ function P.tap(s, x, y)
     return true
   end
   if not b then return "next" end
-  if b.k == "grp" then
-    grp = b.i
-    sel, top = 0, 0
-    return true
-  end
+  if b.k == "back" then return goBack() end
+  if b.k == "rowup" then top = math.max(0, top - 1) return true end
+  if b.k == "rowdn" then top = math.min(b.i, top + 1) return true end
+  if b.k == "grp" then openTab(b.i) return true end
   if b.k == "row" then
-    sel = b.i
+    sel, focus, grp, tabCur = b.i, "rows", vis[b.i][1], vis[b.i][1]
     openEdit(s)
     return true
   end
@@ -1386,6 +1468,9 @@ function P.phase() return phase end
 function P.valueOf(name) return vals[name] end   -- test harness
 function P._draft() return draft, editBase, edit and edit[2] end
 function P._tab() return curGroup() end   -- test harness
+function P._focus() return focus end   -- test harness
+function P._hi() return focus == "tabs" and (tabCur or curGroup()) or nil end   -- test harness
+function P._row() return vis[sel] and vis[sel][2] or nil end   -- test harness
 
 -- sensor check page line
 local function pendName()

@@ -105,6 +105,50 @@ def read_tabs(per_tab=60):
         open_tab(tab)
         wait_tab(tab, per_tab)
 
+# X20 / EdgeTX (Marcin 2026-11-15): two columns. The wheel on the tabs only moves a highlight; ENTER
+# opens the tab and puts the cursor on its first row; the wheel then stays in that tab; RTN goes back
+# to the tabs, and RTN on the tabs turns the page. The X18 keeps the one-list walk for now.
+NEW = True   # all three targets since 0.4.0f (Marcin 2026-11-15)
+def to_tabs(p=None):
+    p = p or P
+    if p.editing(): p.key(S, 'back')
+    if p._focus() == 'rows': p.key(S, 'back')
+def hi_tabs(p=None):
+    """the tab names, walked with the highlight (nothing opened)"""
+    p = p or P
+    to_tabs(p)
+    for _ in range(60): p.key(S, 'left')
+    seen = [p._hi()]
+    for _ in range(60):
+        p.key(S, 'right')
+        if p._hi() == seen[-1]: break
+        seen.append(p._hi())
+    return seen
+def hi_to(tab, p=None):
+    p = p or P
+    to_tabs(p)
+    for _ in range(60): p.key(S, 'left')
+    for _ in range(60):
+        if p._hi() == tab: return True
+        h = p._hi(); p.key(S, 'right')
+        if p._hi() == h: return False
+    return False
+def tab_rows(p=None):
+    """the open tab's rows, walked with the wheel from the first one"""
+    p = p or P
+    seen = [p._row()]
+    for _ in range(120):
+        p.key(S, 'right')
+        if p._row() == seen[-1]: break
+        seen.append(p._row())
+    for _ in range(120): p.key(S, 'left')
+    return seen
+if NEW:
+    def tab_names(): return hi_tabs()
+    def open_tab(tab):
+        """highlight a tab, ENTER (opened, read), RTN: the page stays on that tab"""
+        hi_to(tab); P.key(S, 'enter'); P.key(S, 'back')
+
 # 2 Q_ENABLE then the list reads; missing params become n/a without hanging
 state['busy'] = True
 run(40)
@@ -119,8 +163,22 @@ check('idle after reading the whole list', 'idle' in dbg)
 
 # AIRSPEED_CRUISE (TECS tab): its row number in the list (all rows shown: Q_ENABLE 1)
 CRUISE_ROW = [L.eval('function(L, i) return L[i][2] end')(LIST, i) for i in range(1, len(LIST) + 1)].index('AIRSPEED_CRUISE') + 1
-check('ENTER with nothing selected turns the page', P.key(S, 'enter') == 'next')
-for _ in range(CRUISE_ROW): P.key(S, 'right')   # the wheel walks the rows to AIRSPEED_CRUISE
+if not NEW:
+    check('ENTER with nothing selected turns the page', P.key(S, 'enter') == 'next')
+    for _ in range(CRUISE_ROW): P.key(S, 'right')   # the wheel walks the rows to AIRSPEED_CRUISE
+else:
+    hi_to('FLIGHT'); P.key(S, 'enter'); P.key(S, 'back')
+    check('RTN in the rows: back to the tab column, highlight on the open tab', P._focus() == 'tabs' and P._hi() == 'FLIGHT')
+    hi_to('TECS')
+    check('wheel on the tabs: highlight moves, FLIGHT stays open', P._hi() == 'TECS' and P._tab() == 'FLIGHT')
+    check('RTN in the tab column turns the page', P.key(S, 'back') == 'next' and P._focus() == 'tabs')
+    P.key(S, 'enter')
+    check('ENTER on a tab: opens it, cursor on its first row', P._focus() == 'rows' and P._tab() == 'TECS' and P._row() == rows_of('TECS')[0])
+    for _ in range(80): P.key(S, 'right')
+    check('wheel in the rows stays inside the open tab', P._tab() == 'TECS' and P._row() == rows_of('TECS')[-1])
+    for _ in range(80): P.key(S, 'left')
+    for _ in range(rows_of('TECS').index('AIRSPEED_CRUISE')): P.key(S, 'right')
+    check('wheel walks to AIRSPEED_CRUISE inside TECS', P._row() == 'AIRSPEED_CRUISE')
 check('ENTER opens the editor', P.key(S, 'enter') is True)
 run(2)
 for _ in range(4): P.key(S, 'right')       # +4 x 0.5 = 20.0
@@ -154,6 +212,21 @@ def goto(name):
     for _ in range(100): P.key(S, 'left')
     for _ in range(names.index(name) + 1): P.key(S, 'right')
     run(2)
+def goto_new(name, p=None):
+    """highlight the row's tab, ENTER, wheel to the row; False when the row isn't shown"""
+    p = p or P
+    tab = next((t for t, ns in TAB_OF.items() if name in ns), None) if TAB_OF or rows_of('FLIGHT') else None
+    if tab is None or not hi_to(tab, p): return False
+    p.key(S, 'enter')
+    for _ in range(120):
+        if p._row() == name: return True
+        r = p._row(); p.key(S, 'right')
+        if p._row() == r: return False
+    return False
+if NEW:
+    def goto(name):
+        assert goto_new(name), name
+        run(2)
 goto('RLL_RATE_P'); P.key(S, 'enter'); run(2)
 P.key(S, 'right'); P.key(S, 'right'); P.key(S, 'enter'); run(3)
 check('RLL_RATE_P 0.080 -> 0.090 (two steps of 0.005)', abs(ap.p['RLL_RATE_P'] - 0.09) < 1e-6)
@@ -263,10 +336,15 @@ LIST = LIST2; TAB_OF.clear()   # the helpers walk P2's tabs (OTHER and NAV from 
 read_tabs()
 check('free row read: EXTRA_TOP auto step 0.0001 (about 1 % of 0.0123)', abs(rows['EXTRA_TOP'][7] - 0.0001) < 1e-12 and rows['EXTRA_TOP'][8] == 4)
 check('free whole-number row: WP_RADIUS step 1', rows['WP_RADIUS'][7] == 1)
-P2.key(S, 'back')
-for _ in range(200): P2.key(S, 'left')
 seen = []
-for _ in range(120):
+if NEW:
+    for tab in hi_tabs(P2):
+        hi_to(tab, P2); P2.key(S, 'enter')
+        seen += [n for n in tab_rows(P2) if P2.valueOf(n) not in (None, False)]   # (n/a rows open no editor)
+else:
+  P2.key(S, 'back')
+  for _ in range(200): P2.key(S, 'left')
+  for _ in range(120):
     P2.key(S, 'right'); P2.key(S, 'enter')
     if P2.editing():
         nm = P2._draft()[2]
@@ -284,6 +362,8 @@ def goto2(name):
         if P2.editing(): P2.key(S, 'back')
         if cur == name: return True
     return False
+if NEW:
+    def goto2(name): return goto_new(name, P2)
 P2.flightEdit = True
 S.armed = True
 assert goto2('YAW_RATE_P'); P2.key(S, 'enter'); run(2); P2.key(S, 'right'); P2.key(S, 'enter'); run(3)
@@ -352,17 +432,23 @@ _hb = [(c, d) for c, d in crsf_frames if c == 0xAA]
 check('CRSF: every request is one 0x80 frame C8 EA F4 len msgid ...', _req and all(c == 0x80 and d[:3] == [0xC8, 0xEA, 0xF4] and d[3] == len(d) - 5 for c, d in _req))
 check('CRSF: a GCS HEARTBEAT in an mLRS bridge frame every 2 s (wakes cbridge; %d)' % len(_hb), len(_hb) >= 10 and all(d[2] == 0xFD and d[9] == 0 for c, d in _hb))
 check('CRSF: all rows read (idle, no bad frames)', 'idle' in P3.debug() and P3.stats.bad == 0)
-P3.key(SC, 'back')
-for _ in range(100): P3.key(SC, 'left')
-_qrows = sum(1 for i in range(1, CRUISE_ROW) if L.eval('function(L, i) return L[i][10] end')(LIST3, i) == 'q')
-for _ in range(CRUISE_ROW - _qrows): P3.key(SC, 'right')     # (Q rows hidden: Q_ENABLE 0)
+if NEW:
+    assert goto_new('AIRSPEED_CRUISE', P3)
+else:
+    P3.key(SC, 'back')
+    for _ in range(100): P3.key(SC, 'left')
+    _qrows = sum(1 for i in range(1, CRUISE_ROW) if L.eval('function(L, i) return L[i][10] end')(LIST3, i) == 'q')
+    for _ in range(CRUISE_ROW - _qrows): P3.key(SC, 'right')     # (Q rows hidden: Q_ENABLE 0)
 runc(3)                       # its tab (TECS) is read now, the selected row first
 P3.key(SC, 'enter'); runc(2)
 b0 = ap.p['AIRSPEED_CRUISE']
 P3.key(SC, 'right'); P3.key(SC, 'enter'); runc(3)
 check('CRSF: save AIRSPEED_CRUISE +0.5, "Saved and verified"', abs(ap.p['AIRSPEED_CRUISE'] - (b0 + 0.5)) < 1e-6 and P3.phase() == 'Saved and verified')
 P3.key(SC, 'back'); P3.key(SC, 'back')
-check('CRSF: ENTER with no row picked turns the page', P3.key(SC, 'enter') == 'next')
+if NEW:
+    check('CRSF: RTN twice from the rows turns the page', P3._focus() == 'tabs' and P3.key(SC, 'back') == 'next')
+else:
+    check('CRSF: ENTER with no row picked turns the page', P3.key(SC, 'enter') == 'next')
 # a flight controller that never answers (upstream ArduPilot over ELRS, mLRS, ELRS MAVLink mode)
 crsf_frames.clear()
 fc.answer = False
@@ -515,12 +601,15 @@ def _lossy_run(transport):
             ap.texts.clear()
             Px.wakeup(Sx)
     tab = next(tb for tb in TAB_OF if 'AIRSPEED_CRUISE' in TAB_OF[tb])
-    Px.key(Sx, 'back')
-    for _ in range(200): Px.key(Sx, 'left')
-    for _ in range(200):
-        Px.key(Sx, 'right')
-        if Px._tab() == tab: break
-    Px.key(Sx, 'back')
+    if NEW:
+        hi_to(tab, Px); Px.key(Sx, 'enter'); Px.key(Sx, 'back')
+    else:
+        Px.key(Sx, 'back')
+        for _ in range(200): Px.key(Sx, 'left')
+        for _ in range(200):
+            Px.key(Sx, 'right')
+            if Px._tab() == tab: break
+        Px.key(Sx, 'back')
     have = [n for n in rows_of(tab) if n in ap.p]
     none = [n for n in rows_of(tab) if n not in ap.p]
     t0 = state['t']

@@ -806,6 +806,26 @@ def _plist_row(name, qon, path):
         if m.group(1) == name: return n
     raise KeyError(name)
 _PL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'targets', 'edgetx', 'WIDGETS', 'OmniDeck', 'plist.lua')
+
+def _plist_pos(name, qon, path):
+    # (tab number, row in that tab), both 0-based, on the two-column PARAMS page (X20 / EdgeTX)
+    import re as _re
+    tabs, rows = [], {}
+    for _l in open(path, encoding='utf-8'):
+        m = _re.match(r'\s*\{ "([^"]+)", "([A-Z0-9_]+)"', _l)
+        if not m: continue
+        if not qon and '"q" }' in _l: continue
+        if m.group(1) not in rows: tabs.append(m.group(1)); rows[m.group(1)] = []
+        rows[m.group(1)].append(m.group(2))
+        if m.group(2) == name: return tabs.index(m.group(1)), rows[m.group(1)].index(name)
+    raise KeyError(name)
+def _goto(name, qon):
+    # tab column: wheel the highlight to the tab (nothing opens), ENTER = open it, cursor on its first row; wheel to the row
+    t, r = _plist_pos(name, qon, _PL)
+    for _ in range(20): frame(G.EVT_VIRTUAL_PREV)
+    for _ in range(t): frame(G.EVT_VIRTUAL_NEXT)
+    frame(G.EVT_VIRTUAL_ENTER)
+    for _ in range(r): frame(G.EVT_VIRTUAL_NEXT)
 _ap = FakeAP({'Q_ENABLE': 0.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
               'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
               'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'RLL_RATE_P': 0.08}, dup=True)
@@ -836,8 +856,19 @@ else:
         _ap_pump(); step(0.05)
     _ap_pump(); frame()
     render('etx_params_%s.png' % tag, 6)
+    # two columns (Marcin 2026-11-15): the wheel on the tabs moves a highlight only
+    for _ in range(_plist_pos('TECS_CLMB_MAX', False, _PL)[0]): frame(G.EVT_VIRTUAL_NEXT)
+    for _ in range(10): _ap_pump(); step(0.05)
+    _ap_pump(); frame()
+    render('etx_params_tabhi_%s.png' % tag, 6)      # TECS highlighted, FLIGHT still open
+    frame(G.EVT_VIRTUAL_ENTER)                        # open TECS: first row selected, arrow strip (TECS doesn't fit)
+    for _ in range(60): _ap_pump(); step(0.05)
+    for _ in range(20): frame(G.EVT_VIRTUAL_NEXT)     # the wheel stops at the last TECS row
+    _ap_pump(); frame()
+    render('etx_params_tecs_%s.png' % tag, 6)
+    frame(G.EVT_VIRTUAL_EXIT)                         # rows -> tab column
     if SPORT:
-        for _ in range(_plist_row('AIRSPEED_CRUISE', False, _PL)): frame(G.EVT_VIRTUAL_NEXT)
+        _goto('AIRSPEED_CRUISE', False)
         for _ in range(60): _ap_pump(); step(0.05)   # the selected row is read first
         frame(G.EVT_VIRTUAL_ENTER)         # editor
         for _ in range(20): _ap_pump(); step(0.05)
@@ -847,8 +878,8 @@ else:
         for _ in range(60): _ap_pump(); step(0.05)
         assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('saved', _ap.p['AIRSPEED_CRUISE'])
         render('etx_params_saved_%s.png' % tag, 6)
-        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
-        for _ in range(_plist_row('ARMING_SKIPCHK', False, _PL)): frame(G.EVT_VIRTUAL_NEXT)   # (Q rows hidden: Q_ENABLE 0)
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)   # editor closed, rows -> tab column
+        _goto('ARMING_SKIPCHK', False)                          # (Q rows hidden: Q_ENABLE 0)
         for _ in range(30): _ap_pump(); step(0.05)
         frame(G.EVT_VIRTUAL_ENTER)
         for _ in range(20): _ap_pump(); step(0.05)
@@ -865,8 +896,8 @@ else:
         print('ARMING_SKIPCHK All off: -1 saved and verified')
         frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
         print('params page S.Port: read, edit, save verified OK')
-    frame(G.EVT_VIRTUAL_ENTER)
-    assert wd.page == 1, 'ENTER with no row picked leaves the params page, page %s' % wd.page
+    frame(G.EVT_VIRTUAL_EXIT)
+    assert wd.page == 1, 'RTN in the tab column leaves the params page, page %s' % wd.page
     if wd.apMission != 1:
         # the PARAMS code leaves memory 10 s after the page is left, and comes back when opened
         _memf = L.eval('function() collectgarbage("collect") return collectgarbage("count") end')
