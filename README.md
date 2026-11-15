@@ -13,6 +13,8 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 **Status:** 0.3.0, public beta. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
 
+**Chat:** questions, ideas and flight reports on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
+
 ## Contents
 
 - [What it does](#what-it-does)
@@ -434,7 +436,7 @@ One tile: `/IMAGES/ethosmaps/maps/GOOGLE/Satellite/15/27470/15200.jpg`. In OmniD
 
 ## Reporting a problem
 
-Please send the radio model and its Ethos or EdgeTX version, the flight controller and its version, the link, and a photo of the **Sensor check** page. For a script error, send the exact text.
+Post it on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp) with the radio model and its Ethos or EdgeTX version, the flight controller and its version, the link, and a photo of the **Sensor check** page. For a script error, send the exact text.
 
 - **No telemetry on INAV or Betaflight:** discover the sensors again on the radio with the aircraft powered.
 - **Horizon level on INAV over S.Port or F.Port:** turn on **Use Pitch & Roll sensors in telemetry** in INAV.
