@@ -14,9 +14,42 @@ local T, MAP, TL, MI, MSPC, AU = UI.T, UI.MAP, UI.TL, UI.MI, UI.MSPC, UI.AU
 
 -- ---------------------------------------------------------------- settings
 local function configure(w)
+  -- form order only (grouped 0.4.0e); what is saved and in which order is SETTINGS below
   local line = form.addLine("Telemetry link")
   form.addChoiceField(line, nil, { { "Auto", T.LINK_AUTO }, { "CRSF / ELRS / mLRS", T.LINK_CRSF }, { "S.Port / F.Port / FBUS", T.LINK_SPORT } },
     function() return w.linkMode end, function(v) w.linkMode = v end)
+  -- units
+  line = form.addLine("Speed units")
+  form.addChoiceField(line, nil, { { "km/h", 0 }, { "m/s", 1 }, { "knots", 2 }, { "mph", 3 } },
+    function() return w.spdUnit end, function(v) w.spdUnit = v end)
+  line = form.addLine("Altitude units")
+  form.addChoiceField(line, nil, { { "metres", 0 }, { "feet", 1 } },
+    function() return w.altUnit end, function(v) w.altUnit = v end)
+  line = form.addLine("Efficiency units")
+  form.addChoiceField(line, nil, { { "Wh/km", 0 }, { "mAh/km", 1 }, { "Wh/mi", 2 }, { "mAh/mi", 3 } },
+    function() return w.effUnit end, function(v) w.effUnit = v end)
+  -- main page
+  line = form.addLine("Start page")
+  form.addChoiceField(line, nil, { { "Main", 1 }, { "Map", 2 } },
+    function() return w.startPage end, function(v) w.startPage = v end)
+  -- the panel at the top right of the main page, above the data blocks (test42)
+  line = form.addLine("Main page top-right panel")
+  form.addChoiceField(line, nil, { { "Minimap", 0 }, { "Home arrow", 1 }, { "Radar", 2 }, { "OmniDeck logo", 3 },
+    { "Logo file (below)", 4 } },
+    function() return w.topPanel end, function(v) w.topPanel = v end)
+  -- the logo for panel choice "Logo file": any PNG in /scripts/omnideck/logos/ (bigger ones
+  -- are scaled down to the panel, smaller ones are not enlarged)
+  local logos = UI.logoFiles()
+  local lchoices = { { "None", 0 } }
+  for i, n in ipairs(logos) do lchoices[#lchoices + 1] = { n, i } end
+  line = form.addLine("Logo file")
+  form.addChoiceField(line, nil, lchoices,
+    function()
+      for i, n in ipairs(logos) do if n == w.logoFile then return i end end
+      return 0
+    end,
+    function(v) w.logoFile = (v > 0 and logos[v]) or "" end)
+  -- map page
   line = form.addLine("Map orientation")
   form.addChoiceField(line, nil, { { "North up", 0 }, { "Heading up", 1 } },
     function() return w.orient end, function(v) w.orient = v end)
@@ -40,6 +73,14 @@ local function configure(w)
       w.tz = nil
       TL.clear()
     end)
+  line = form.addLine("Flight trail")
+  form.addChoiceField(line, nil, { { "On", 1 }, { "Off", 0 } },
+    function() return w.trail end, function(v) w.trail = v end)
+  if form.addTextButton then
+    line = form.addLine("Clear trail + learned WPs")
+    form.addTextButton(line, nil, "Clear", function() MAP.resetTrail() MI.clearLearned() return true end)
+  end
+  -- missions on the map
   -- ArduPilot mission file (Mission Planner .waypoints in /scripts/omnideck/missions/)
   local files = MI.listFiles()
   local fchoices = { { "None (learn from telemetry)", 0 } }
@@ -54,6 +95,10 @@ local function configure(w)
       w.missionFile = (v > 0 and files[v]) or ""
       MI.loadFile(w.missionFile)
     end)
+  -- Stratos firmware: the whole mission over MAVlite onto the map (S.Port, F.Port, ELRS, Crossfire)
+  line = form.addLine("ArduPilot mission download")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.apMission end, function(v) w.apMission = v end)
   line = form.addLine("INAV mission download")
   form.addChoiceField(line, nil, { { "On", 1 }, { "Off", 0 } },
     function() return w.inavWp end, function(v) w.inavWp = v if v == 0 then MI.setInav(nil) end end)
@@ -61,18 +106,28 @@ local function configure(w)
     line = form.addLine("Re-download INAV mission")
     form.addTextButton(line, nil, "Reload", function() MSPC.restart() MI.setInav(nil) w.inavWpN = nil return true end)
   end
-  line = form.addLine("Speed units")
-  form.addChoiceField(line, nil, { { "km/h", 0 }, { "m/s", 1 }, { "knots", 2 }, { "mph", 3 } },
-    function() return w.spdUnit end, function(v) w.spdUnit = v end)
-  line = form.addLine("Altitude units")
-  form.addChoiceField(line, nil, { { "metres", 0 }, { "feet", 1 } },
-    function() return w.altUnit end, function(v) w.altUnit = v end)
-  line = form.addLine("Efficiency units")
-  form.addChoiceField(line, nil, { { "Wh/km", 0 }, { "mAh/km", 1 }, { "Wh/mi", 2 }, { "mAh/mi", 3 } },
-    function() return w.effUnit end, function(v) w.effUnit = v end)
-  line = form.addLine("Flight trail")
+  -- the pages a tap cycles through (test42); the flight summary still opens on disarm
+  line = form.addLine("Messages page")
+  form.addChoiceField(line, nil, { { "Auto (ArduPilot only)", 0 }, { "On", 1 }, { "Off", 2 } },
+    function() return w.msgPage end, function(v) w.msgPage = v end)
+  line = form.addLine("Flight stats page")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.statsPage end, function(v) w.statsPage = v end)
+  line = form.addLine("Flight summary on disarm")
   form.addChoiceField(line, nil, { { "On", 1 }, { "Off", 0 } },
-    function() return w.trail end, function(v) w.trail = v end)
+    function() return w.sumAuto end, function(v) w.sumAuto = v end)
+  line = form.addLine("Sensor check page")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.checkPage end, function(v) w.checkPage = v end)
+  -- ArduPlane parameters (ArduPilot only)
+  line = form.addLine("ArduPilot params page")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
+    function() return w.paramsPage end, function(v) w.paramsPage = v end)
+  -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
+  line = form.addLine("ArduPilot params: edit in flight")
+  form.addChoiceField(line, nil, { { "Off", 0 }, { "Gains and trim", 1 } },
+    function() return w.flightEdit end, function(v) w.flightEdit = v end)
+  -- voice and alarms
   -- voice packs found in /scripts/omnideck/audio/
   local packs = AU.packs()
   local vchoices = { { "Off", 0 } }
@@ -88,9 +143,13 @@ local function configure(w)
       AU.setVoice(w.voice)
       AU.test()
     end)
+  line = form.addLine("Message beep")
+  form.addChoiceField(line, nil, { { "Every message", 1 }, { "Warnings and errors", 2 }, { "Off", 0 } },
+    function() return w.beep end, function(v) w.beep = v AU.setBeep(v) end)
   line = form.addLine("Battery mAh (INAV/BF only)")
   form.addNumberField(line, nil, 0, 50000, function() return w.batCap end, function(v) w.batCap = v end)
-  -- alarms (0 = off)
+  line = form.addLine("Battery cells (0 = auto)")
+  form.addNumberField(line, nil, 0, 14, function() return w.cells end, function(v) w.cells = v end)
   line = form.addLine("Low voltage alarm (V per cell, 0 = off)")
   local fv = form.addNumberField(line, nil, 0, 450, function() return w.lowVolt end, function(v) w.lowVolt = v end)
   pcall(function() fv:decimals(2) end)
@@ -99,63 +158,9 @@ local function configure(w)
   local fc = form.addNumberField(line, nil, 0, 450, function() return w.critVolt end, function(v) w.critVolt = v end)
   pcall(function() fc:decimals(2) end)
   pcall(function() fc:suffix("V") end)
-  line = form.addLine("Battery cells (0 = auto)")
-  form.addNumberField(line, nil, 0, 14, function() return w.cells end, function(v) w.cells = v end)
   line = form.addLine("Low altitude alarm: Terrain, pull up (0 = off)")
   local fa = form.addNumberField(line, nil, 0, 3000, function() return w.lowAlt end, function(v) w.lowAlt = v end)
   pcall(function() fa:suffix(w.altUnit == 1 and "ft" or "m") end)
-  line = form.addLine("Message beep")
-  form.addChoiceField(line, nil, { { "Every message", 1 }, { "Warnings and errors", 2 }, { "Off", 0 } },
-    function() return w.beep end, function(v) w.beep = v AU.setBeep(v) end)
-  line = form.addLine("Flight summary on disarm")
-  form.addChoiceField(line, nil, { { "On", 1 }, { "Off", 0 } },
-    function() return w.sumAuto end, function(v) w.sumAuto = v end)
-  line = form.addLine("Start page")
-  form.addChoiceField(line, nil, { { "Main", 1 }, { "Map", 2 } },
-    function() return w.startPage end, function(v) w.startPage = v end)
-  -- the panel at the top right of the main page, above the data blocks (test42)
-  line = form.addLine("Main page top-right panel")
-  form.addChoiceField(line, nil, { { "Minimap", 0 }, { "Home arrow", 1 }, { "Radar", 2 }, { "OmniDeck logo", 3 },
-    { "Logo file (below)", 4 } },
-    function() return w.topPanel end, function(v) w.topPanel = v end)
-  -- the logo for panel choice "Logo file": any PNG in /scripts/omnideck/logos/ (bigger ones
-  -- are scaled down to the panel, smaller ones are not enlarged)
-  local logos = UI.logoFiles()
-  local lchoices = { { "None", 0 } }
-  for i, n in ipairs(logos) do lchoices[#lchoices + 1] = { n, i } end
-  line = form.addLine("Logo file")
-  form.addChoiceField(line, nil, lchoices,
-    function()
-      for i, n in ipairs(logos) do if n == w.logoFile then return i end end
-      return 0
-    end,
-    function(v) w.logoFile = (v > 0 and logos[v]) or "" end)
-  -- the pages a tap cycles through (test42); the flight summary still opens on disarm
-  line = form.addLine("Messages page")
-  form.addChoiceField(line, nil, { { "Auto (ArduPilot only)", 0 }, { "On", 1 }, { "Off", 2 } },
-    function() return w.msgPage end, function(v) w.msgPage = v end)
-  line = form.addLine("Flight stats page")
-  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
-    function() return w.statsPage end, function(v) w.statsPage = v end)
-  line = form.addLine("Sensor check page")
-  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
-    function() return w.checkPage end, function(v) w.checkPage = v end)
-  -- ArduPlane parameters over S.Port / F.Port (ArduPilot only)
-  line = form.addLine("ArduPilot params page")
-  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
-    function() return w.paramsPage end, function(v) w.paramsPage = v end)
-  -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
-  -- Stratos firmware: the whole mission over MAVlite onto the map (S.Port, F.Port, ELRS, Crossfire)
-  line = form.addLine("ArduPilot mission download")
-  form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
-    function() return w.apMission end, function(v) w.apMission = v end)
-  line = form.addLine("ArduPilot params: edit in flight")
-  form.addChoiceField(line, nil, { { "Off", 0 }, { "Gains and trim", 1 } },
-    function() return w.flightEdit end, function(v) w.flightEdit = v end)
-  if form.addTextButton then
-    line = form.addLine("Clear trail + learned WPs")
-    form.addTextButton(line, nil, "Clear", function() MAP.resetTrail() MI.clearLearned() return true end)
-  end
   form.addLine("OmniDeck " .. VERSION)
 end
 

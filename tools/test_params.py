@@ -171,7 +171,7 @@ P.key(S, 'back')
 goto('ARMING_SKIPCHK'); P.key(S, 'enter'); run(2)
 P.key(S, 'right'); P.key(S, 'right')     # cursor on bit 3 GPS lock... (cursor starts at 1 = Barometer)
 P.key(S, 'enter')                         # toggle GPS lock (bit 3)
-for _ in range(18 - 3 + 3): P.key(S, 'right')   # to "Save" (18 checks, All on, Back, Save)
+for _ in range(18 - 3 + 4): P.key(S, 'right')   # to "Save" (18 checks, All on, All off, Back, Save)
 P.key(S, 'enter'); run(3)
 check('ARMING_SKIPCHK GPS lock skipped = 8', ap.p['ARMING_SKIPCHK'] == 8.0)
 P.key(S, 'back')
@@ -490,6 +490,56 @@ for transport in ('sport', 'crsf'):
     check('%s: VTOL mission "Sent and verified" (%s)' % (transport, Pm.sendState.msg), Pm.sendState.state == 'done')
     check('%s: aircraft has VTOL takeoff, transition 4, WP, transition 3, VTOL land' % transport,
           [x[0] for x in ap.mission[1:]] == [84, 3000, 16, 3000, 85] and ap.mission[2][5] == 4 and ap.mission[4][5] == 3)
+
+# 10 lost answers (Marcin X18 + ELRS 2026-11-15: most rows n/a until tapped): each parameter's first
+# two answers are lost, more than one round of READ_TRIES. Over ELRS / Crossfire on the X18 the rows
+# must fill in by themselves (EdgeTX / X20 unchanged); S.Port / F.Port is left as it was (n/a until tapped). A name the FC doesn't have goes
+# n/a on both (its "failed" text).
+def _lossy_run(transport):
+    lost = {}
+    def lossy_reply(name, orig):
+        lost[name] = lost.get(name, 0) + 1
+        if lost[name] > 2: orig(name)
+    sp0, cr0 = ap.reply, fc.reply
+    ap.reply = lambda name: lossy_reply(name, sp0)
+    fc.reply = lambda name: lossy_reply(name, cr0)
+    ap.p['Q_ENABLE'] = 1.0
+    Px = L.execute(open(os.path.join(DIR, 'params.lua'), encoding='utf-8').read())
+    Px.init(T, L.execute(open(os.path.join(DIR, 'plist.lua'), encoding='utf-8').read()))
+    Sx = L.eval('{ fc = "ArduPilot", link = "%s", armed = false, msgs = {} }' % ('CRSF' if transport == 'crsf' else 'S.Port'))
+    def runx(sec, dt=0.05):
+        for _ in range(int(sec / dt)):
+            state['t'] += dt
+            while fc.replies: T.onMavlite(L.table_from(fc.replies.pop(0)))
+            for tx in ap.texts: L.eval('function(s, t) s.msgs[#s.msgs+1] = { text = t, sev = 4 } end')(Sx, tx)
+            ap.texts.clear()
+            Px.wakeup(Sx)
+    tab = next(tb for tb in TAB_OF if 'AIRSPEED_CRUISE' in TAB_OF[tb])
+    Px.key(Sx, 'back')
+    for _ in range(200): Px.key(Sx, 'left')
+    for _ in range(200):
+        Px.key(Sx, 'right')
+        if Px._tab() == tab: break
+    Px.key(Sx, 'back')
+    have = [n for n in rows_of(tab) if n in ap.p]
+    none = [n for n in rows_of(tab) if n not in ap.p]
+    t0 = state['t']
+    for _ in range(60):
+        runx(1)
+        if all(Px.valueOf(n) is not None for n in have + none): break
+    ap.reply, fc.reply = sp0, cr0
+    return tab, have, none, Px, state['t'] - t0
+tab, have, none, Px, dt = _lossy_run('crsf')
+if tgt == 'x18':   # the fix is in the X18 copy only (user 2026-11-15); EdgeTX and X20 as before
+    check('ELRS lost answers: %s rows the FC has all read without a tap (%s, %.0f s)' % (tab, ', '.join(have), dt),
+          all(Px.valueOf(n) not in (None, False) for n in have))
+else:
+    check('ELRS unchanged on %s: lost answers still end as n/a (%s)' % (tgt, ', '.join(have)),
+          all(Px.valueOf(n) is False for n in have))
+check('ELRS lost answers: rows the FC lacks are n/a (%d)' % len(none), all(Px.valueOf(n) is False for n in none))
+tab, have, none, Px, dt = _lossy_run('sport')
+check('S.Port unchanged: lost answers still end as n/a (%s)' % ', '.join(have), all(Px.valueOf(n) is False for n in have))
+check('S.Port: rows the FC lacks are n/a (%d)' % len(none), all(Px.valueOf(n) is False for n in none))
 
 print('\n%s: %d failed' % (tgt + (' lua54' if '--lua54' in sys.argv else ' lua52'), len(fails)))
 sys.exit(1 if fails else 0)

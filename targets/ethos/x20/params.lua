@@ -1130,10 +1130,11 @@ local function drawEditor(W, H, y0, y1, s, ctx)
     local cur = draft
     lcd.color(cur == 0 and C.ok or cur == -1 and C.bad or C.warn)
     lcd.drawText(bx + bw / 2, by + 4, fmtVal(r, cur), CENTERED)
-    lcd.font(fSmall)
-    local _, sh = lcd.getTextSize("A")
     local gy, gh = by + th + 10, stY - (by + th + 10) - 2
     local rows = math.ceil(#BITS / 2)
+    -- the checks in the mid font (one size up) when the rows have room, else the small one
+    lcd.font(th + 2 <= floor(gh / rows) and fMid or fSmall)
+    local _, sh = lcd.getTextSize("A")
     local rh = math.max(sh, floor(gh / rows))
     local cw = floor((bw - 24) / 2)
     for i, b in ipairs(BITS) do
@@ -1172,7 +1173,7 @@ local function drawEditor(W, H, y0, y1, s, ctx)
   lcd.color(col)
   lcd.drawText(bx + bw / 2, stY, phase, CENTERED)
   -- buttons: wheel + ENTER walk them on the check list (cursor past the 18 checks)
-  local labels = r[10] == "bits" and { "All on", "Back", "Save" } or { "-", "+", "Back", "Save" }
+  local labels = r[10] == "bits" and { "All on", "All off", "Back", "Save" } or { "-", "+", "Back", "Save" }
   local n = #labels
   local gap = 8
   local w1 = floor((bw - 16 - gap * (n - 1)) / n)
@@ -1295,7 +1296,7 @@ function P.paint(w, W, H, s, u, ctx)
 end
 
 -- ---------------------------------------------------------------- input
-local function bitsMax() return #BITS + 3 end
+local function bitsMax() return #BITS + 4 end
 
 local function editKey(s, key)
   local bits = edit[10] == "bits"
@@ -1311,7 +1312,8 @@ local function editKey(s, key)
     elseif key == "enter" then
       if bitCur <= #BITS then toggleBit(bitCur)
       elseif bitCur == #BITS + 1 then draft, phase = 0, ""
-      elseif bitCur == #BITS + 2 then edit = nil
+      elseif bitCur == #BITS + 2 then draft, phase = -1, ""   -- All off: ArduPilot's -1 skips every check
+      elseif bitCur == #BITS + 3 then edit = nil
       else save(s) end
     end
     return true
@@ -1359,6 +1361,7 @@ function P.tap(s, x, y)
     elseif b.k == "btn" then
       if b.i == "-" then nudge(-1) elseif b.i == "+" then nudge(1)
       elseif b.i == "All on" then draft, phase = 0, ""
+      elseif b.i == "All off" then draft, phase = -1, ""
       elseif b.i == "Back" then edit = nil
       elseif b.i == "Save" then save(s) end
     end

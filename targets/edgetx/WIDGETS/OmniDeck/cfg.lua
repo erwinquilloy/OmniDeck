@@ -12,12 +12,19 @@ local DIR = "/WIDGETS/OmniDeck/"
 
 -- key, label, then either a list of { value, name } choices or { min, max, step, unit, scale }
 C.ITEMS = {
+  -- list order only (grouped 0.4.0e); the file is key=value, so the order of the lines doesn't matter
   { "linkMode", "Telemetry link", { { 0, "Auto" }, { 1, "CRSF / ELRS / mLRS" }, { 2, "S.Port / F.Port / FBUS" } } },
-  { "voice", "Voice", "packs" },
-  { "beep", "Message beep", { { 1, "Every message" }, { 2, "Warnings and errors" }, { 0, "Off" } } },
+  -- units
   { "spdUnit", "Speed units", { { 0, "km/h" }, { 1, "m/s" }, { 2, "knots" }, { 3, "mph" } } },
   { "altUnit", "Altitude units", { { 0, "metres" }, { 1, "feet" } } },
   { "effUnit", "Efficiency units", { { 0, "Wh/km" }, { 1, "mAh/km" }, { 2, "Wh/mi" }, { 3, "mAh/mi" } } },
+  -- main page
+  { "startPage", "Start page", { { 1, "Main" }, { 2, "Map" } } },
+  -- the panel at the top right of the main page, above the data blocks (test42; etx3 had
+  -- "panel": 0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo, carried over in C.read)
+  { "topPanel", "Top-right panel", { { 0, "Minimap" }, { 1, "Home arrow" }, { 2, "Radar" }, { 3, "OmniDeck logo" },
+    { 4, "Stratos logo" } } },
+  -- map page
   { "orient", "Map orientation", { { 0, "North up" }, { 1, "Heading up" } } },
   { "zoomMode", "Map view", { { 0, "Aircraft-centred" }, { 1, "Home-centred" } } },
   -- a knob or slider sets the map zoom (all ranges across its travel); Off = wheel / auto zoom
@@ -25,31 +32,31 @@ C.ITEMS = {
   -- offline map tiles on the card (IMAGES/ethosmaps/maps/..., IMAGES/yaapu/maps/...)
   { "tileSet", "Map tiles", "tilesets" },
   { "trail", "Flight trail", { { 1, "On" }, { 0, "Off" } } },
-  { "startPage", "Start page", { { 1, "Main" }, { 2, "Map" } } },
+  -- missions on the map
+  -- Stratos firmware: the whole mission over MAVlite onto the map (S.Port, F.Port, ELRS, Crossfire)
+  { "apMission", "ArduPilot mission download", { { 0, "Off" }, { 1, "On" } } },
+  { "inavWp", "INAV mission download", { { 1, "On" }, { 0, "Off" } } },
+  -- pages
   -- EdgeTX gives a widget touch and keys only in full screen; a switch changes pages anywhere
   { "pageSwitch", "Page switch", "switches" },
   { "pageSwMode", "Page switch action", { { 0, "Next page (flip up / press)" }, { 1, "Position picks page" } } },
-  { "sumAuto", "Flight summary on disarm", { { 1, "On" }, { 0, "Off" } } },
-  { "batCap", "Battery mAh (INAV/BF only)", { 0, 30000, 100, "mAh", 1 } },
-  { "lowVolt", "Low voltage alarm (per cell)", { 0, 450, 5, "V", 100 } },
-  { "critVolt", "Critical voltage alarm (per cell)", { 0, 450, 5, "V", 100 } },
-  { "cells", "Battery cells (0 = auto)", { 0, 14, 1, "", 1 } },
-  { "lowAlt", "Low altitude alarm (0 = off)", { 0, 3000, 10, "", 1 } },
-  { "inavWp", "INAV mission download", { { 1, "On" }, { 0, "Off" } } },
-  -- the panel at the top right of the main page, above the data blocks (test42; etx3 had
-  -- "panel": 0 minimap, 1 radar, 2 OmniDeck logo, 3 Stratos logo, carried over in C.read)
-  { "topPanel", "Top-right panel", { { 0, "Minimap" }, { 1, "Home arrow" }, { 2, "Radar" }, { 3, "OmniDeck logo" },
-    { 4, "Stratos logo" } } },
   -- the pages a tap cycles through (test42); the flight summary still opens on disarm
   { "msgPage", "Messages page", { { 0, "Auto (ArduPilot only)" }, { 1, "On" }, { 2, "Off" } } },
   { "statsPage", "Flight stats page", { { 0, "Off" }, { 1, "On" } } },
+  { "sumAuto", "Flight summary on disarm", { { 1, "On" }, { 0, "Off" } } },
   { "checkPage", "Sensor check page", { { 0, "Off" }, { 1, "On" } } },
-  -- ArduPlane parameters over S.Port / F.Port (params.lua)
+  -- ArduPlane parameters (params.lua)
   { "paramsPage", "ArduPilot params page", { { 0, "Off" }, { 1, "On" } } },
   -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
   { "flightEdit", "ArduPilot params: edit in flight", { { 0, "Off" }, { 1, "Gains and trim" } } },
-  -- Stratos firmware: the whole mission over MAVlite onto the map (S.Port, F.Port, ELRS, Crossfire)
-  { "apMission", "ArduPilot mission download", { { 0, "Off" }, { 1, "On" } } },
+  -- voice and alarms
+  { "voice", "Voice", "packs" },
+  { "beep", "Message beep", { { 1, "Every message" }, { 2, "Warnings and errors" }, { 0, "Off" } } },
+  { "batCap", "Battery mAh (INAV/BF only)", { 0, 30000, 100, "mAh", 1 } },
+  { "cells", "Battery cells (0 = auto)", { 0, 14, 1, "", 1 } },
+  { "lowVolt", "Low voltage alarm (per cell)", { 0, 450, 5, "V", 100 } },
+  { "critVolt", "Critical voltage alarm (per cell)", { 0, 450, 5, "V", 100 } },
+  { "lowAlt", "Low altitude alarm (0 = off)", { 0, 3000, 10, "", 1 } },
 }
 
 C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, orient = 0,

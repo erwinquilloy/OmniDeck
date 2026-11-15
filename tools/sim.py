@@ -1949,6 +1949,14 @@ else:
         wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
         for _ in range(5): step(0.2)
         render('params_skipchk_%s.png' % tag, 6)
+        for _ in range(3): KEY('KEY_ROTARY_LEFT')          # cursor 1 -> Save -> Back -> All off
+        KEY('KEY_ENTER_BREAK')                             # All off
+        render('params_skipchk_alloff_%s.png' % tag, 6)
+        for _ in range(2): KEY('KEY_ROTARY_RIGHT')         # -> Save
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(10): step(0.2)
+        assert abs(_ap.p['ARMING_SKIPCHK'] - -1.0) < 1e-6, ('All off saves -1', _ap.p['ARMING_SKIPCHK'])
+        print('ARMING_SKIPCHK All off: -1 saved and verified')
         KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
         for _ in range(60): step(0.2)                         # the rest, Q rows included (Q_ENABLE 1)
         render('params_q_%s.png' % tag, 6, )

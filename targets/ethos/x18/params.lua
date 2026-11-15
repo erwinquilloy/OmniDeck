@@ -32,6 +32,12 @@ local T = nil
 local LIST = nil                 -- plist.lua rows
 local vis, groups = {}, {}       -- rows shown (Q rows only with Q_ENABLE 1), their groups in order
 local vals, vbytes = {}, {}      -- name -> value (false = the FC doesn't have it), its 4 bytes
+-- ELRS / Crossfire and mLRS only (S.Port / F.Port unchanged): a read with no answer is NOT "the FC
+-- doesn't have it" (only ArduPilot's "Param read failed (NAME)" says that). On CRSF the row stays
+-- unread and is asked again after the others, n/a only after LOST_ROUNDS rounds; an n/a row is
+-- asked again every 30 s (CRSF and mLRS). Marcin X18 + ELRS 2026-11-15: most rows n/a until tapped.
+local LOST = { n = {}, at = {}, gone = {} }   -- rounds without an answer, when the last ended, FC said "failed"
+local LOST_ROUNDS, LOST_WAIT = 3, 3
 
 -- ---------------------------------------------------------------- float32 <-> bytes
 -- byte by byte, so every step stays below 2^24 (exact even where Lua numbers are 32-bit floats)
@@ -519,6 +525,7 @@ local function handle(id, b)
   local v = b2f(b[1], b[2], b[3], b[4])
   for _, r in ipairs(LIST) do if r[2] == name then if r.free then autoStep(r, v) end break end end
   vals[name], vbytes[name] = v, bytes
+  LOST.n[name], LOST.at[name], LOST.gone[name] = nil, nil, nil
   if name == "Q_ENABLE" then qOn = v >= 1 rebuild() end
   if pend and pend.name == name then
     local want = pend.set or pend.check
@@ -712,7 +719,8 @@ local prefAt = {}   -- mLRS: when a row was last asked ahead of its turn (see se
 local naAt = {}     -- when a row became n/a (or was last asked again, mLRS)
 local function readReq(name)
   -- an n/a row asked again (mLRS, every 30 s) gets one try, so it never holds up a save for long
-  pend = { name = name, tries = (vals[name] == false and link == "MAVLINK") and 3 or 0 }
+  local again = vals[name] == false
+  pend = { name = name, tries = (again and link == "MAVLINK" and 3) or (again and link == "CRSF" and READ_TRIES - 1) or 0 }
   send(REQ_READ, nameBytes(name, {}))
 end
 
@@ -756,6 +764,7 @@ function P.reset()
   MS.state, MS.count, MS.stamp, MS.items, MS.next, MS.last, MS.checkAt = "off", nil, nil, {}, 1, 0, -100
   answered, silent, quietAt = false, 0, nil
   vals, vbytes, out, pend, qOn = {}, {}, {}, nil, nil
+  LOST.n, LOST.at, LOST.gone = {}, {}, {}
   edit, draft, editBase, phase, saveReq = nil, nil, nil, "", nil
   sel, top, grp, link, prev, rxSt = 0, 0, nil, nil, nil, nil
   tabTop, lastCur, lastSel, drag = 0, nil, nil, nil
@@ -799,16 +808,19 @@ local function nextRead(rowsShown)
   if qOn == nil then return "Q_ENABLE" end
   if edit then return nil end
   local g = curGroup()
+  local t = os.clock()
+  -- unread, and not just left without an answer (that row waits LOST_WAIT s, the others go first)
+  local function due(n) return vals[n] == nil and t - (LOST.at[n] or -100) >= LOST_WAIT end
   local r = vis[sel]
-  if r and vals[r[2]] == nil then return r[2] end
-  for i = 1, #rowsShown do local n = rowsShown[i][2] if vals[n] == nil then return n end end
-  for _, x in ipairs(vis) do if x[1] == g and vals[x[2]] == nil then return x[2] end end
-  -- mLRS: answers get lost now and then, so an n/a row is asked again every 30 s
-  if link == "MAVLINK" then
-    local t = os.clock()
+  if r and due(r[2]) then return r[2] end
+  for i = 1, #rowsShown do local n = rowsShown[i][2] if due(n) then return n end end
+  for _, x in ipairs(vis) do if x[1] == g and due(x[2]) then return x[2] end end
+  -- mLRS, ELRS / Crossfire: answers get lost now and then, so an n/a row is asked again every 30 s,
+  -- unless ArduPilot said it has no such parameter (S.Port / F.Port: only a tap asks again)
+  if link == "MAVLINK" or link == "CRSF" then
     for _, x in ipairs(vis) do
       local nm = x[2]
-      if x[1] == g and vals[nm] == false and t - (naAt[nm] or 0) >= 30 then naAt[nm] = t return nm end
+      if x[1] == g and vals[nm] == false and not LOST.gone[nm] and t - (naAt[nm] or 0) >= 30 then naAt[nm] = t return nm end
     end
   end
   return nil
@@ -952,7 +964,7 @@ local function service(s, pageOpen)
     -- ArduPilot answers a name it doesn't have with a text only: take it as soon as it is here
     if not pend.set and failedText(s, name) then
       answered, silent = true, 0
-      vals[name], pend, naAt[name] = false, nil, os.clock()
+      vals[name], pend, naAt[name], LOST.gone[name] = false, nil, os.clock(), true
       if name == "Q_ENABLE" then qOn = false rebuild() end
       return
     end
@@ -975,7 +987,8 @@ local function service(s, pageOpen)
     end
     pend.tries = pend.tries + 1
     -- mLRS: a reply lost now and then on the slower link, so more tries before "n/a"
-    if pend.tries >= (link == "MAVLINK" and 4 or READ_TRIES) or failedText(s, name) then
+    local gone = failedText(s, name)
+    if pend.tries >= (link == "MAVLINK" and 4 or READ_TRIES) or gone then
       if pend.check then   -- the read-back after a save got no answer either
         phase, phaseCol = "No answer: check the value in a GCS", "warn"
         vals[name], pend = nil, nil
@@ -988,7 +1001,13 @@ local function service(s, pageOpen)
         if silent >= 2 then quietAt = now end
         return
       end
+      -- ELRS / Crossfire only (mLRS: one round of 4 tries as before; S.Port / F.Port unchanged)
+      if not gone and link == "CRSF" and name ~= "Q_ENABLE" and vals[name] == nil and (LOST.n[name] or 0) + 1 < LOST_ROUNDS then
+        LOST.n[name], LOST.at[name], pend = (LOST.n[name] or 0) + 1, now, nil   -- unread: asked again later
+        return
+      end
       vals[name], pend, naAt[name] = false, nil, os.clock()
+      if gone then LOST.gone[name] = true end
       if name == "Q_ENABLE" then qOn = false rebuild() end
     else
       pend.at = nil
@@ -1052,7 +1071,7 @@ local function openEdit(s)
   if v == nil then flash("Reading " .. r[2] .. "...", "warn") return end
   if v == false then
     -- n/a may also be answers lost on the way (mLRS): ENTER asks once more
-    vals[r[2]] = nil
+    vals[r[2]], LOST.n[r[2]], LOST.at[r[2]], LOST.gone[r[2]] = nil, nil, nil, nil
     flash("Reading " .. r[2] .. " again...", "warn")
     if not pend and #out == 0 then readReq(r[2]) end
     return
@@ -1138,10 +1157,11 @@ local function drawEditor(W, H, y0, y1, s, ctx)
     local cur = draft
     lcd.color(cur == 0 and C.ok or cur == -1 and C.bad or C.warn)
     lcd.drawText(bx + bw / 2, by + 4, fmtVal(r, cur), CENTERED)
-    lcd.font(fSmall)
-    local _, sh = lcd.getTextSize("A")
     local gy, gh = by + th + 10, stY - (by + th + 10) - 2
     local rows = math.ceil(#BITS / 2)
+    -- the checks in the mid font (one size up) when the rows have room, else the small one
+    lcd.font(th + 2 <= floor(gh / rows) and fMid or fSmall)
+    local _, sh = lcd.getTextSize("A")
     local rh = math.max(sh, floor(gh / rows))
     local cw = floor((bw - 24) / 2)
     for i, b in ipairs(BITS) do
@@ -1196,7 +1216,7 @@ local function drawEditor(W, H, y0, y1, s, ctx)
     btnRow(r[9] and { "-", "+" } or { "-10", "-", "+", "+10" }, btn1Y)
     btnRow({ "Back", "Save" }, btnY)
   else
-    btnRow({ "All on", "Back", "Save" }, btnY)
+    btnRow({ "All on", "All off", "Back", "Save" }, btnY)
   end
 end
 
@@ -1344,7 +1364,7 @@ function P.paint(w, W, H, s, u, ctx)
 end
 
 -- ---------------------------------------------------------------- input
-local function bitsMax() return #BITS + 3 end
+local function bitsMax() return #BITS + 4 end
 
 local function editKey(s, key)
   local bits = edit[10] == "bits"
@@ -1360,7 +1380,8 @@ local function editKey(s, key)
     elseif key == "enter" then
       if bitCur <= #BITS then toggleBit(bitCur)
       elseif bitCur == #BITS + 1 then draft, phase = 0, ""
-      elseif bitCur == #BITS + 2 then edit = nil
+      elseif bitCur == #BITS + 2 then draft, phase = -1, ""   -- All off: ArduPilot's -1 skips every check
+      elseif bitCur == #BITS + 3 then edit = nil
       else save(s) end
     end
     return true
@@ -1409,6 +1430,7 @@ function P.tap(s, x, y)
       if b.i == "-" then nudge(-1) elseif b.i == "+" then nudge(1)
       elseif b.i == "-10" then nudge(-10) elseif b.i == "+10" then nudge(10)
       elseif b.i == "All on" then draft, phase = 0, ""
+      elseif b.i == "All off" then draft, phase = -1, ""
       elseif b.i == "Back" then edit = nil
       elseif b.i == "Save" then save(s) end
     end

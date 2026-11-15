@@ -855,6 +855,14 @@ else:
         render('etx_params_skipchk_%s.png' % tag, 6)
         assert abs(_ap.p['ARMING_SKIPCHK'] - 512.0) < 1e-6
         print('ARMING_SKIPCHK editor opened (value 512 = Airspeed skipped)')
+        for _ in range(3): frame(G.EVT_VIRTUAL_PREV)     # cursor 1 -> Save -> Back -> All off
+        frame(G.EVT_VIRTUAL_ENTER)                       # All off
+        render('etx_params_skipchk_alloff_%s.png' % tag, 6)
+        for _ in range(2): frame(G.EVT_VIRTUAL_NEXT)     # -> Save
+        frame(G.EVT_VIRTUAL_ENTER)
+        for _ in range(60): _ap_pump(); step(0.05)
+        assert abs(_ap.p['ARMING_SKIPCHK'] - -1.0) < 1e-6, ('All off saves -1', _ap.p['ARMING_SKIPCHK'])
+        print('ARMING_SKIPCHK All off: -1 saved and verified')
         frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
         print('params page S.Port: read, edit, save verified OK')
     frame(G.EVT_VIRTUAL_ENTER)
@@ -1378,8 +1386,12 @@ if os.path.isfile(sd_path('/SCRIPTS/TOOLS/OmniDeck Setup.lua')):
     st_t.run(0)
     # row 1 = Telemetry link: ENTER, NEXT (Auto -> CRSF), ENTER
     for e in ('EVT_VIRTUAL_ENTER', 'EVT_VIRTUAL_NEXT', 'EVT_VIRTUAL_ENTER'): st_t.run(G_[e])
-    # down to Speed units (row 4): NEXT x3, ENTER, NEXT x2 (km/h -> knots), ENTER
-    for e in ['EVT_VIRTUAL_NEXT'] * 3 + ['EVT_VIRTUAL_ENTER'] + ['EVT_VIRTUAL_NEXT'] * 2 + ['EVT_VIRTUAL_ENTER']: st_t.run(G_[e])
+    # down to Speed units (its row in cfg.lua's list, which is grouped and may move), ENTER,
+    # NEXT x2 (km/h -> knots), ENTER
+    import re as _re
+    _keys = _re.findall(r'^\s*\{ "(\w+)", "', open(os.path.join(HERE, '..', 'targets', 'edgetx', 'WIDGETS', 'OmniDeck', 'cfg.lua'), encoding='utf-8').read(), _re.M)
+    _down = _keys.index('spdUnit') - _keys.index('linkMode')
+    for e in ['EVT_VIRTUAL_NEXT'] * _down + ['EVT_VIRTUAL_ENTER'] + ['EVT_VIRTUAL_NEXT'] * 2 + ['EVT_VIRTUAL_ENTER']: st_t.run(G_[e])
     cfgp = sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg')
     assert os.path.isfile(cfgp), 'setup tool wrote no file'
     txt = open(cfgp).read()
