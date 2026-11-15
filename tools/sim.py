@@ -1951,6 +1951,13 @@ else:
         for _ in range(20): KEY('KEY_ROTARY_RIGHT')   # stops at the last TECS row
         step(0.2)
         render('params_tecs_%s.png' % tag, 6)
+        wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_START'], W // 2, 4)   # the top bar: no button there
+        wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], W // 2, 4)
+        if SPORT:
+            assert widget.page == 6, ('a tap off the buttons keeps the params page', widget.page)
+        else:   # CRSF here = the FC doesn't answer: that screen has no buttons, a tap still turns the page
+            assert widget.page == 1, ('a tap on the doesnt-answer screen turns the page', widget.page)
+            widget.page = 6
         KEY('KEY_RTN_BREAK')                          # rows -> tab column
     if SPORT:
         _armed0, _sum0 = st['armed'], widget.sumAuto

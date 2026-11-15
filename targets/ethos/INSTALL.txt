@@ -13,6 +13,8 @@ WHAT'S NEW IN 0.4.0f (after 0.4.0)
   RTN on the tabs goes to the next page. A "< BACK" button in the lower right does the same as
   RTN. When a group has more rows than fit, up / down arrows in the bottom row (left of BACK)
   scroll it; groups that fit show none. On the "doesn't answer" screen RTN also turns the page.
+  A tap next to the buttons no longer turns the page (it did by accident when an arrow was
+  just missed): leave the page with RTN or BACK, twice from a group's rows.
 - PARAMS page over ELRS and TBS Crossfire (150 Hz), not only S.Port / F.Port. Needs ArduPlane
   Stratos firmware with "MAVlite over CRSF" (v2.2.1 or the test builds). Upstream ArduPilot and
   ELRS MAVLink mode get the page "The flight controller doesn't answer". TBS at 50 Hz is too

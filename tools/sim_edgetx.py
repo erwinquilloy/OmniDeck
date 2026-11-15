@@ -866,6 +866,8 @@ else:
     for _ in range(20): frame(G.EVT_VIRTUAL_NEXT)     # the wheel stops at the last TECS row
     _ap_pump(); frame()
     render('etx_params_tecs_%s.png' % tag, 6)
+    frame(G.EVT_TOUCH_FIRST, {'x': 240, 'y': 4}); frame(G.EVT_TOUCH_BREAK, {'x': 240, 'y': 4})   # the top bar: no button there
+    assert wd.page == 6, 'a tap off the buttons keeps the params page, page %s' % wd.page
     frame(G.EVT_VIRTUAL_EXIT)                         # rows -> tab column
     if SPORT:
         _goto('AIRSPEED_CRUISE', False)

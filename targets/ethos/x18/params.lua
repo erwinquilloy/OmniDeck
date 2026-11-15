@@ -1499,7 +1499,9 @@ function P.tap(s, x, y)
     end
     return true
   end
-  if not b then return "next" end
+  -- a tap next to the buttons does nothing (user 2026-11-15: a near-miss on an arrow turned the
+  -- page); the page is left with RTN or BACK only, twice from the rows
+  if not b then return true end
   if b.k == "back" then return goBack() end
   if b.k == "tabup" then tabTop = math.max(0, tabTop - 1) return true end
   if b.k == "tabdn" then tabTop = tabTop + 1 return true end   -- (the next paint keeps it in range)
