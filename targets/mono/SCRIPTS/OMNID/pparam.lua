@@ -1,14 +1,17 @@
 --[[
-  OmniDeck Mono, PARAMS page (128x64): read and change ArduPlane parameters (pplist.lua) from
-  the radio, one tab at a time. In the page cycle with Setup PARAMS PAGE = SHOW, ArduPilot only.
+  OmniDeck Mono, parameter editor (128x64): read and change ArduPlane parameters (pplist.lua)
+  from the radio, one tab at a time. Run by SYS > Tools > OmniDeck Params, which gives it T (link
+  state and the CRSF push), E (clock and the mLRS bridge queue) and ctx.cfg: a tool of its own,
+  because beside the OmniDeck telemetry script there was not enough Lua memory (TX12 MK2: 103 KB in
+  use of ~127, the page needs ~28 KB; 2026-11-17). EdgeTX pauses telemetry scripts while a tool runs.
 
   Links (CRSF only; S.Port / F.Port are not done on Mono):
     ELRS / Crossfire   ArduPlane Stratos v2.2.1 or later (MAVlite over CRSF). Request: CRSF frame
                        0x80 C8 EA F4 len msgid payload; answer 0x80 F4 len msgid payload, handed
-                       over by telem.lua (T.onMavlite). Other firmware does not answer.
+                       over by the tool (T.onMavlite). Other firmware does not answer.
     mLRS               Tx Ser Port = cbridge, any ArduPilot: real MAVLink v2 in CRSF frames 0xAA
-                       (chunk byte, size, up to 58 bytes) both ways; etx.lua keeps them while this
-                       page is loaded (E.envOn). The mLRS module sends nothing over the bridge until
+                       (chunk byte, size, up to 58 bytes) both ways; the tool keeps them while
+                       E.envOn. The mLRS module sends nothing over the bridge until
                        the radio has sent something, so a GCS HEARTBEAT goes out every 2 s (ELRS and
                        Crossfire ignore the frame type).
   PARAM_REQUEST_READ 20 / PARAM_SET 23 -> PARAM_VALUE 22 (float32 value, name). Over MAVlite a name
@@ -21,8 +24,8 @@
   GAINS+TRIM.
 
   Keys: wheel or +/- moves (in the editor: changes the value), ENTER opens a tab / a row / saves,
-  RTN goes back (from the tab list: next page), long ENTER turns the page from anywhere but the
-  editor. Nothing of this page stays in memory once another page is shown (close()).
+  RTN goes back (from the tab list: leaves the tool, c.wantNext), long ENTER leaves from anywhere
+  but the editor.
 ]]
 
 local floor = math.floor
@@ -188,8 +191,7 @@ end
 
 -- why the page can't work now (nil = it can): up to four lines of 21 characters
 local function blocked(s)
-  if s.fc ~= "ArduPilot" then return { "NEEDS ARDUPILOT" } end
-  if s.link ~= "CRSF" then return { "NEEDS ELRS, CROSSFIRE", "OR MLRS (CRSF LINK)", "S.PORT: NOT ON MONO" } end
+  if s.fc ~= "ArduPilot" then return { "WAITING FOR ARDUPILOT", "TELEMETRY: ELRS,", "CROSSFIRE OR MLRS", "(S.PORT NOT SUPPORTED)" } end
   if T.alive() == false then return { "NO TELEMETRY" } end
   if quietAt then
     if link == "MAVLINK" then return { "NO ANSWER", "MLRS BRIDGE ON, NO", "PARAMETER ANSWERS YET" } end
@@ -508,7 +510,7 @@ end
 local function drawBlocked(lines)
   title("PARAMS", nil)
   for i, l in ipairs(lines) do lcd.drawText(1, 2 + i * 10, l, 0) end
-  lcd.drawText(1, 57, "ENTER: NEXT PAGE", SMLSIZE)
+  lcd.drawText(1, 57, "ENTER OR RTN: EXIT", SMLSIZE)
 end
 
 local function close()
