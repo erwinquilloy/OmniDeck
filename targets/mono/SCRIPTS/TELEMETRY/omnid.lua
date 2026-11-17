@@ -5,7 +5,9 @@
 
   Set it up as a telemetry screen: MODEL > DISPLAY > a screen > Script > omnid.
   ENTER: next page - main, map, messages (ArduPilot only), flight stats (Setup: STATS PAGE),
-  link check, sensor check (Setup: SENSOR PAGE). The wheel or +/- scrolls messages and sensors.
+  link check, sensor check (Setup: SENSOR PAGE), parameters (Setup: PARAMS PAGE, ArduPilot
+  over ELRS / Crossfire with Stratos firmware, or mLRS cbridge; on that page ENTER opens and long
+  ENTER turns the page). The wheel or +/- scrolls messages and sensors.
   The flight summary opens by itself at disarm (Setup: SUMMARY); ENTER leaves it. A text log of
   each flight is written at landing only with Setup: FLIGHT LOG ON (default OFF).
   Every start is a fresh one, and so is a model switch: nothing of the old model stays.
@@ -64,9 +66,10 @@ end
 local ROOT = "/SCRIPTS/OMNID/"
 local VERSION = "0.1.0"
 -- the page cycle; a page whose test fails is skipped
-local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "psum.lua", "plink.lua", "psens.lua" }
+local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "psum.lua", "plink.lua", "psens.lua", "pparam.lua" }
 local SHOW = {
   ["pmsg.lua"] = function(s, c) return s.fc == "ArduPilot" end,
+  ["pparam.lua"] = function(s, c) return c.paramPage == 1 and s.fc == "ArduPilot" end,
   ["psum.lua"] = function(s, c) return c.statsPage == 1 end,
   ["psens.lua"] = function(s, c) return c.checkPage == 1 end,
 }
@@ -81,8 +84,14 @@ local function load(name)
   return chunk and chunk() or nil
 end
 
-local function loadPage(n, auto)
+-- a page that holds on to something outside itself (the PARAMS page: the CRSF hooks) lets go here
+local function dropPage()
+  if page and page.close then pcall(page.close, ctx) end
   page = nil
+end
+
+local function loadPage(n, auto)
+  dropPage()
   collectgarbage()
   page = load(PAGES[n])
   pageN, onSummary = n, auto == true
@@ -154,7 +163,8 @@ local function modelName()
   return ok and type(info) == "table" and info.name or nil
 end
 local function freshStart()
-  page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
+  dropPage()
+  T, F, A, E, cfg = nil, nil, nil, nil, nil
   ctx.T, ctx.F, ctx.A = nil, nil, nil
   ctx.flightT, ctx.trailE, ctx.trailN = 0, {}, {}
   ctx.logName, ctx.wantSummary, ctx.wantStart, ctx.wantLog = nil, nil, nil, nil
@@ -201,7 +211,7 @@ local function startPage() return cfg.startPage == 2 and 2 or 1 end
 local function writeLog()
   if not ctx.wantLog then return end
   ctx.wantLog = false
-  page = nil
+  dropPage()
   collectgarbage()
   local w = load("log.lua")
   local ok, name = false, nil
@@ -226,7 +236,7 @@ init = function()
   E.tick()
   A.greetNow(E.os.clock())
   A.cells, A.vLow, A.vCrit = cfg.cells, cfg.lowVolt / 100, cfg.critVolt / 100
-  ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
+  ctx.T, ctx.F, ctx.A, ctx.E, ctx.cfg, ctx.clock = T, F, A, E, cfg, E.os.clock
   loadPage(startPage())
 end
 
@@ -260,13 +270,15 @@ local function run(event)
   elseif ctx.wantStart then
     ctx.wantStart = false
     loadPage(startPage())
-  elseif event == EVT_VIRTUAL_ENTER then
+  elseif event == EVT_VIRTUAL_ENTER and not (page and page.wantsEnter and page.wantsEnter(ctx)) then
     if onSummary then loadPage(startPage()) else loadPage(nextPage()) end
+    event = 0   -- the key that turned the page is not the new page's (PARAMS would open a tab)
   end
   if page == nil and T then loadPage(pageN, onSummary) end   -- unloaded for the log
   lcd.clear()
   if page then
     page.draw(ctx, event)
+    if ctx.wantNext then ctx.wantNext = nil loadPage(nextPage()) end   -- the page's own way out
   else
     lcd.drawText(1, 1, "OmniDeck: page missing", 0)
   end

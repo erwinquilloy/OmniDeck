@@ -139,6 +139,8 @@ local crsfPass, crsfMsp = {}, {}
 -- emptying a backlog after a pause costs a few steps per frame, not a table each. Status text
 -- frames (0xF1) go to their own short queue and are never pushed out by status values.
 local RING = 4
+local crsfEnv, ENV_MAX = {}, 12
+E.envOn, E.envAt = false, nil   -- E.envAt: when the last mLRS bridge frame came (E.os.clock time)
 local ringC, ringD, ringHead, ringN = {}, {}, 1, 0
 local otxText = {}
 local function crsfFill(want)
@@ -149,6 +151,14 @@ local function crsfFill(want)
     ST.raw = ST.raw + 1
     if cmd == 0x7B then
       if #crsfMsp < 8 then crsfMsp[#crsfMsp + 1] = { cmd, data } end
+    elseif cmd == 0xAA then
+      -- mLRS cbridge (MAVLink in CRSF frames): kept only while the PARAMS page reads them
+      -- (E.envOn); otherwise dropped here, about 1.3 kB/s nobody else needs
+      if E.envOn then
+        if #crsfEnv >= ENV_MAX then table.remove(crsfEnv, 1) end
+        crsfEnv[#crsfEnv + 1] = data
+      end
+      E.envAt = clockNow
     elseif cmd == 0x80 or cmd == 0x7F then
       ST.pass = ST.pass + 1
       got = true
@@ -187,6 +197,12 @@ local crsfSensor = {
   end,
   pushFrame = function(self, cmd, data) return crossfireTelemetryPush(cmd, data) end,
 }
+-- the oldest mLRS bridge frame (PARAMS page), nil when none
+function E.popEnv()
+  if #crsfEnv == 0 then crsfFill() end
+  return table.remove(crsfEnv, 1)
+end
+function E.envClear() crsfEnv = {} end
 E.crsf = crossfireTelemetryPop and { getSensor = function() return crsfSensor end } or nil
 
 -- S.Port: MSP replies (primId 0x32) wait for mspclient; passthrough and the rest go to telem

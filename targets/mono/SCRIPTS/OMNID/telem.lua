@@ -385,6 +385,11 @@ local function crsfPop()
   -- only the passthrough frame types; MSP replies (0x7B) are left for mspclient.lua
   local ok, cmd, data = pcall(crsfSensor.popFrame, crsfSensor, 0x7F, 0x80)   -- no closure per pop
   if not ok or cmd == nil or data == nil then return false end
+  if data[1] == 0xF4 then
+    -- MAVlite reply (ArduPlane Stratos over ELRS / Crossfire) for the PARAMS page (pparam.lua)
+    if T.onMavlite then T.onMavlite(data) end
+    return true
+  end
   if (cmd == 0x80 or cmd == 0x7F) and data[1] == 0xF1 and #data >= 3 then
     -- ArduPilot status text: severity, then the text up to a 0
     s.link = "CRSF"
@@ -412,6 +417,12 @@ local function crsfPop()
     end
   end
   return true
+end
+
+-- PARAMS page (pparam.lua): its requests go out on the same CRSF queue
+function T.crsfPush(cmd, data)
+  if not crsfSensor or not crsfSensor.pushFrame then return false end
+  return crsfSensor:pushFrame(cmd, data)
 end
 
 -- ---------------------------------------------------------------- S.Port frames
