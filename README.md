@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-One telemetry display for ArduPilot, INAV and Betaflight, on FrSky Ethos and EdgeTX colour radios, with OpenTX 2.3 (in progress).
+A free telemetry script for ArduPilot, INAV and Betaflight, on FrSky Ethos and EdgeTX colour radios, with OpenTX 2.3 (in progress).
 
 A full-screen widget with a horizon and tapes, a moving map with optional satellite tiles, status messages, voice call-outs and a flight summary, the same on every flight controller and every radio link.
 
