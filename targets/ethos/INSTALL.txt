@@ -19,6 +19,13 @@ WHAT'S NEW IN 0.4.0f (after 0.4.0)
   Stratos firmware with "MAVlite over CRSF" (v2.2.1 or the test builds). Upstream ArduPilot and
   ELRS MAVLink mode get the page "The flight controller doesn't answer". TBS at 50 Hz is too
   slow for it for now: use 150 Hz.
+- NOT SUPPORTED: ELRS in MAVLink mode (ELRS Lua "Link Mode" = MAVLink). The PARAMS page, the
+  ArduPilot mission download and the mission editor do not work there, with any firmware: the
+  ELRS receiver passes only MAVLink to the flight controller, so OmniDeck's requests never arrive,
+  and the ELRS module turns only telemetry back into CRSF (no parameters, no mission). For these,
+  set ELRS Link Mode to Normal (CRSF, 150 Hz or faster), or use S.Port / F.Port or mLRS with
+  cbridge. The telemetry screens still work in MAVLink mode, but only as fast as ArduPilot sends
+  MAVLink on that port (1 Hz by default: raise MAVn_EXTRA1, MAVn_EXTRA2, MAVn_EXT_STAT on it).
 - mLRS: the PARAMS page, the ArduPilot mission download and the mission editor's Send work over
   mLRS with ANY ArduPilot (no Stratos firmware needed). In the mLRS Lua (Tx section) set
   "Tx Ser Port" = cbridge, then store / reboot the module. The mLRS module then passes MAVLink
@@ -168,7 +175,8 @@ Pages (tap or ENTER)
 - "Sensor check page" (Off by default): On puts the sensor check page in the cycle.
 - "ArduPilot params page" (Off by default): On puts the PARAMS page in the cycle (ArduPilot only).
   "ArduPilot params: edit in flight": Off, or "Gains and trim" (PID, Q PID and the pitch trim rows while armed).
-- "ArduPilot mission download" (Off by default): the aircraft's mission on the map (Stratos firmware).
+- "ArduPilot mission download" (Off by default): the aircraft's mission on the map (Stratos firmware
+  or mLRS cbridge; not with ELRS in MAVLink mode).
 Fixes
 - Betaflight with airmode on (permanently or by switch): the mode shows AIR and is spoken "Air
   mode"; with airmode off it shows ACRO. It used to show ACRO for both. (Over S.Port Betaflight
