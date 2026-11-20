@@ -249,6 +249,7 @@ init = function()
   E.tick()
   A.greetNow(E.os.clock())
   A.cells, A.vLow, A.vCrit = cfg.cells, cfg.lowVolt / 100, cfg.critVolt / 100
+  A.altLim = cfg.lowAlt / (cfg.altUnit == 1 and 3.28084 or 1)   -- the setting is in the altitude unit
   ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
   loadPage(startPage())
 end

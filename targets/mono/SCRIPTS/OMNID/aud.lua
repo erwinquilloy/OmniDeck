@@ -175,6 +175,24 @@ local function voltAlarm(s, alive, now)
   al.stage = stage
 end
 
+-- low altitude ("Terrain, pull up"), as the colour builds: armed, and only once the aircraft has
+-- been more than 2 m above the setting, so the take-off and a landing approach from below don't
+-- count; again every 15 s while low. A.altLim in metres (0 = off); A.altLow for the main page.
+local ALT_REPEAT_S = 15
+local alt = { armed = false, said = -100 }
+A.altLim, A.altLow = 0, false
+local function altAlarm(s, alive, now)
+  A.altLow = false
+  if not s.armed then alt.armed = false end
+  if alive and s.armed == true and A.altLim > 0 and s.alt then
+    if s.alt > A.altLim + 2 then alt.armed = true end
+    if alt.armed and s.alt < A.altLim then
+      A.altLow = true
+      if now - alt.said >= ALT_REPEAT_S then alt.said = now say("pullup", true) end
+    end
+  end
+end
+
 function A.update(s, alive, now)
   -- "Omni Deck telemetry ready" once when the widget starts (as Yaapu does), as soon as the
   -- saved voice is loaded; it does not wait for telemetry
@@ -231,6 +249,7 @@ function A.update(s, alive, now)
 
   if s.armed then battery(s) end
   voltAlarm(s, alive, now)
+  altAlarm(s, alive, now)
 
   -- ready to arm: spoken when it changes while disarmed, like the INAV dashboard's
   -- "ready to arm" / "arming prevented"; arming forgets it, so it is said again after landing

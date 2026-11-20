@@ -150,7 +150,7 @@ IMPERIAL = '--imperial' in sys.argv
 ALLPAGES = '--pages' in sys.argv
 if IMPERIAL or ALLPAGES:
     with open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg'), 'w') as f:
-        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\nmapView=1\n')
+        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\nmapView=1\nlowAlt=100\nvoice=Aria\n')
 LOGON = IMPERIAL or ALLPAGES   # FLIGHT LOG defaults to OFF; these variants switch it on
 def sd_path(p, base):
     return os.path.join(base, *[x for x in str(p).split('/') if x])
@@ -407,6 +407,14 @@ if NATIVE:
 L.execute('collectgarbage() _PEAK = 0'); _m0 = L.eval('(collectgarbage("count"))'); run(frames=60)
 print('cruise: peak +%.1f KB over 3 s of normal flight' % (G._PEAK - _m0))
 L.execute('collectgarbage() _PEAK = 0'); mem_flying = L.eval('(collectgarbage("count"))')
+if ALLPAGES:
+    # Setup LOW ALT 100 m: armed and once above 102 m, then below 100 m -> "Terrain, pull up"
+    n0 = sum(1 for _, p in PLAYED if p.endswith('/pullup.wav'))
+    st.update(alt=80); run(frames=40)
+    n1 = sum(1 for _, p in PLAYED if p.endswith('/pullup.wav'))
+    assert n1 > n0, 'low-altitude alarm not spoken'
+    st.update(alt=120); run(frames=20)
+    print('low-altitude alarm OK (pullup.wav at 80 m, setting 100 m)')
 st.update(armed=False)
 run(frames=60)
 print('landing: Lua memory %.1f KB in flight, peak %.1f KB (+%.1f) while the flight ends (64-bit sim)'

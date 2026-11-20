@@ -199,7 +199,8 @@ local function draw(ctx)
     if (#label + 1 + #val) * (small and SW or 6) <= 55 then lcd.drawText(x, y, label, f) end
     lcd.drawText(127, y, val, f + RIGHT + (flags or 0))
   end
-  row(10, "ALT", s.alt and u.altStr(s.alt) or "---")
+  -- low-altitude alarm (Setup LOW ALT): the value inverted and blinking while low
+  row(10, "ALT", s.alt and u.altStr(s.alt) or "---", ctx.A.altLow and (BLINK + INVERS) or 0)
   row(18, "SPD", spd and (u.spd(spd) .. u.spdLbl) or "---")
   -- home row: "H", the arrow to home right after it (radius 4: x 82-90), the distance right-aligned
   -- at the column edge like the other rows (5 characters at most: x 98-127)
