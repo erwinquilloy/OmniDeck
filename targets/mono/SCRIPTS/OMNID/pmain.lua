@@ -201,9 +201,11 @@ local function draw(ctx)
   end
   row(10, "ALT", s.alt and u.altStr(s.alt) or "---")
   row(18, "SPD", spd and (u.spd(spd) .. u.spdLbl) or "---")
+  -- home row: "H", the arrow to home right after it (radius 4: x 82-90), the distance right-aligned
+  -- at the column edge like the other rows (5 characters at most: x 98-127)
   lcd.drawText(x, 26, "H", 0)
-  lcd.drawText(117, 26, u.dist(s.homeDist), RIGHT)
-  homeArrow(123, 29, s)
+  homeArrow(x + 12, 29, s)
+  lcd.drawText(127, 26, u.dist(s.homeDist), RIGHT)
   -- voltage alarm (OmniDeck Setup): the value inverted while low, blinking while critical
   local st = ctx.A.stage or 0
   local vf = (st == 2 and BLINK + INVERS) or (st == 1 and INVERS) or 0
