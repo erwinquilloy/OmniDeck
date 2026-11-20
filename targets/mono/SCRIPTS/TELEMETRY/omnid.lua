@@ -62,7 +62,7 @@ if rawget(_G, "table") == nil then
 end
 
 local ROOT = "/SCRIPTS/OMNID/"
-local VERSION = "0.1.0"
+local VERSION = "0.1.1"
 -- the page cycle; a page whose test fails is skipped
 local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "psum.lua", "plink.lua", "psens.lua" }
 local SHOW = {
