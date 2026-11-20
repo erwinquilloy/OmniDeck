@@ -128,7 +128,9 @@ local function trail(s)
   if T.gen ~= trailGen then   -- another flight controller (telem.lua resetFc): its own flight
     trailGen = T.gen
     ctx.trailE, ctx.trailN, trailStep, trailLat, trailLon = {}, {}, TRAIL_STEP0, nil, nil
+    ctx.lastLat, ctx.lastLon = nil, nil
   end
+  if s.lat then ctx.lastLat, ctx.lastLon = s.lat, s.lon end   -- the map's LAST position with no fix
   if not (s.lat and s.homeLat) then return end
   local tE, tN = ctx.trailE, ctx.trailN
   if s.homeLat ~= trailLat or s.homeLon ~= trailLon then
@@ -176,6 +178,7 @@ local function freshStart()
   page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
   ctx.T, ctx.F, ctx.A = nil, nil, nil
   ctx.flightT, ctx.trailE, ctx.trailN = 0, {}, {}
+  ctx.map, ctx.lastLat, ctx.lastLon = nil, nil, nil   -- map zoom and last position belong to the model
   ctx.logName, ctx.wantSummary, ctx.wantStart, ctx.wantLog = nil, nil, nil, nil
   trailStep, trailLat, trailLon, trailGen = TRAIL_STEP0, nil, nil, 0
   collectgarbage()
@@ -239,6 +242,7 @@ init = function()
   local C = load("cfg.lua")
   cfg = C.read()
   ctx.u = C.units(cfg)
+  ctx.mapView = cfg.mapView
   C = nil
   A.setVoice(cfg.voice)
   A.setBeep(cfg.beep)

@@ -22,15 +22,16 @@ C.ITEMS = {
   { "critVolt", "CRIT V/CELL", { 0, 450, 5, "V", 100 } },
   { "batCap", "BATT MAH", { 0, 30000, 100, "", 1 } },
   { "startPage", "START PAGE", { { 1, "MAIN" }, { 2, "MAP" } } },
+  { "mapView", "MAP VIEW", { { 0, "AIRCRAFT" }, { 1, "HOME" } } },
   { "statsPage", "STATS PAGE", { { 0, "HIDE" }, { 1, "SHOW" } } },
   { "checkPage", "SENSOR PAGE", { { 0, "HIDE" }, { 1, "SHOW" } } },
   { "linkMode", "LINK", { { 0, "AUTO" }, { 1, "CRSF" }, { 2, "S.PORT" } } },
 }
 C.NOTE = { statsPage = "IN THE PAGE CYCLE", checkPage = "PAGE 5", cells = "0 = AUTO", lowVolt = "0 = OFF", critVolt = "0 = OFF", batCap = "INAV/BF ONLY, 0 = OFF",
-           logFlight = "TEXT FILE IN OMNID/LOGS" }
+           logFlight = "TEXT FILE IN OMNID/LOGS", mapView = "CENTRE OF THE MAP" }
 
 C.DEFAULTS = { voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, sumAuto = 1, logFlight = 0, cells = 0,
-               lowVolt = 0, critVolt = 0, batCap = 0, startPage = 1, statsPage = 0, checkPage = 0, linkMode = 0 }
+               lowVolt = 0, critVolt = 0, batCap = 0, startPage = 1, mapView = 0, statsPage = 0, checkPage = 0, linkMode = 0 }
 
 function C.path()
   local name = "default"

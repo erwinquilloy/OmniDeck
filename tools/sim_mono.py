@@ -150,7 +150,7 @@ IMPERIAL = '--imperial' in sys.argv
 ALLPAGES = '--pages' in sys.argv
 if IMPERIAL or ALLPAGES:
     with open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg'), 'w') as f:
-        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\n')
+        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\nmapView=1\n')
 LOGON = IMPERIAL or ALLPAGES   # FLIGHT LOG defaults to OFF; these variants switch it on
 def sd_path(p, base):
     return os.path.join(base, *[x for x in str(p).split('/') if x])
@@ -351,6 +351,24 @@ words = ' '.join(t for t, x, y in texts)
 save('map_%s.png' % tag)
 if not NATIVE:
     assert 'WP3' in words and 'H' in words.split(), words
+# coordinates in the bottom strip: the aircraft's position, 5 decimals
+import re as _re
+_c = [m for m in _re.findall(r'(-?\d+\.\d{5}) (-?\d+\.\d{5})', words)]
+assert _c, ('coordinates', words)
+if not NATIVE:   # the native feed puts its GPS sensor 0.004 deg away on purpose
+    assert abs(float(_c[0][0]) - st['lat']) < 2e-4 and abs(float(_c[0][1]) - st['lon']) < 2e-4, ('coordinates', words)
+def scale_label():
+    return [t for t, x, y in texts if y == 49 and t[:1].isdigit()][0]
+if not ALLPAGES:
+    # aircraft-centred (Setup MAP VIEW default): the wheel zooms, right (NEXT) = closer
+    s0 = scale_label(); run(G.EVT_VIRTUAL_PREV, frames=1); run(G.EVT_VIRTUAL_PREV, frames=1)
+    s1 = scale_label(); run(G.EVT_VIRTUAL_NEXT, frames=1); run(G.EVT_VIRTUAL_NEXT, frames=1)
+    s2 = scale_label()
+    assert s1 != s0 and s2 == s0, ('wheel zoom', s0, s1, s2)
+    print('map zoom by wheel OK: %s -> %s -> %s' % (s0, s1, s2))
+else:
+    # home-centred (mapView=1 in this run's cfg): zoomed itself to keep the aircraft on the map
+    print('map home-centred, scale %s' % scale_label())
 print('map page OK:', words[:100])
 if not NATIVE:   # messages: ArduPilot only
     run(G.EVT_VIRTUAL_ENTER, frames=5)
