@@ -93,7 +93,13 @@ end
 -- memory, tried again on every update, froze the TX12 MK2 (power switch dead, RC link still up;
 -- a page load test 2026-11-17). Its reason is shown in its place.
 local retryAt = -100
+-- the summary opened by the disarm goes back to the start page after SUM_SHOW_S, as on the colour
+-- builds (ui.lua SUM_SHOW_S); ENTER closes it sooner. Opened again for the log (writeLog) it
+-- keeps its time; the flight stats page (Setup STATS PAGE) is a page of the cycle and stays.
+local SUM_SHOW_S = 15
+local sumOpenedAt = nil
 local function loadPage(n, auto)
+  if auto ~= true then sumOpenedAt = nil end
   page = nil
   collectgarbage()
   page = load(PAGES[n])
@@ -273,8 +279,11 @@ local function run(event)
   if ctx.wantSummary then
     ctx.wantSummary = false
     loadPage(4, true)
+    sumOpenedAt = E.os.clock()
   elseif ctx.wantStart then
     ctx.wantStart = false
+    loadPage(startPage())
+  elseif onSummary and sumOpenedAt and E.os.clock() - sumOpenedAt >= SUM_SHOW_S then
     loadPage(startPage())
   elseif event == EVT_VIRTUAL_ENTER then
     if onSummary then loadPage(startPage()) else loadPage(nextPage()) end

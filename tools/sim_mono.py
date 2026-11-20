@@ -405,8 +405,16 @@ if not NATIVE:
   else:
     assert not logs and 'LOG' not in words.split(), ('FLIGHT LOG is OFF by default', logs)
     print('no log written (FLIGHT LOG OFF)')
-  run(G.EVT_VIRTUAL_ENTER)
-  assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
+  if ALLPAGES or IMPERIAL:
+    run(G.EVT_VIRTUAL_ENTER)
+    assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
+  else:
+    # left alone, the summary goes back to the start page after 15 s, as on the colour builds
+    run(frames=200)   # 10 s more
+    assert 'FLIGHT SUMMARY' in ' '.join(t for t, x, y in texts), 'summary still up at ~13 s'
+    run(frames=120)   # 6 s more
+    assert any(t.startswith('ALT') for t, x, y in texts), 'summary closed by itself after 15 s'
+    print('summary closed by itself after 15 s')
 # voice: with Aria picked on first run, the welcome plays at once and the call-outs follow,
 # every one a file that exists in the pack
 clips = [p for _, p in PLAYED]
