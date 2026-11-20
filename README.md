@@ -452,7 +452,7 @@ OmniDeck Mono is OmniDeck for EdgeTX radios with a 128 x 64 black-and-white scre
 - **Settings:** SYS › Tools › OmniDeck Setup, per model: voice, message beeps, units, summary, flight log, voltage and low-altitude alarms, pack capacity, start page, map view, optional pages and link.
 - **Units:** `m`, `km` above 999 m, `k` for km and km/h, `ft`, `mi`, `WH/km` and the rest as set in Setup.
 - **ArduPilot parameters:** use the [AP Param Editor](https://github.com/erwinquilloy/ap-param-editor); OmniDeck Mono has no editor of its own.
-- **Memory:** about 127 KB of Lua memory on a TX12 MK2; OmniDeck Mono uses about 97 to 107 KB, shown on the Link check page. Pages load one at a time.
+- **Memory:** about 127 KB of Lua memory on a TX12 MK2; OmniDeck Mono 0.1.0 used about 97 to 107 KB, and 0.1.1 about 15 KB less; the Link check page shows it. Pages load one at a time.
 - **Compared with the colour builds:** no map tiles, only the active waypoint on the map, no mission files or INAV mission download, no touch or tapes.
 
 ## Reporting a problem
