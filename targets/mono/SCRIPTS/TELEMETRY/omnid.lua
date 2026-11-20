@@ -247,14 +247,17 @@ end
 -- it counts garbage not yet collected: Lua's own collector lets that pile up well past the live
 -- data before it runs (TX12 MK2, INAV, killed at disarm 2026-11-13). A full collection whenever
 -- the heap passes GC_KB keeps the garbage from ever reaching the limit.
--- The trigger sits 12 KB above the live data (at least GC_KB, at most GC_MAX_KB), so a
--- collection runs every few seconds rather than on every call when the live data is large.
-local GC_KB, GC_MAX_KB = OD_GC_KB or 100, OD_GC_MAX_KB or 118
+-- The trigger sits GC_MARGIN KB above the live data (at least GC_KB, at most GC_MAX_KB), so a
+-- collection runs every second or two rather than on every call when the live data is large.
+-- 8 / 112 since 2026-11-20: over mLRS (bigger CRSF passthrough frames, a new table per frame)
+-- the TX12 MK2 showed 107/127K and froze with the old 12 / 118 (screen, keys and power switch
+-- dead, RF up); the margin to the ~127 KB ceiling was too thin for that much garbage.
+local GC_KB, GC_MAX_KB, GC_MARGIN = OD_GC_KB or 96, OD_GC_MAX_KB or 112, OD_GC_MARGIN or 8
 local gcAt = GC_KB
 local function gcGuard()
   if collectgarbage("count") > gcAt then
     collectgarbage()
-    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, collectgarbage("count") + 12))
+    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, collectgarbage("count") + GC_MARGIN))
   end
 end
 

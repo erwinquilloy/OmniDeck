@@ -294,8 +294,8 @@ def feed():
             crsf_q.append((0x80, data))
 
 # ------------------------------------------------------------------ run
-# GC trigger for the 64-bit sim's bigger heap (the radio's 100 KB scaled: sim live data ~2.6x)
-G.OD_GC_KB, G.OD_GC_MAX_KB = MEM_BASE + 260, MEM_BASE + 310
+# GC trigger for the 64-bit sim's bigger heap (the radio's 96 / 112 / +8 KB scaled: sim live data ~2.6x)
+G.OD_GC_KB, G.OD_GC_MAX_KB, G.OD_GC_MARGIN = MEM_BASE + 250, MEM_BASE + 291, 21
 script = load_script('/SCRIPTS/TELEMETRY/omnid.lua')()
 worst = {'init': 0, 'run': 0, 'background': 0}
 CALL(script['init']); worst['init'] = G._N
