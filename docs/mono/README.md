@@ -69,7 +69,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 |---|---|---|
 | Telemetry screen | **ENTER** | next page |
 | | wheel, **+** / **−** | scroll the messages and sensor pages |
-| | **ENTER** on the summary | back to the start page |
+| | **ENTER** on the summary | back to the start page (it also goes back by itself after 15 s) |
 | OmniDeck Setup | wheel | move between settings |
 | | **ENTER** | edit; the wheel then changes the value; **ENTER** again keeps it |
 | | **RTN** | leave; the changes apply now |
@@ -121,7 +121,7 @@ Speed has its own setting: `k` (km/h), `MS`, `KT` or `MPH`. The flight summary a
 
 ![Flight summary](img/summary.png)
 
-The **flight summary** opens by itself at disarm when the aircraft was armed for at least 10 seconds: flight time, distance flown (the whole track), furthest from home, max altitude, max airspeed and ground speed, efficiency and the lowest voltage. **ENTER** goes back to the start page.
+The **flight summary** opens by itself at disarm when the aircraft was armed for at least 10 seconds: flight time, distance flown (the whole track), furthest from home, max altitude, max airspeed and ground speed, efficiency and the lowest voltage. It goes back to the start page by itself after 15 seconds; **ENTER** goes back sooner.
 
 With **FLIGHT LOG** on in Setup, the same flights are also written as text files to `SCRIPTS/OMNID/logs/`. Set the radio's clock, or the file names and dates will be wrong.
 
