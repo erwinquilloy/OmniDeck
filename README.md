@@ -443,13 +443,13 @@ OmniDeck Mono is OmniDeck for EdgeTX radios with a 128 x 64 black-and-white scre
 
 ![OmniDeck Mono main page](docs/mono/img/main.png)
 
-**Status:** 0.1.0, beta. Bench-tested on a TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04. Not flown yet, and not yet tried on the Pocket or Boxer.
+**Status:** 0.1.1, beta. Bench-tested on a TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04. Not flown yet, and not yet tried on the Pocket or Boxer.
 
 **Full guide: [OmniDeck Mono](docs/mono/README.md)** (install, keys, every page, settings, memory, problems).
 
-- **Download:** `OmniDeck_Mono_0.1.0.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.0). Copy its `SCRIPTS` folder to the root of the SD card, then **MODEL › DISPLAY**, a screen, **Script**, **omnid**. Keep the `.luac` files: the radio runs out of memory compiling the telemetry code itself.
-- **Pages:** Main (horizon, heading and home marker, and a labelled column: ALT, SPD, H, BAT, CUR, EF, TIM), Map, Messages (ArduPilot), Flight stats (optional), Link check, Sensor check (optional). ENTER moves to the next page. The flight summary opens by itself at disarm and goes back to the start page after 15 s, and a flight log can be written to the SD card.
-- **Settings:** SYS › Tools › OmniDeck Setup, per model: voice, message beeps, units, summary, flight log, voltage alarms, pack capacity, start page, optional pages and link.
+- **Download:** `OmniDeck_Mono_0.1.1.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.1). Copy its `SCRIPTS` folder to the root of the SD card, then **MODEL › DISPLAY**, a screen, **Script**, **omnid**. Keep the `.luac` files: the radio runs out of memory compiling the telemetry code itself.
+- **Pages:** Main (horizon, heading and home marker, and a labelled column: ALT, SPD, H, BAT, CUR, EF, TIM), Map (aircraft- or home-centred, wheel zoom, coordinates), Messages (ArduPilot), Flight stats (optional), Link check, Sensor check (optional). ENTER moves to the next page. The flight summary opens by itself at disarm and goes back to the start page after 15 s, and a flight log can be written to the SD card.
+- **Settings:** SYS › Tools › OmniDeck Setup, per model: voice, message beeps, units, summary, flight log, voltage alarms, pack capacity, start page, map view, optional pages and link.
 - **Units:** `m`, `km` above 999 m, `k` for km and km/h, `ft`, `mi`, `WH/km` and the rest as set in Setup.
 - **ArduPilot parameters:** use the [AP Param Editor](https://github.com/erwinquilloy/ap-param-editor); OmniDeck Mono has no editor of its own.
 - **Memory:** about 127 KB of Lua memory on a TX12 MK2; OmniDeck Mono uses about 97 to 107 KB, shown on the Link check page. Pages load one at a time.

@@ -4,7 +4,7 @@ OmniDeck for EdgeTX radios with a 128 × 64 black-and-white screen. A free telem
 
 ![Main page in FBWA, 1.5 km out, on its way home](img/main.png)
 
-**Status:** 0.1.0, beta. Bench-tested on a RadioMaster TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04. Not flown yet, and not yet tried on the Pocket or Boxer.
+**Status:** 0.1.1, beta. Bench-tested on a RadioMaster TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04. Not flown yet, and not yet tried on the Pocket or Boxer.
 
 Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
 
@@ -15,6 +15,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 - [Keys](#keys)
 - [Main page](#main-page)
 - [Pages](#pages)
+- [Map](#map)
 - [Flight summary and log](#flight-summary-and-log)
 - [Voice and alarms](#voice-and-alarms)
 - [Settings](#settings)
@@ -39,7 +40,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 
 ## Install
 
-1. Download `OmniDeck_Mono_0.1.0.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.0).
+1. Download `OmniDeck_Mono_0.1.1.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.1).
 2. Connect the radio by USB and pick **USB Storage (SD)**, or put the card in a card reader.
 3. Copy the `SCRIPTS` folder from the zip to the **root** of the card, merging with the folder already there:
 
@@ -68,7 +69,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 | Screen | Key | Does |
 |---|---|---|
 | Telemetry screen | **ENTER** | next page |
-| | wheel, **+** / **−** | scroll the messages and sensor pages |
+| | wheel, **+** / **−** | scroll the messages and sensor pages; on the map, zoom (right = closer) |
 | | **ENTER** on the summary | back to the start page (it also goes back by itself after 15 s) |
 | OmniDeck Setup | wheel | move between settings |
 | | **ENTER** | edit; the wheel then changes the value; **ENTER** again keeps it |
@@ -113,9 +114,23 @@ Speed has its own setting: `k` (km/h), `MS`, `KT` or `MPH`. The flight summary a
 
 | | |
 |---|---|
-| ![Main page, banked](img/main_banked.png) **Main**, banked. | ![Map](img/map.png) **Map.** North-up, zooms itself to keep home, the aircraft, its trail and the active waypoint on screen. Mode, waypoint and distance to home on top. |
+| ![Main page, banked](img/main_banked.png) **Main**, banked. | ![Map](img/map.png) **Map.** North-up vector map with home, the aircraft, its trail, the active waypoint and the coordinates. See [Map](#map). |
 | ![Messages](img/messages.png) **Messages.** ArduPilot status texts, newest at the bottom, warnings marked `!`. The wheel scrolls back. | ![Flight stats](img/stats.png) **Flight stats** (optional). The flight in progress, the same rows as the summary. |
 | ![Link check](img/link.png) **Link check.** Link, flight controller, passthrough, LQ and RSSI, satellites and the Lua memory in use. | ![Sensor check](img/sensors.png) **Sensor check** (optional). Each radio sensor OmniDeck reads and its raw value (INAV over CRSF shown). |
+
+## Map
+
+Setup **MAP VIEW** picks what stays in the centre, as on the colour builds:
+
+| Aircraft-centred (default) | Home-centred |
+|---|---|
+| ![Map, aircraft-centred](img/map.png) | ![Map, home-centred](img/map_home.png) |
+| The aircraft stays in the middle. The **wheel** (or **+** / **−**) zooms: right closer, left further out, through range steps from 50 m to 50 km from the centre to the nearest edge. It starts at 300 m and keeps its zoom when you change pages. | Home stays in the middle and the map zooms itself: out at once when the aircraft nears the edge, back in one step at a time (at most every 2 s) once it is well inside, and to the closest step again each time you arm. |
+
+- **Home** is a boxed `H`. When it is off the map it stays at the edge, so it shows the way home.
+- **Trail** dots, the **active waypoint** (ArduPilot sends only that one) with a dotted line to it, a **scale bar** at the bottom left and **N** at the top right.
+- **Coordinates** along the bottom: the aircraft's latitude and longitude to 5 decimals (about 1 m; the radio's Lua numbers are 32-bit). With no GPS fix the last known position shows, marked `LAST`, to help find a plane that is down out of sight.
+- **Top bar:** flight mode, the active waypoint, and the distance to home.
 
 ## Flight summary and log
 
@@ -151,6 +166,7 @@ The same call-outs as the colour builds, from the packs in `SCRIPTS/OMNID/audio/
 | CRIT V/CELL | 0 to 4.50 V in 0.05 V steps; 0 = off | Off |
 | BATT MAH | pack capacity for INAV and Betaflight, which don't send it; 0 = off | 0 |
 | START PAGE | Main, Map | Main |
+| MAP VIEW | Aircraft, Home: what the map keeps in the centre | Aircraft |
 | STATS PAGE | Hide, Show | Hide |
 | SENSOR PAGE | Hide, Show | Hide |
 | LINK | Auto, CRSF, S.Port | Auto |
