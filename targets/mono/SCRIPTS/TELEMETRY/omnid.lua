@@ -262,12 +262,19 @@ end
 -- 8 / 112 since 2026-11-20: over mLRS (bigger CRSF passthrough frames, a new table per frame)
 -- the TX12 MK2 showed 107/127K and froze with the old 12 / 118 (screen, keys and power switch
 -- dead, RF up); the margin to the ~127 KB ceiling was too thin for that much garbage.
-local GC_KB, GC_MAX_KB, GC_MARGIN = OD_GC_KB or 96, OD_GC_MAX_KB or 112, OD_GC_MARGIN or 8
+-- 6 / 106 since 2026-11-20 evening: still "not enough memory" on the main page over mLRS with 8 / 112.
+local GC_KB, GC_MAX_KB, GC_MARGIN = OD_GC_KB or 92, OD_GC_MAX_KB or 106, OD_GC_MARGIN or 6
 local gcAt = GC_KB
+-- ctx.memPeak / ctx.memLive for the Link page: the highest heap seen at the end of an update
+-- (garbage included) and the live data after the last full collection
 local function gcGuard()
-  if collectgarbage("count") > gcAt then
+  local c = collectgarbage("count")
+  if c > (ctx.memPeak or 0) then ctx.memPeak = c end
+  if c > gcAt then
     collectgarbage()
-    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, collectgarbage("count") + GC_MARGIN))
+    local live = collectgarbage("count")
+    ctx.memLive = live
+    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, live + GC_MARGIN))
   end
 end
 
