@@ -31,16 +31,16 @@ local function draw(ctx)
     else
       eff = f.used / km
     end
-    if eff and string.find(u.effLbl, "MI", 1, true) then eff = eff * 1.609344 end
+    if eff and string.find(u.effLbl, "mi", 1, true) then eff = eff * 1.609344 end
   end
   -- seven rows at 8 px: distance flown (the track, added up) and the farthest from home apart
   local rows = {
     { "FLIGHT", string.format("%02d:%02d", floor(t / 60), t % 60) },
     { "DIST FLOWN", u.dist(f.dist) },
     { "MAX HOME", u.dist(f.maxHome) },
-    { "MAX ALT", f.maxAlt and (u.alt(f.maxAlt) .. u.altLbl) or "--" },
+    { "MAX ALT", f.maxAlt and u.altStr(f.maxAlt) or "--" },
     { spdLbl, spdVal },
-    { "EFFICIENCY", eff and (string.format(eff < 100 and "%.1f" or "%d", eff) .. u.effLbl) or "--" },
+    { "EFFICIENCY", eff and ((eff < 99.95 and string.format("%.1f", eff) or tostring(floor(eff + 0.5))) .. u.effLbl) or "--" },   -- no "%d": Lua 5.3 refuses fractions
     { "MIN VOLT", f.minVolt and string.format("%.1fV", f.minVolt) or "--" },
   }
   for i, r in ipairs(rows) do

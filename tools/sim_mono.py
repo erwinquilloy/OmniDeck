@@ -377,9 +377,9 @@ s = G.OD_ENV  # adapter environment (not used directly)
 if NATIVE:
     assert 'ANGL' in words, words
 else:
-    assert 'FBWA' in words and ('ALT 394FT' if IMPERIAL else 'ALT 120M') in words and '3D14 ARM 7.9V' in words, words
+    assert 'FBWA' in words and ('ALT 394ft' if IMPERIAL else 'ALT 120m') in words and '3D14 ARM 7.9V' in words, words
     assert '15.8V' in words and 'A' in words and 'GS ' in words and '030' in words, words
-    assert any(w.endswith('MAH/MI' if IMPERIAL else 'WH/KM') and not w.startswith('--') for w in words.split()), words
+    assert any(w.endswith('MAH/mi' if IMPERIAL else 'WH/km') and not w.startswith('--') for w in words.split()), words
 print('main page OK:', words[:120])
 # roll the other way and pitch down
 st.update(roll=-35, pitch=-8)
@@ -388,7 +388,7 @@ run(frames=20); save('main_roll_%s.png' % tag)
 st.update(roll=10, pitch=3, lat=HOME[0] + 0.0095, lon=HOME[1] + 0.013, yaw=200)
 run(frames=40); save('main_away_%s.png' % tag)
 words = ' '.join(t for t, x, y in texts)
-assert 'H' in words.split() and ('0.9MI' if IMPERIAL else '1.5K') in words, words
+assert 'H' in words.split() and ('0.9mi' if IMPERIAL else '1.5k') in words, words
 # a short flight east of home, towards waypoint 3, with status texts
 from simtelem import text_chunks
 for m, sev in [('ArduPlane V4.7.2 (fb773567)', 6), ('PreArm: Throttle below failsafe', 2), ('Mission: 3 WP', 6),
@@ -514,7 +514,7 @@ if not NATIVE:
     run(frames=4)
     w = ' '.join(t for t, x, y in texts)
     assert sum(1 for _, p in PLAYED if p.endswith('omniready.wav')) == n_greet + 1, 'no fresh start'
-    assert any(x in w for x in ('T 00:00', 'T 00:01', 'T 00:02')), w   # restarted (the sim craft is armed)
+    assert any(x in w for x in ('TIM 00:00', 'TIM 00:01', 'TIM 00:02')), w   # restarted (the sim craft is armed)
     print('model switch OK:', w[:90])
     MODEL[0] = 'Sim Plane'
 

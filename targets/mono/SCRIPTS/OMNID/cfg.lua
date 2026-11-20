@@ -84,27 +84,33 @@ function C.write(vals)
 end
 
 -- unit helpers for the pages: numbers in the chosen unit and short labels for 128x64
-local SPD = { [0] = { 3.6, "K" }, [1] = { 1, "MS" }, [2] = { 1.943844, "KT" }, [3] = { 2.236936, "MPH" } }
-local EFF = { [0] = { true, 1, "WH/KM" }, [1] = { false, 1, "MAH/KM" }, [2] = { true, 1.609344, "WH/MI" },
-              [3] = { false, 1.609344, "MAH/MI" } }
+local SPD = { [0] = { 3.6, "k" }, [1] = { 1, "MS" }, [2] = { 1.943844, "KT" }, [3] = { 2.236936, "MPH" } }
+local EFF = { [0] = { true, 1, "WH/km" }, [1] = { false, 1, "MAH/km" }, [2] = { true, 1.609344, "WH/mi" },
+              [3] = { false, 1.609344, "MAH/mi" } }
 function C.units(v)
   local sp, e, ft = SPD[v.spdUnit] or SPD[0], EFF[v.effUnit] or EFF[0], v.altUnit == 1
   local floor = math.floor
-  local u = { imperial = ft, spdLbl = sp[2], altLbl = ft and "FT" or "M", effLbl = e[3] }
+  local u = { imperial = ft, spdLbl = sp[2], altLbl = ft and "ft" or "m", effLbl = e[3] }
   function u.spd(mps) return floor(mps * sp[1] + 0.5) end
   function u.alt(m) return floor((ft and m * 3.28084 or m) + 0.5) end
-  -- distance in at most 5 characters: 999M 9.9K 99.9K 123K / 528FT 0.2MI 9.9MI 99MI 100MI
+  -- altitude with its unit: 999m, then 1.00km .. 9.99km, then 10.0km (user 2026-11-20); feet stay feet
+  function u.altStr(m)
+    if ft then return floor(m * 3.28084 + 0.5) .. "ft" end
+    if m < 999.5 then return floor(m + 0.5) .. "m" end
+    return string.format(m < 9995 and "%.2fkm" or "%.1fkm", m / 1000)
+  end
+  -- distance in at most 5 characters: 999m 9.9k 99.9k 123k / 528ft 0.2mi 9.9mi 99mi 100mi
   function u.dist(m)
     if not m then return "---" end
     if ft then
       local mi = m / 1609.344
-      if mi < 0.1 then return floor(m * 3.28084 + 0.5) .. "FT" end
-      if mi < 9.95 then return string.format("%.1fMI", mi) end
-      return floor(mi + 0.5) .. "MI"
+      if mi < 0.1 then return floor(m * 3.28084 + 0.5) .. "ft" end
+      if mi < 9.95 then return string.format("%.1fmi", mi) end
+      return floor(mi + 0.5) .. "mi"
     end
-    if m < 999.5 then return floor(m + 0.5) .. "M" end
-    if m < 99950 then return string.format("%.1fK", m / 1000) end
-    return floor(m / 1000 + 0.5) .. "K"
+    if m < 999.5 then return floor(m + 0.5) .. "m" end
+    if m < 99950 then return string.format("%.1fk", m / 1000) end
+    return floor(m / 1000 + 0.5) .. "k"
   end
   -- efficiency from power or current over ground speed (m/s), in the chosen unit
   function u.eff(volt, amps, mps)

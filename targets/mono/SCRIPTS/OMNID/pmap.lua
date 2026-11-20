@@ -17,8 +17,8 @@ local M_PER_DEG = 111320
 local STEPS = { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000 }
 local STEPS_FT = { 15.24, 30.48, 60.96, 152.4, 304.8, 804.672, 1609.344, 3218.688, 8046.72, 16093.44, 32186.88,
                    80467.2, 160934.4 }
-local LABELS_FT = { "50FT", "100FT", "200FT", "500FT", "1000FT", "0.5MI", "1MI", "2MI", "5MI", "10MI", "20MI", "50MI",
-                    "100MI" }
+local LABELS_FT = { "50ft", "100ft", "200ft", "500ft", "1000ft", "0.5mi", "1mi", "2mi", "5mi", "10mi", "20mi", "50mi",
+                    "100mi" }
 
 -- metres east / north of the reference point
 local function en(s, lat, lon)
