@@ -194,7 +194,11 @@ A TX12 MK2 gives Lua scripts about **127 KB**. EdgeTX stops every Lua script wit
 | At disarm with the flight log on | 101 of 127 KB |
 | Over mLRS, which sends bigger telemetry frames | 107 of 127 KB |
 
-0.1.1 leaves out the colour builds' code that Mono never uses and loads the voice phrase tables only when a mode changes or a message arrives: in the simulator that is about 15 KB less live memory than 0.1.0.
+| Measured on a TX12 MK2 with 0.1.1 | Live / peak |
+|---|---|
+| ELRS, armed over 30 min | 96 / 106 of 127 KB |
+
+0.1.1 leaves out the colour builds' code that Mono never uses and loads the voice phrase tables only when a mode changes or a message arrives: on the TX12 MK2 that took the live data from 104 to 93 KB and the peak from 114 to 100 KB (ELRS).
 
 The Link check page shows LUA MEM as two figures: the live data, and PK, the highest it has reached, garbage included.
 
@@ -219,7 +223,7 @@ Report anything else on the [Arduplane Stratos Discord](https://discord.gg/NrfaP
 | ArduPilot on TX12 MK2, EdgeTX 2.12: all pages, voice, summary | Bench pass |
 | INAV over ExpressLRS: arm and disarm cycles, flight log | Bench pass |
 | mLRS 1.4.04 on TX12 MK2: all pages, arming | Bench pass |
-| Freeze and "not enough memory" on the TX12 MK2 (ELRS and mLRS) | Memory use cut in 0.1.1; retest pending |
+| Freeze and "not enough memory" on the TX12 MK2 | Fixed in 0.1.1 (memory use cut): bench pass, armed over 30 min, ELRS |
 | Flight test | Not yet |
 | Pocket and Boxer | Not yet |
 
