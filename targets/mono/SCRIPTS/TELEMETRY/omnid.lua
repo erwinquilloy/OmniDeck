@@ -6,8 +6,6 @@
   Set it up as a telemetry screen: MODEL > DISPLAY > a screen > Script > omnid.
   ENTER: next page - main, map, messages (ArduPilot only), flight stats (Setup: STATS PAGE),
   link check, sensor check (Setup: SENSOR PAGE). The wheel or +/- scrolls messages and sensors.
-  ArduPilot parameters: SYS > Tools > OmniDeck Params (a tool of its own: it needs more Lua memory
-  than is left beside this script).
   The flight summary opens by itself at disarm (Setup: SUMMARY); ENTER leaves it. A text log of
   each flight is written at landing only with Setup: FLIGHT LOG ON (default OFF).
   Every start is a fresh one, and so is a model switch: nothing of the old model stays.
@@ -93,7 +91,7 @@ end
 
 -- A page that didn't load is tried again only every 3 s (retryAt): a load that failed for lack of
 -- memory, tried again on every update, froze the TX12 MK2 (power switch dead, RC link still up;
--- a PARAMS page test 2026-11-17). Its reason is shown in its place.
+-- a page load test 2026-11-17). Its reason is shown in its place.
 local retryAt = -100
 local function loadPage(n, auto)
   page = nil

@@ -25,8 +25,7 @@ OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out_mono')
 SPORT, NATIVE = '--sport' in sys.argv, '--native' in sys.argv
 SD = os.path.normpath(os.path.join(HERE, '..', 'targets', 'mono'))
 os.makedirs(OUT, exist_ok=True)
-PARAMS, MLRS = '--params' in sys.argv, '--mlrs' in sys.argv
-tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '') + ('_notable' if '--notable' in sys.argv else '') + ('_params' if PARAMS else '') + ('_mlrs' if MLRS else '')
+tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '') + ('_notable' if '--notable' in sys.argv else '')
 
 L = lua52.LuaRuntime(unpack_returned_tuples=True)
 G = L.globals()
@@ -195,12 +194,7 @@ G.playFile = play_file
 G.playNumber = lambda *a: None
 G.playTone = lambda *a: None
 G.EVT_VIRTUAL_ENTER, G.EVT_VIRTUAL_NEXT, G.EVT_VIRTUAL_PREV, G.EVT_VIRTUAL_EXIT = 0x2001, 0x2002, 0x2003, 0x2004
-G.EVT_VIRTUAL_ENTER_LONG = 0x2005
-KILLED = []
-G.killEvents = lambda e: KILLED.append(e)
-LOADS = []
 def load_script(path, mode='bt', env=None):
-    LOADS.append(str(path))
     p = os.path.join(SD, *[x for x in str(path).split('/') if x])
     if not os.path.isfile(p): return None
     src = open(p, encoding='utf-8').read()
@@ -218,47 +212,7 @@ def sport_pop():
     if not sport_q: return None
     return tuple(sport_q.pop(0))
 G.crossfireTelemetryPop = crsf_pop
-# ------------------------------------------------------------------ fake ArduPilot for the PARAMS page
-# --params: ArduPlane Stratos answering MAVlite over CRSF (0x80 C8 EA F4 len msgid payload ->
-# 0x80 F4 len msgid payload; an unknown name gets only the status text "Param read failed (NAME)").
-# --params --mlrs: any ArduPilot over the mLRS cbridge (MAVLink v2 in 0xAA frames, tools/fake_mavap.py).
-import struct
-APP = {'Q_ENABLE': 0.0, 'TRIM_THROTTLE': 45.0, 'AIRSPEED_CRUISE': 18.0, 'THR_MAX': 100.0, 'AIRSPEED_MAX': 30.0,
-       'TECS_PITCH_MAX': 20.0, 'TECS_CLMB_MAX': 5.0, 'FBWB_CLIMB_RATE': 2.0, 'AIRSPEED_MIN': 10.0,
-       'STAB_PITCH_DOWN': 2.0, 'TECS_SINK_MIN': 2.0, 'TECS_PITCH_MIN': 0.0, 'TECS_SINK_MAX': 5.0,
-       'ARMING_SKIPCHK': 512.0, 'ARMING_RUDDER': 1.0, 'ARMING_REQUIRE': 1.0, 'RLL_RATE_P': 0.08}
-if MLRS: APP['KFF_THR2PTCH'] = 0.0      # MAVLink has no "failed" text: an unknown name costs 4 tries
-LITE = {'on': True, 'sets': 0, 'reqs': 0}
-lite_out = []      # (due ms, cmd, data): answers ride the telemetry downlink a little later
-FAKE = None
-if MLRS:
-    from fake_mavap import FakeAP
-    FAKE = FakeAP()
-    FAKE.p = APP
-    FAKE.needs_hello = True    # the mLRS module: nothing over the bridge until the radio speaks
-def lite_reply(name):
-    d = [0xF4, 4 + len(name), 22] + list(struct.pack('<f', APP[name])) + list(name.encode())
-    lite_out.append((t_ms[0] + 200, 0x80, d))
-def crsf_push(cmd, data):
-    cmd, d = int(cmd), [int(data[i]) for i in range(1, len(data) + 1)]
-    if FAKE is not None:
-        if cmd == 0xAA: FAKE.from_radio(cmd, d)
-        return True
-    if not LITE['on'] or cmd != 0x80 or d[:3] != [0xC8, 0xEA, 0xF4]: return True
-    n, mid, pl = d[3], d[4], d[5:5 + d[3]]
-    assert len(pl) == n, d
-    if mid == 20:
-        LITE['reqs'] += 1
-        name = bytes(pl).decode()
-        if name in APP: lite_reply(name)
-        else: lite_out.append((t_ms[0] + 200, 0x80, [0xF1, 3] + list(('Param read failed (%s)' % name).encode()) + [0]))
-    elif mid == 23:
-        name = bytes(pl[4:]).decode()
-        if name in APP:
-            APP[name] = struct.unpack('<f', bytes(pl[:4]))[0]; LITE['sets'] += 1
-            lite_reply(name)
-    return True
-G.crossfireTelemetryPush = crsf_push
+G.crossfireTelemetryPush = lambda *a: True
 G.sportTelemetryPop = sport_pop
 G.sportTelemetryPush = lambda *a: True
 RSSI = [90]
@@ -348,17 +302,10 @@ CALL(script['init']); worst['init'] = G._N
 mem_init = L.eval('(collectgarbage("count"))')
 
 WORST_AT = [None]
-def fake_ap():
-    while lite_out and lite_out[0][0] <= t_ms[0]:
-        _, c, d = lite_out.pop(0); crsf_q.append((c, d))
-    if FAKE is not None and t_ms[0] % 100 == 0 and FEED[0] == 'normal':
-        FAKE.tick(t_ms[0] / 1000.0)
-        for fr in FAKE.frames(): crsf_q.append((0xAA, fr))
 def run(evt=0, frames=1):
     for _ in range(frames):
         t_ms[0] += 50
         if t_ms[0] % 250 == 0: feed()
-        fake_ap()
         CALL(script['run'], evt); evt = 0
         if G._N > worst['run']: WORST_AT[0] = (G._N, t_ms[0], texts[0][0] if texts else '')
         worst['run'] = max(worst['run'], G._N)
@@ -366,7 +313,6 @@ def bg(n):
     for _ in range(n):
         t_ms[0] += 50
         if t_ms[0] % 250 == 0: feed()
-        fake_ap()
         CALL(script['background']); worst['background'] = max(worst['background'], G._N)
 
 bg(40)
@@ -518,115 +464,6 @@ if not NATIVE:
     print('model switch OK:', w[:90])
     MODEL[0] = 'Sim Plane'
 
-def words_now(): return ' '.join(t for t, x, y in texts)
-if PARAMS and not NATIVE and not SPORT:
-    # SYS > Tools > OmniDeck Params: EdgeTX pauses the telemetry script while a tool runs, so only
-    # the tool is called; it reads the CRSF queue itself
-    FEED[0], RSSI[0] = 'normal', 90   # the FC-swap test left an INAV craft on
-    st['armed'] = False
-    run(frames=40)
-    L.execute('collectgarbage() collectgarbage()'); live0 = L.eval('(collectgarbage("count"))')
-    TOOL = {'r': 0, 'worst': 0}
-    def trun(evt=0, frames=1):
-        for _ in range(frames):
-            t_ms[0] += 50
-            if t_ms[0] % 250 == 0: feed()
-            fake_ap()
-            lcd_clear()
-            TOOL['r'] = CALL(TOOL['tool']['run'], evt); evt = 0
-            TOOL['worst'] = max(TOOL['worst'], G._N)
-            if TOOL['r']: return TOOL['r']
-        return TOOL['r']
-    def tool_start():
-        TOOL['tool'] = load_script('/SCRIPTS/TOOLS/OmniDeck Params.lua')()
-        CALL(TOOL['tool']['init']); TOOL['r'] = 0
-    tool_start()
-    trun(frames=200)      # Q_ENABLE first
-    w = words_now(); save('params_tabs_%s.png' % tag)
-    assert 'PARAMS' in w and 'FLIGHT' in w and any(t.startswith('MLRS ' if MLRS else 'CRSF ') and t.endswith('K') for t, x, y in texts), w
-    for _ in range(5): trun(G.EVT_VIRTUAL_NEXT)
-    trun(G.EVT_VIRTUAL_ENTER)
-    assert any(t == 'TECS' and y == 1 for t, x, y in texts), 'TECS tab not open: ' + words_now()
-    for _ in range(60):
-        trun(frames=20)
-        if not any('/13' in t for t, x, y in texts): break
-    w = words_now(); save('params_tecs_%s.png' % tag)
-    L.execute('collectgarbage() collectgarbage()'); live1 = L.eval('(collectgarbage("count"))')
-    print('PARAMS TECS tab:', w[:200])
-    assert '18.0 M/S' in w and '45 %' in w, w
-    for _ in range(12): trun(G.EVT_VIRTUAL_NEXT)      # down to the last row (13 rows, 7 shown)
-    w = words_now()
-    if not MLRS: assert 'THR TO PITCH' in w and 'N/A' in w, 'unknown name not n/a: ' + w
-    for _ in range(11): trun(G.EVT_VIRTUAL_PREV)      # back to row 2, cruise speed
-    trun(G.EVT_VIRTUAL_ENTER, frames=20)
-    w = words_now()
-    assert 'AIRSPEED_CRUISE' in w and 'ENT SAVE' in w, w
-    trun(G.EVT_VIRTUAL_NEXT); trun(G.EVT_VIRTUAL_NEXT)
-    assert '19.0 M/S' in words_now(), words_now()
-    trun(G.EVT_VIRTUAL_ENTER)
-    for _ in range(40):
-        trun(frames=5)
-        if 'SAVED AND VERIFIED' in words_now(): break
-    save('params_saved_%s.png' % tag)
-    assert 'SAVED AND VERIFIED' in words_now() and abs(APP['AIRSPEED_CRUISE'] - 19.0) < 1e-6, (words_now(), APP['AIRSPEED_CRUISE'])
-    print('PARAMS save OK:', words_now()[:120])
-    # armed (0x5001 bit 8 in the passthrough the tool reads): view only, AIR EDITS off
-    st['armed'] = True; trun(frames=20)
-    trun(G.EVT_VIRTUAL_NEXT, frames=2)
-    w = words_now()
-    assert 'VIEW ONLY' in w and '19.0 M/S' in w, w
-    st['armed'] = False; trun(frames=20)
-    # ARMING_SKIPCHK check editor: 512 = bit 9 airspeed skipped; skip the barometer too and save
-    trun(G.EVT_VIRTUAL_EXIT); trun(G.EVT_VIRTUAL_EXIT)
-    assert any(t.startswith('PARAMS') for t, x, y in texts), 'RTN twice: back to the tab list ' + words_now()
-    for _ in range(5): trun(G.EVT_VIRTUAL_PREV)
-    for _ in range(4): trun(G.EVT_VIRTUAL_NEXT)
-    trun(G.EVT_VIRTUAL_ENTER)
-    for _ in range(40):
-        trun(frames=10)
-        if '1 SKIP' in words_now(): break
-    assert 'SKIP CHECKS' in words_now() and '1 SKIP' in words_now(), words_now()
-    trun(G.EVT_VIRTUAL_ENTER, frames=20)
-    w = words_now(); save('params_bits_%s.png' % tag)
-    assert 'SKIP CHECKS' in w and 'BAROMETER' in w, w
-    trun(G.EVT_VIRTUAL_ENTER)     # toggle barometer
-    assert '2 SKIP' in words_now(), words_now()
-    for _ in range(20): trun(G.EVT_VIRTUAL_NEXT)
-    trun(G.EVT_VIRTUAL_ENTER)     # SAVE
-    for _ in range(40):
-        trun(frames=5)
-        if 'SAVED AND VERIFIED' in words_now(): break
-    assert APP['ARMING_SKIPCHK'] == 514.0 and 'SAVED AND VERIFIED' in words_now(), (APP['ARMING_SKIPCHK'], words_now())
-    print('PARAMS check editor OK: ARMING_SKIPCHK 512 -> 514')
-    print('PARAMS tool: +%.1f KB live with the TECS tab open (64-bit sim), run max %d instructions' % (live1 - live0, TOOL['worst']))
-    # RTN: editor -> rows -> tab list; RTN there leaves the tool
-    trun(G.EVT_VIRTUAL_EXIT); trun(G.EVT_VIRTUAL_EXIT)
-    assert any(t.startswith('PARAMS') for t, x, y in texts), words_now()
-    assert trun(G.EVT_VIRTUAL_EXIT) == 1, 'RTN on the tab list: leave the tool'
-    # long ENTER leaves from the rows too
-    tool_start(); trun(frames=60); trun(G.EVT_VIRTUAL_ENTER, frames=5)
-    assert trun(G.EVT_VIRTUAL_ENTER_LONG) == 1, 'long ENTER: leave the tool'
-    if not MLRS:
-        # ELRS with firmware that doesn't answer MAVlite: says so, ENTER leaves
-        LITE['on'] = False
-        tool_start()
-        trun(frames=500)
-        w = words_now(); save('params_noanswer_%s.png' % tag)
-        assert 'NO ANSWER' in w and 'STRATOS' in w, w
-        assert trun(G.EVT_VIRTUAL_ENTER) == 1, 'blocked: ENTER leaves'
-        LITE['on'] = True
-        print('PARAMS no-answer OK')
-    else:
-        assert FAKE.hellos > 0
-    # no ArduPilot at all (INAV craft): waits, RTN leaves
-    FEED[0] = 'inav'; crsf_q.clear()
-    tool_start(); trun(frames=40)
-    w = words_now()
-    assert 'WAITING FOR ARDUPILOT' in w, w
-    assert trun(G.EVT_VIRTUAL_EXIT) == 1
-    FEED[0] = 'normal'; st['armed'] = True
-    print('PARAMS waiting-for-ArduPilot OK')
-    run(frames=40)
 print('Mono checks OK', tag)
 
 # SYS > Tools > OmniDeck Setup, on the same screen stubs

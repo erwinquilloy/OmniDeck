@@ -25,15 +25,12 @@ C.ITEMS = {
   { "statsPage", "STATS PAGE", { { 0, "HIDE" }, { 1, "SHOW" } } },
   { "checkPage", "SENSOR PAGE", { { 0, "HIDE" }, { 1, "SHOW" } } },
   { "linkMode", "LINK", { { 0, "AUTO" }, { 1, "CRSF" }, { 2, "S.PORT" } } },
-  { "paramFlight", "AIR EDITS", { { 0, "VIEW ONLY" }, { 1, "GAINS+TRIM" } } },
 }
 C.NOTE = { statsPage = "IN THE PAGE CYCLE", checkPage = "PAGE 5", cells = "0 = AUTO", lowVolt = "0 = OFF", critVolt = "0 = OFF", batCap = "INAV/BF ONLY, 0 = OFF",
-           logFlight = "TEXT FILE IN OMNID/LOGS",
-           paramFlight = "PARAMS TOOL WHILE ARMED" }
+           logFlight = "TEXT FILE IN OMNID/LOGS" }
 
 C.DEFAULTS = { voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, sumAuto = 1, logFlight = 0, cells = 0,
-               lowVolt = 0, critVolt = 0, batCap = 0, startPage = 1, statsPage = 0, checkPage = 0, linkMode = 0,
-               paramFlight = 0 }
+               lowVolt = 0, critVolt = 0, batCap = 0, startPage = 1, statsPage = 0, checkPage = 0, linkMode = 0 }
 
 function C.path()
   local name = "default"
