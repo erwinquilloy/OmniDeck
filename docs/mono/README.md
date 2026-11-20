@@ -87,7 +87,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 
 | Row | Shows | Notes |
 |---|---|---|
-| ALT | altitude above home | `120m`; from 1000 m `1.00km` to `9.99km`, then `10.0km` |
+| ALT | altitude above home | `120m`; from 1000 m `1.00km` to `9.99km`, then `10.0km`; blinks while under the LOW ALT alarm |
 | SPD | airspeed, or ground speed without a sensor | in the Setup speed unit |
 | H | distance to home; the arrow right after the H points home | `999m`, `1.5k`, `25.0k` |
 | BAT | flight battery voltage | the value inverts when low and blinks when critical (Setup voltage alarms) |
@@ -142,7 +142,7 @@ With **FLIGHT LOG** on in Setup, the same flights are also written as text files
 
 ## Voice and alarms
 
-The same call-outs as the colour builds, from the packs in `SCRIPTS/OMNID/audio/` (Aria and Guy are included): flight modes, arm and disarm, battery percent while armed (50, 40, 30, 25, 20, 15, 10 and 5 %), failsafes, GPS fix changes, telemetry lost and recovered, ready and not ready to arm, ArduPilot messages worth hearing such as "Takeoff complete", a beep for other messages, and the low and critical voltage per cell when set in Setup. "OmniDeck telemetry ready" plays when the radio starts or you select the model.
+The same call-outs as the colour builds, from the packs in `SCRIPTS/OMNID/audio/` (Aria and Guy are included): flight modes, arm and disarm, battery percent while armed (50, 40, 30, 25, 20, 15, 10 and 5 %), failsafes, GPS fix changes, telemetry lost and recovered, ready and not ready to arm, ArduPilot messages worth hearing such as "Takeoff complete", a beep for other messages, the low and critical voltage per cell when set in Setup, and the low-altitude "Terrain, pull up" when LOW ALT is set: only while armed and once the aircraft has been above the setting, so the take-off and a landing approach from below don't count; again every 15 s while low, with the ALT value blinking on the main page. "OmniDeck telemetry ready" plays when the radio starts or you select the model.
 
 ## Settings
 
@@ -164,6 +164,7 @@ The same call-outs as the colour builds, from the packs in `SCRIPTS/OMNID/audio/
 | CELLS | 0 to 14; 0 = auto | 0 |
 | LOW V/CELL | 0 to 4.50 V in 0.05 V steps; 0 = off | Off |
 | CRIT V/CELL | 0 to 4.50 V in 0.05 V steps; 0 = off | Off |
+| LOW ALT | low-altitude alarm, 0 to 3000 in steps of 10, in the ALT/DIST unit; 0 = off | Off |
 | BATT MAH | pack capacity for INAV and Betaflight, which don't send it; 0 = off | 0 |
 | START PAGE | Main, Map | Main |
 | MAP VIEW | Aircraft, Home: what the map keeps in the centre | Aircraft |
@@ -185,7 +186,7 @@ While it runs, EdgeTX pauses the OmniDeck screen. While armed the editor is view
 
 ## Memory
 
-A TX12 MK2 gives Lua scripts about **127 KB**. EdgeTX stops every Lua script with "Lua disabled!" once that is used up, and its count includes garbage not yet collected. OmniDeck Mono loads one page at a time, clears the garbage once it is 8 KB above the live data, and never lets the total pass 112 KB.
+A TX12 MK2 gives Lua scripts about **127 KB**. EdgeTX stops every Lua script with "Lua disabled!" once that is used up, and its count includes garbage not yet collected. OmniDeck Mono loads one page at a time, clears the garbage once it is 6 KB above the live data, and never lets the total pass 106 KB.
 
 | Measured on a TX12 MK2 | Lua memory |
 |---|---|
@@ -193,7 +194,7 @@ A TX12 MK2 gives Lua scripts about **127 KB**. EdgeTX stops every Lua script wit
 | At disarm with the flight log on | 101 of 127 KB |
 | Over mLRS, which sends bigger telemetry frames | 107 of 127 KB |
 
-The Link check page shows the live figure, garbage included.
+The Link check page shows LUA MEM as two figures: the live data, and PK, the highest it has reached, garbage included.
 
 ## Problems
 
