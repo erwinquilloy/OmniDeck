@@ -52,9 +52,10 @@ WHAT'S NEW IN 0.4.0f (after 0.4.0)
   - Type: Waypoint, Loiter (unlimited), Loiter turns, Loiter time, Land, RTL, Speed change, Land start; on a quadplane
     (Q_ENABLE 1) also VTOL land and Transition, and Type on the first item switches Takeoff /
     VTOL takeoff.
-  - Field picks what - / + change: altitude, loiter turns, loiter radius, loiter time, speed,
-    transition direction (to FW / to VTOL). A timed loiter has no radius: ArduPilot uses
-    WP_LOITER_RAD for it.
+  - Field picks what - / + change: altitude (1 m a press), loiter turns (1), loiter radius
+    (10 m), loiter time (10 s), speed (1 m/s), transition direction (to FW / to VTOL). The
+    wheel moves in half steps (radius 5 m, time 5 s; altitude, turns and speed 1). A timed
+    loiter has no radius: ArduPilot uses WP_LOITER_RAD for it.
   - < / > move the item earlier / later (the takeoff stays first). Del deletes it and selects the
     item before it, so a tap on the map puts a new point in its place (to move a waypoint: Del,
     then tap where it should be). Del twice on the takeoff starts a new mission. The wheel changes
