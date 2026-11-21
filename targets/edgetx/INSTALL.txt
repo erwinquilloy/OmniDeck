@@ -1,10 +1,13 @@
-OmniDeck 0.4.0f for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 0.4.1 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 0.4.1 (after 0.4.0f)
+- Mission editor: - / + change the altitude by 1 m (was 10 m), the wheel by 1 m too (was 5 m).
 
 WHAT'S NEW IN 0.4.0f (after 0.4.0)
 - PARAMS page keys (Marcin's suggestions): the page has two columns. The wheel on the group tabs

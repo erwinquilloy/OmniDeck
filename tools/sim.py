@@ -2096,6 +2096,8 @@ if SPORT and not NATIVE:
         cv = Canvas(); wt['paint'](widget)
         bl = ED._boxes(); bx = {str(bl[i].k): bl[i] for i in range(1, len(bl) + 1)}
         def _btn(k): b = bx[k]; _tap(b.x + b.w / 2, b.y + b.h / 2)
+        _btn('+'); assert ED._draft()[0][s1].alt == 61, ('X20: + = altitude +1 m', ED._draft()[0][s1].alt)
+        _btn('-'); assert ED._draft()[0][s1].alt == 60, ('X20: - = altitude -1 m', ED._draft()[0][s1].alt)
         _btn('Type')
         assert ED._draft()[0][ED._draft()[1]].cmd == 17, 'X20: Type -> LOITER UNLIM'
         _btn('Type'); _btn('Type'); _btn('Type'); _btn('+')
@@ -2120,7 +2122,7 @@ if SPORT and not NATIVE:
         bl = ED._boxes(); bx = {str(bl[i].k): bl[i] for i in range(1, len(bl) + 1)}
         _btn('Done')
         assert not ED.active and widget.page == 2, 'X20: Done leaves the editor'
-        print('X20 mission editor: EDIT, add, Type, +10, Send (written + verified), Done OK')
+        print('X20 mission editor: EDIT, add, +1 m / -1 m, Type, Send (written + verified), Done OK')
     widget.apMission = 0
     step(0.2)
 widget.paramsPage, widget.page = 0, 1

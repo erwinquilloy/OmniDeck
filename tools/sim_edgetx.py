@@ -931,7 +931,7 @@ if SPORT and not NATIVE:
     render('etx_map_apmission_%s.png' % tag, 2)
     _pr = None
     print('ArduPilot mission download on the map page OK')
-    # ---- mission editor (EdgeTX TX16S / MK3): EDIT, tap to add, Type, +10, Send, Done
+    # ---- mission editor (EdgeTX TX16S / MK3): EDIT, tap to add, Type, +1 m, Send, Done
     def _tap(x, y):
         frame(G.EVT_TOUCH_FIRST, {'x': int(x), 'y': int(y)})
         frame(G.EVT_TOUCH_BREAK, {'x': int(x), 'y': int(y)})
@@ -971,7 +971,7 @@ if SPORT and not NATIVE:
     assert ED._draft()[0][s1].p3 == 20, ('loiter unlimited: Field -> radius, + + = 20 m', ED._draft()[0][s1].p3)
     _btn('Type'); _btn('+')
     d2, s2, f2 = ED._draft()
-    assert d2[s2].cmd == 18 and d2[s2].p1 == 3 and d2[s2].alt == alt0 + 10, ('Type -> Loiter turns 3, + = altitude +10 m', d2[s2].cmd, d2[s2].alt)
+    assert d2[s2].cmd == 18 and d2[s2].p1 == 3 and d2[s2].alt == alt0 + 1, ('Type -> Loiter turns 3, + = altitude +1 m', d2[s2].cmd, d2[s2].alt)
     _btn('Field'); _btn('+'); _btn('Field'); _btn('+'); _btn('+')
     d2, s2, f2 = ED._draft()
     assert d2[s2].p1 == 4 and d2[s2].p3 == 20 and f2 == 3, ('Field: turns 3 -> 4, radius 0 -> 20 m', d2[s2].p1, d2[s2].p3, f2)
@@ -1040,7 +1040,7 @@ if SPORT and not NATIVE:
     m = _ap.mission
     assert len(m) == nsent + 1, ('the aircraft holds the edited mission (+home)', len(m), nsent)
     _lo = [x for x in m if x[0] == 18][-1]
-    assert abs(_lo[2] - la_want) < 2e-6 and abs(_lo[4] - (alt0 + 10)) < 1e-3 and _lo[5] == 4 and _lo[6] == 20, ('loiter turns item on the aircraft', _lo)
+    assert abs(_lo[2] - la_want) < 2e-6 and abs(_lo[4] - (alt0 + 1)) < 1e-3 and _lo[5] == 4 and _lo[6] == 20, ('loiter turns item on the aircraft', _lo)
     _sp = [x for x in m if x[0] == 178][-1]
     assert abs(_sp[7] - 19) < 1e-6 and _sp[2] == 0, ('speed item on the aircraft, 19 m/s in param2, no position', _sp)
     render('etx_medit_sent_%s.png' % tag, 2)
@@ -1131,7 +1131,7 @@ if SPORT and not NATIVE:
     _tap(W * 0.5, H * 0.5)
     assert wd.page != 2, 'after Done a tap on the map turns the page again'
     wd.page = 2
-    print('mission editor: EDIT, add, Type, +10, Send (written + verified), Done OK')
+    print('mission editor: EDIT, add, Type, +1 m, Send (written + verified), Done OK')
     wd.apMission = 0
     step(0.2)
     assert UIm.MI.current()[1] != 'ardupilot', 'setting Off clears the downloaded mission'

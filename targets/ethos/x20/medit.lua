@@ -42,7 +42,7 @@ local FIELDS = { [16] = { "alt" }, [17] = { "alt", "radius" }, [18] = { "alt", "
 -- field: where it lives, step, limits. Loiter time has no radius: ArduPilot stores none for it
 -- (AP_Mission: it uses WP_LOITER_RAD)
 local SPEC = {
-  alt    = { k = "alt", step = 10, lo = 0,  hi = 5000 },
+  alt    = { k = "alt", step = 1,  lo = 0,  hi = 5000 },
   turns  = { k = "p1",  step = 1,  lo = 1,  hi = 255 },
   radius = { k = "p3",  step = 10, lo = 0,  hi = 2550 },   -- 0 = WP_LOITER_RAD
   time   = { k = "p1",  step = 10, lo = 0,  hi = 3600 },
