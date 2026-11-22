@@ -233,13 +233,26 @@ local function writeLog()
   collectgarbage()
 end
 
-init = function()
+-- A start that fails (a module that doesn't load, most likely "not enough memory" when other
+-- scripts on the model hold part of the Lua heap) must not stop the script: EdgeTX would show
+-- only "Syntax error" (GX12 tester, TELE key, 2026-11-22). Everything is dropped, the reason is
+-- shown with the memory in use, and the start is tried again every START_RETRY_S. That retry
+-- runs on getTime() (EdgeTX's 10 ms ticks), as etx.lua and its clock may be what failed.
+local START_RETRY_S = 5
+local startErr, startAt = nil, 0
+-- a module the script cannot run without: its load failure stops the start, with its reason
+local function need(name)
+  local r = load(name)
+  if not r then error(loadErr, 0) end
+  return r
+end
+local function start()
   curModel, modelAt = modelName(), -100
-  E = load("etx.lua")
+  E = need("etx.lua")
   T = E.loadfile("telem.lua")()
-  F = load("sum.lua")
-  A = load("aud.lua")
-  local C = load("cfg.lua")
+  F = need("sum.lua")
+  A = need("aud.lua")
+  local C = need("cfg.lua")
   cfg = C.read()
   ctx.u = C.units(cfg)
   ctx.mapView = cfg.mapView
@@ -252,6 +265,31 @@ init = function()
   A.altLim = cfg.lowAlt / (cfg.altUnit == 1 and 3.28084 or 1)   -- the setting is in the altitude unit
   ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
   loadPage(startPage())
+end
+
+init = function()
+  local ok, err = pcall(start)
+  if ok then startErr = nil return end
+  startErr = (string.gsub(tostring(err), "^[^:]*:%d+: ", ""))   -- no "omnid.lua:247: " in front
+  page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
+  ctx.T, ctx.F, ctx.A, ctx.clock = nil, nil, nil, nil
+  collectgarbage()
+  startAt = getTime()
+end
+
+-- after a failed start: try again every START_RETRY_S; true while still not started
+local function notStarted()
+  if not startErr then return false end
+  if getTime() - startAt >= START_RETRY_S * 100 then init() end
+  return startErr ~= nil
+end
+
+-- the reason something didn't load, 25 characters a line, and the memory in use
+local function drawErr(title, t)
+  lcd.drawText(1, 1, title, 0)
+  t = t or "?"
+  for i = 0, 4 do lcd.drawText(1, 11 + i * 8, string.sub(t, i * 25 + 1, i * 25 + 25), SMLSIZE) end
+  lcd.drawText(1, 56, "LUA MEM " .. math.floor(collectgarbage("count")) .. "K", SMLSIZE)
 end
 
 -- EdgeTX stops all Lua ("Lua disabled!") once the script heap passes ~127 KB on a TX12 MK2, and
@@ -280,13 +318,20 @@ local function gcGuard()
 end
 
 local function background()
+  if notStarted() then return end
   pump()
+  if startErr then return end   -- a model switch whose fresh start failed
   writeLog()
   gcGuard()
 end
 
 local function run(event)
-  pump()
+  if not notStarted() then pump() end
+  if startErr then
+    lcd.clear()
+    drawErr("OmniDeck: not started", startErr)
+    return 0
+  end
   writeLog()
   if ctx.wantSummary then
     ctx.wantSummary = false
@@ -307,11 +352,7 @@ local function run(event)
   if page then
     page.draw(ctx, event)
   else
-    lcd.drawText(1, 1, "OmniDeck: page missing", 0)
-    -- the reason, 25 characters a line, and the memory in use (EdgeTX stops Lua at ~127 KB)
-    local t = loadErr or "?"
-    for i = 0, 4 do lcd.drawText(1, 11 + i * 8, string.sub(t, i * 25 + 1, i * 25 + 25), SMLSIZE) end
-    lcd.drawText(1, 56, "LUA MEM " .. math.floor(collectgarbage("count")) .. "K", SMLSIZE)
+    drawErr("OmniDeck: page missing", loadErr)
   end
   gcGuard()
   return 0
