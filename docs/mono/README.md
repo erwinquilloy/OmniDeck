@@ -205,6 +205,7 @@ The Link check page shows LUA MEM as two figures: the live data, and PK, the hig
 ## Problems
 
 - **"not enough memory" when the script starts:** a `telem.lua` source file is on the card. Delete it and keep `telem.luac`.
+- **"Syntax error" over the page (for example "bad argument #1 to 'getValue'"), while OmniDeck runs fine from the file browser:** another telemetry script on one of the model's DISPLAY screens is failing, such as EdgeTX's stock `gplusl.lua` on a model with no GPS sensor. EdgeTX runs every screen's script in the background and shows any script's error over the page you are on. Set that screen to None or remove the script. If OmniDeck itself can't start, it says so: **OmniDeck: not started**, with the reason and LUA MEM, and it tries again every 5 s.
 - **No telemetry on INAV or Betaflight:** discover the sensors again on the radio with the aircraft powered.
 - **Horizon stays level on INAV over S.Port or F.Port:** turn on **Use Pitch & Roll sensors in telemetry** in INAV.
 - **Flight time 00:00 on ArduPilot on the bench:** expected; it counts only while ArduPilot reports it is flying.
