@@ -198,7 +198,12 @@ def inav_reply(cmd, payload):
 # as fc_msp.c answers them. type: 0 u8, 1 i8, 2 u16, 3 i16, 4 u32, 5 float; section 0x10 = control
 # profile (a value per profile), 0x20 = mixer profile; look = lookup names (mode 0x40).
 # OD_INAV_VER=8: an INAV before 9.0, whose telemetry MSP answers a v2 request with an error.
-INAV_VER = [int(os.environ.get('OD_INAV_VER', '9')), 1, 0]
+# OD_INAV_VER=9.0: INAV 9.0.x, whose MSP-over-telemetry replies leave out everything written with
+# sbufWriteDataSafe (the setting's name, lookup names and value; fixed in 9.1.0). OD_INAV_BUG=1: that
+# bug behind a 9.1 version number (the radio must show n/a, never a 0 made up from a short reply)
+_iv = (os.environ.get('OD_INAV_VER', '9.1') + '.0').split('.')
+INAV_VER = [int(_iv[0]), int(_iv[1]), 0]
+INAV_SAFE_BUG = INAV_VER[:2] == [9, 0] or os.environ.get('OD_INAV_BUG') == '1'
 INAV_PROF = {'ctl': 0, 'mix': 0}          # active control / mixer profile
 INAV_ARMED = [False]
 INAV_STORES = [0]
@@ -263,7 +268,7 @@ def inav_reply2(cmd, p):
         name, rest = _zname(p)
         s = INAV_SET.get(name)
         if s is None: return [2], True
-        if cmd == 0x1003: return _enc(s['t'], _sval(s)), False
+        if cmd == 0x1003: return ([] if INAV_SAFE_BUG else _enc(s['t'], _sval(s))), False
         if cmd == 0x1004:
             v = _dec(s['t'], rest)
             if v is None or v < s['min'] or v > s['max']: return [2], True
@@ -271,10 +276,11 @@ def inav_reply2(cmd, p):
             else: s['v'] = v
             msp_log['set'].append((name, v))
             return [], False
-        out = list(name.encode()) + [0, 0, 0, s['t'], s['sec'], 0x40 if s['look'] else 0]   # name\0, pgn, type, section, mode
+        out = ([] if INAV_SAFE_BUG else list(name.encode()) + [0]) + [0, 0, s['t'], s['sec'], 0x40 if s['look'] else 0]   # name\0, pgn, type, section, mode
         out += list((s['min'] & 0xFFFFFFFF).to_bytes(4, 'little')) + list((s['max'] & 0xFFFFFFFF).to_bytes(4, 'little'))
         out += [7, 0]
         out += [INAV_PROF['ctl'], 3] if s['sec'] == 0x10 else ([INAV_PROF['mix'], 2] if s['sec'] == 0x20 else [0, 0])
+        if INAV_SAFE_BUG: return out, False
         for nm in (s['look'] or []): out += list(nm.encode()) + [0]
         return out + _enc(s['t'], _sval(s)), False
     return None, False
@@ -2063,9 +2069,21 @@ elif NATIVE:
     for _ in range(60): step(0.2)
     PRi = _PRg(wt)
     if INAV_VER[0] < 9:
-        assert PRi.inav.state == 'old', ('INAV 8: page says it needs 9.0', PRi.inav.state)
+        assert PRi.inav.state == 'old', ('INAV 8: page says it needs 9.1', PRi.inav.state)
         render('iparams_old_%s.png' % tag, 6)
-        print('INAV %d: "Parameters need INAV 9.0 or later" OK' % INAV_VER[0])
+        print('INAV %d: "Parameters need INAV 9.1 or later" OK' % INAV_VER[0])
+    elif INAV_VER[:2] == [9, 0]:
+        assert PRi.inav.state == 'buggy', ('INAV 9.0: page says it needs 9.1', PRi.inav.state)
+        render('iparams_90_%s.png' % tag, 6)
+        print('INAV 9.0: "Parameters need INAV 9.1 or later" (empty setting replies) OK')
+    elif INAV_SAFE_BUG:
+        for _ in range(60): step(0.2)
+        assert PRi.inav.state == 'ready'
+        _nv = [PRi.valueOf(n) for n in ('max_angle_inclination_rll', 'max_angle_inclination_pit', 'roll_rate')]
+        assert all(v is False for v in _nv), ('short replies -> n/a, never 0', _nv)
+        assert PRi.stats.bad > 0
+        render('iparams_short_%s.png' % tag, 6)
+        print('INAV short setting replies: n/a (bad %d), no made-up 0 OK' % PRi.stats.bad)
     else:
         assert PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi.inav.state, PRi.inav.ver)
         assert PRi.inav.plat == 'AIRPLANE', ('platform read first', PRi.inav.plat)

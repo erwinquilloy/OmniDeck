@@ -839,7 +839,12 @@ local function mspReply(cmd, b, err)
     pend = nil
     if err then IN.state = "old" return end
     IN.ver = string.format("%d.%d.%d", b[1] or 0, b[2] or 0, b[3] or 0)
-    IN.state = (b[1] or 0) >= 9 and "ready" or "old"
+    -- INAV 9.0.x speaks MSPv2 over the radio link but answers the setting commands without the
+    -- setting's name and value: msp_shared.c gave each reply a buffer of size 0, and the "Safe"
+    -- writes those two use skip a full buffer (fixed in 9.1.0-RC1, INAV commit 922536955).
+    -- X20S + ELRS + INAV 9.0.0, 2026-11-23: every value read as 0.
+    local maj, mnr = b[1] or 0, b[2] or 0
+    IN.state = (maj > 9 or (maj == 9 and mnr >= 1)) and "ready" or (maj == 9 and "buggy" or "old")
     return
   end
   if m == "store" then
@@ -867,7 +872,10 @@ local function mspReply(cmd, b, err)
   if pend.check then
     if cmd ~= M_SETTING then return end
     local mt, r = IN.meta[name], rowOf(name)
-    if err or not mt then pend = nil phase, phaseCol = "No answer: check the value in INAV Configurator", "warn" return end
+    if err or not mt or #b < (VSIZE[mt.t] or 1) then
+      if not err then P.stats.bad = P.stats.bad + 1 end
+      pend = nil phase, phaseCol = "No answer: check the value in INAV Configurator", "warn" return
+    end
     local raw = decode(mt.t, b, 1)
     local same = (mt.t == 5) and sameBytes(f2b(raw), f2b(pend.checkRaw)) or raw == pend.checkRaw
     if same then
@@ -883,9 +891,11 @@ local function mspReply(cmd, b, err)
     vals[name], naAt[name] = false, os.clock()
     return
   end
-  -- name, pgn, type, section, mode, min, max, index, profile, count, [names], value
+  -- name, pgn, type, section, mode, min, max, index, profile, count, [names], value. A reply
+  -- for another name, or without its value, is not taken (n/a, counted as bad): never a 0 made up
   local i = 1
   while b[i] and b[i] ~= 0 do i = i + 1 end
+  local bad = not b[i] or string.char((table.unpack or unpack)(b, 1, i - 1)) ~= name
   i = i + 1
   local t, sec, mode = (b[i + 2] or 0) % 8, (b[i + 3] or 0), (b[i + 4] or 0)
   local mn = u32(b, i + 5)
@@ -902,6 +912,13 @@ local function mspReply(cmd, b, err)
       look[#look + 1] = string.char((table.unpack or unpack)(b, s0, i - 1))
       i = i + 1
     end
+  end
+  if bad or #b < i + (VSIZE[t] or 1) - 1 or not VSIZE[t] then
+    P.stats.bad = P.stats.bad + 1
+    pend = nil
+    if name == "platform_type" then IN.plat = "?" return end
+    vals[name], naAt[name] = false, os.clock()
+    return
   end
   local raw = decode(t, b, i)
   if sec == 0x10 and prof and IN.profile ~= prof then   -- CONTROL_VALUE: the active control profile
@@ -1069,8 +1086,11 @@ local function blocked(s)
     if IN.state == "notinav" then
       return "Parameters need ArduPilot or INAV", "This flight controller is " .. tostring(IN.variant) .. ": Betaflight has no settings by name over the radio link."
     end
+    if IN.state == "buggy" then
+      return "Parameters need INAV 9.1 or later", "This one is INAV " .. tostring(IN.ver) .. ": 9.0 sends setting values over the radio link empty (fixed in INAV 9.1.0)."
+    end
     if IN.state == "old" then
-      return "Parameters need INAV 9.0 or later", (IN.ver and ("This one is INAV " .. IN.ver) or "This INAV answers MSP version 1 only over the radio link") .. ". Update INAV, or use INAV Configurator."
+      return "Parameters need INAV 9.1 or later", (IN.ver and ("This one is INAV " .. IN.ver) or "This INAV answers MSP version 1 only over the radio link") .. ". Update INAV, or use INAV Configurator."
     end
     if quietAt then
       return "The flight controller doesn't answer", "INAV 9.0+ over ELRS / Crossfire 150 Hz or S.Port / F.Port. Not over mLRS (it drops the MSP frames)."
