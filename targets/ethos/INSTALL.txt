@@ -6,30 +6,26 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
-WHAT'S NEW IN 0.4.2-inav2 (TEST BUILD, X20 family only)
-- Needs INAV 9.1.0 or later. INAV 9.0.0 / 9.0.1 answer the setting requests over the radio link
-  without the setting's value (an INAV bug, fixed in 9.1.0), so every value read as 0 in inav1
-  (X20S + ELRS + INAV 9.0.0). The page now says "Parameters need INAV 9.1 or later" there, and a
-  reply without its value shows n/a, never 0.
-
-WHAT'S NEW IN 0.4.2-inav1 (TEST BUILD, X20 family only)
-- PARAMS page for INAV 9.1 or later (X20 family; the X18 copy is unchanged). Setting
-  "Params page (ArduPilot, INAV)". Over ELRS / TBS Crossfire (150 Hz) and S.Port / F.Port; not
-  over mLRS (its module drops the MSP frames). INAV 7 and 8 can't carry these commands over the
-  radio link: the page says "Parameters need INAV 9.1 or later". Betaflight: not supported.
+WHAT'S NEW IN 1.0.0b (after 0.4.1)
+- PARAMS page for INAV (X20 family; X18-size screens keep the ArduPilot-only page). Needs INAV
+  9.1.0 or later: INAV 7 and 8 can't carry the setting commands over the radio link, and INAV
+  9.0.x answers them without the values (an INAV bug, fixed in 9.1.0); the page says
+  "Parameters need INAV 9.1 or later" there. Over ELRS / TBS Crossfire (150 Hz) and S.Port /
+  F.Port; not over mLRS (its module drops the MSP frames). Betaflight: not supported.
 - 62 INAV settings in 8 groups: FLIGHT, LAUNCH, NAV THR, RTH, LANDING, MISSION, FW PID, MC PID,
   by their CLI names, in plain units (degrees, m, m/s; INAV keeps decidegrees, cm, cm/s).
   Ranges and choice names (e.g. RTH alt mode AT_LEAST / MAX) come from the flight controller.
-- Save: INAV sets the value, OmniDeck reads it back ("Saved and verified"), then stores it in
-  EEPROM while disarmed ("Saved, verified and stored").
+  A setting the flight controller doesn't answer shows n/a.
+- Save: INAV sets the value, OmniDeck reads it back, then stores it in EEPROM while disarmed
+  ("Saved, verified and stored").
 - In flight ("Params: edit in flight" = "Gains and trim"): the PID groups, level trim and hover
   throttle can be changed; they work at once and are stored automatically after the disarm
   (the hint line shows "NOT STORED" until then), on any page.
 - VTOL (mixer_control_profile_linking ON): INAV reads and writes the ACTIVE profile only. The
-  hint line shows "INAV 9.1.0  profile 2 MULTIROTOR". Hover PIDs (MC PID) can be edited only
-  with the VTOL in multirotor mode, plane PIDs (FW PID) only in fixed-wing mode; flip the VTOL
-  switch (on the bench, disarmed) to edit the other set.
-- The two settings were renamed: "Params page (ArduPilot, INAV)", "Params: edit in flight".
+  hint line shows e.g. "INAV 9.1.0  profile 2 MULTIROTOR". Hover PIDs (MC PID) can be edited
+  only with the VTOL in multirotor mode, plane PIDs (FW PID) only in fixed-wing mode; flip the
+  VTOL switch (on the bench, disarmed) to edit the other set.
+- Two settings renamed: "Params page (ArduPilot, INAV)", "Params: edit in flight".
 - INAV mission download pauses while the PARAMS page talks to INAV (one MSP request at a time).
 
 WHAT'S NEW IN 0.4.1 (after 0.4.0f)
