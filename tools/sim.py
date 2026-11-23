@@ -194,6 +194,111 @@ def inav_reply(cmd, payload):
         return b + [fl]
     if cmd == 121: return [3, 5, 1, 2, 0, 0, 0]
     return None
+# INAV 9 settings over MSPv2 (MSP2_COMMON_SETTING_INFO / _SETTING / _SET_SETTING, MSP_EEPROM_WRITE),
+# as fc_msp.c answers them. type: 0 u8, 1 i8, 2 u16, 3 i16, 4 u32, 5 float; section 0x10 = control
+# profile (a value per profile), 0x20 = mixer profile; look = lookup names (mode 0x40).
+# OD_INAV_VER=8: an INAV before 9.0, whose telemetry MSP answers a v2 request with an error.
+INAV_VER = [int(os.environ.get('OD_INAV_VER', '9')), 1, 0]
+INAV_PROF = {'ctl': 0, 'mix': 0}          # active control / mixer profile
+INAV_ARMED = [False]
+INAV_STORES = [0]
+def _s(t, mn, mx, v, sec=0, look=None): return {'t': t, 'min': mn, 'max': mx, 'v': v, 'sec': sec, 'look': look}
+INAV_SET = {
+    'max_angle_inclination_rll': _s(3, 100, 900, 450), 'max_angle_inclination_pit': _s(3, 100, 900, 350),
+    'fw_level_pitch_trim': _s(5, -10, 10, 1.5), 'roll_rate': _s(0, 4, 180, 18, 0x10 * 0), 'pitch_rate': _s(0, 4, 180, 9),
+    'yaw_rate': _s(0, 1, 180, 6), 'fw_turn_assist_pitch_gain': _s(5, 0, 2, 1.0),
+    'nav_fw_launch_thr': _s(2, 1000, 2000, 1700), 'nav_fw_launch_idle_thr': _s(2, 1000, 2000, 1000),
+    'nav_fw_launch_accel': _s(2, 1350, 20000, 1863), 'nav_fw_launch_climb_angle': _s(0, 5, 45, 18),
+    'nav_fw_launch_motor_delay': _s(2, 0, 5000, 500), 'nav_fw_launch_max_altitude': _s(2, 0, 60000, 0),
+    'nav_fw_launch_max_angle': _s(0, 5, 180, 45),
+    'nav_fw_cruise_thr': _s(2, 1000, 2000, 1400), 'nav_fw_min_thr': _s(2, 1000, 2000, 1200),
+    'nav_fw_max_thr': _s(2, 1000, 2000, 1700), 'nav_fw_pitch2thr': _s(0, 0, 100, 10),
+    'nav_fw_climb_angle': _s(0, 5, 80, 20), 'nav_fw_dive_angle': _s(0, 5, 80, 15), 'nav_fw_bank_angle': _s(0, 5, 80, 35),
+    'nav_fw_cruise_speed': _s(2, 0, 65535, 1500), 'nav_fw_allow_manual_thr_increase': _s(0, 0, 1, 0, look=['OFF', 'ON']),
+    'nav_rth_altitude': _s(2, 0, 65000, 5000), 'nav_rth_alt_mode': _s(0, 0, 4, 4, look=['CURRENT', 'EXTRA', 'FIXED', 'MAX', 'AT_LEAST']),
+    'nav_rth_home_altitude': _s(2, 0, 65000, 0), 'nav_rth_climb_first': _s(0, 0, 2, 1, look=['OFF', 'ON', 'ON_FW_SPIRAL']),
+    'nav_fw_loiter_radius': _s(4, 0, 30000, 7500),
+    'nav_fw_land_approach_length': _s(4, 100, 100000, 35000), 'nav_fw_land_glide_alt': _s(2, 100, 5000, 200),
+    'nav_fw_land_flare_alt': _s(2, 0, 10000, 150), 'nav_fw_land_glide_pitch': _s(1, -15, 45, 0),
+    'nav_fw_land_flare_pitch': _s(1, -15, 45, 8),
+    'nav_wp_radius': _s(2, 10, 10000, 100), 'nav_auto_speed': _s(2, 10, 2000, 500), 'nav_max_auto_speed': _s(2, 10, 2000, 1000),
+    'nav_extra_arming_safety': _s(0, 0, 1, 1, look=['ON', 'ALLOW_BYPASS']),
+    'tpa_rate': _s(0, 0, 200, [0, 20], 0x10), 'tpa_breakpoint': _s(2, 1000, 2000, [1500, 1500], 0x10),
+    'fw_tpa_time_constant': _s(2, 0, 5000, [2000, 2000], 0x10),
+    'nav_mc_hover_thr': _s(2, 1000, 2000, 1300), 'nav_land_maxalt_vspd': _s(2, 100, 2000, 200),
+    'nav_land_minalt_vspd': _s(2, 50, 500, 50),
+    'platform_type': _s(0, 0, 5, [1, 0], 0x20, look=['MULTIROTOR', 'AIRPLANE', 'HELICOPTER', 'TRICOPTER', 'ROVER', 'BOAT']),
+}
+for _ax, _fw, _mc in (('roll', (5, 7, 0, 50), (40, 30, 23)), ('pitch', (5, 7, 0, 50), (40, 30, 23)), ('yaw', (6, 10, None, 60), (85, 45, None))):
+    for _k, _v in zip(('p', 'i', 'd', 'ff'), _fw):
+        if _v is not None: INAV_SET['fw_%s_%s' % (_k, _ax)] = _s(2, 0, 255, [_v, _v + 100], 0x10)   # profile 2 differs
+    for _k, _v in zip(('p', 'i', 'd'), _mc):
+        if _v is not None: INAV_SET['mc_%s_%s' % (_k, _ax)] = _s(2, 0, 255, [_v + 100, _v], 0x10)   # hover tune = profile 2
+def _sval(s):
+    v = s['v']
+    if isinstance(v, list): v = v[INAV_PROF['mix' if s['sec'] == 0x20 else 'ctl']]
+    return v
+def _enc(t, v):
+    import struct
+    return list(struct.pack({0: '<B', 1: '<b', 2: '<H', 3: '<h', 4: '<I', 5: '<f'}[t], v))
+def _dec(t, b):
+    import struct
+    fmt = {0: '<B', 1: '<b', 2: '<H', 3: '<h', 4: '<I', 5: '<f'}[t]
+    n = struct.calcsize(fmt)
+    return struct.unpack(fmt, bytes(b[:n]))[0] if len(b) >= n else None
+def _zname(p):
+    if 0 not in p: return None, []
+    i = p.index(0)
+    return bytes(p[:i]).decode(), p[i + 1:]
+msp_log['set'] = []
+def inav_reply2(cmd, p):
+    """(payload, error) for an MSPv2 request"""
+    if cmd == 2: return [ord(c) for c in 'INAV'], False
+    if cmd == 3: return INAV_VER, False
+    if cmd == 250:
+        if INAV_ARMED[0]: return [2], True
+        INAV_STORES[0] += 1
+        return [], False
+    if cmd in (0x1003, 0x1004, 0x1007):
+        name, rest = _zname(p)
+        s = INAV_SET.get(name)
+        if s is None: return [2], True
+        if cmd == 0x1003: return _enc(s['t'], _sval(s)), False
+        if cmd == 0x1004:
+            v = _dec(s['t'], rest)
+            if v is None or v < s['min'] or v > s['max']: return [2], True
+            if isinstance(s['v'], list): s['v'][INAV_PROF['mix' if s['sec'] == 0x20 else 'ctl']] = v
+            else: s['v'] = v
+            msp_log['set'].append((name, v))
+            return [], False
+        out = list(name.encode()) + [0, 0, 0, s['t'], s['sec'], 0x40 if s['look'] else 0]   # name\0, pgn, type, section, mode
+        out += list((s['min'] & 0xFFFFFFFF).to_bytes(4, 'little')) + list((s['max'] & 0xFFFFFFFF).to_bytes(4, 'little'))
+        out += [7, 0]
+        out += [INAV_PROF['ctl'], 3] if s['sec'] == 0x10 else ([INAV_PROF['mix'], 2] if s['sec'] == 0x20 else [0, 0])
+        for nm in (s['look'] or []): out += list(nm.encode()) + [0]
+        return out + _enc(s['t'], _sval(s)), False
+    return None, False
+def fc_receive2(b, transport):
+    """a complete MSPv2 request: flags, cmd lo, cmd hi, size lo, size hi, payload"""
+    cmd, size = b[1] | (b[2] << 8), b[3] | (b[4] << 8)
+    if len(b) < 5 + size: return False
+    msp_log['req'].append(cmd)
+    if INAV_VER[0] < 9: out, err, cmd = [0], True, 0      # INAV 7/8: TELEMETRY_MSP_VER_MISMATCH
+    else: out, err = inav_reply2(cmd, b[5:5 + size])
+    if out is None: return True
+    body = [0, cmd & 0xFF, cmd >> 8, len(out) & 0xFF, len(out) >> 8] + out
+    per = 5 if transport == 'sport' else 57
+    for i in range(0, len(body), per):
+        c = [0x40 | (0x10 if i == 0 else 0) | (0x80 if err else 0) | reply_seq[0]] + body[i:i + per]
+        reply_seq[0] = (reply_seq[0] + 1) & 0x0F
+        if transport == 'sport':
+            c += [0] * (6 - len(c))
+            item = (c[0] | (c[1] << 8), c[2] | (c[3] << 8) | (c[4] << 16) | (c[5] << 24))
+            msp_reply_q.append((sim_time[0] + MSP_DELAY, item))
+            if i == 0: msp_reply_q.append((sim_time[0] + MSP_DELAY, item))   # receivers can repeat a frame
+        else:
+            msp_reply_q.append((sim_time[0] + MSP_DELAY, [0xEA, 0xC8] + c))
+    return True
 rx_req = {'buf': None}
 reply_seq = [0]
 drop_once = {'done': False}
@@ -201,10 +306,14 @@ def fc_receive(chunk, transport):
     st = chunk[0]
     if st & 0x10:
         rx_req['buf'] = list(chunk[1:])
+        rx_req['v2'] = (st >> 5) & 3 == 2
     elif rx_req['buf'] is not None:
         rx_req['buf'] += list(chunk[1:])
     b = rx_req['buf']
     if b is None or len(b) < 2: return
+    if rx_req.get('v2'):
+        if len(b) >= 5 and fc_receive2(b, transport): rx_req['buf'] = None
+        return
     size, cmd = b[0], b[1]
     need = 2 + size + (1 if transport == 'sport' else 0)
     if len(b) < need: return
@@ -606,6 +715,7 @@ if INAV:
     INAV_WPS = [(1, *project(HOME[0], HOME[1], 600, 30), 80, 0, 0), (1, *project(HOME[0], HOME[1], 1500, 50), 100, 0, 0),
                 (3, *project(HOME[0], HOME[1], 1800, 80), 100, 30, 0), (1, *project(HOME[0], HOME[1], 900, 120), 90, 0, 0),
                 (8, *project(HOME[0], HOME[1], 100, 200), 0, 0, 0xA5)]
+    widget.inavWp = 1          # INAV mission download is Off by default since the 0.3 series
 st['armed'] = False
 for _ in range(10): step(0.5)
 st['armed'] = True
@@ -1928,9 +2038,122 @@ KEY = lambda k: wt['event'](widget, consts['EVT_KEY'], consts[k], 0, 0)
 assert widget.paramsPage == 0, 'params page off by default'
 widget.paramsPage = 1; widget.page = 2 if NATIVE else 3
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-if NATIVE:
-    assert widget.page != 6, 'params page: ArduPilot only, page %s' % widget.page
-    print('params page not offered for INAV/Betaflight OK')
+if NATIVE and W <= 480:
+    assert widget.page != 6, 'X18: params page ArduPilot only, page %s' % widget.page
+    print('X18: params page not offered for INAV/Betaflight OK')
+elif NATIVE:
+    # ---- INAV PARAMS page (X20, INAV 9+ over MSPv2): read, save + EEPROM, VTOL profiles, old INAV
+    G._SPORTPUSH, G._POPMSPSPORT = _old            # the INAV MSP fake, not the ArduPilot one
+    assert widget.page == 6, ('X20: params page in the cycle for INAV', widget.page)
+    # params.lua as ui.lua holds it (upvalue PR of one of the widget's functions, at any depth)
+    _PRg = L.eval('''function(wt)
+      local seen = {}
+      local function find(f, d)
+        if type(f) ~= "function" or seen[f] or d > 4 then return nil end
+        seen[f] = true
+        for i = 1, 300 do
+          local n, v = debug.getupvalue(f, i)
+          if n == nil then break end
+          if n == "PR" and type(v) == "table" then return v end
+          local r = find(v, d + 1) if r then return r end
+        end
+      end
+      for _, k in ipairs({ "wakeup", "paint", "event" }) do local r = find(wt[k], 0) if r then return r end end
+    end''')
+    for _ in range(60): step(0.2)
+    PRi = _PRg(wt)
+    if INAV_VER[0] < 9:
+        assert PRi.inav.state == 'old', ('INAV 8: page says it needs 9.0', PRi.inav.state)
+        render('iparams_old_%s.png' % tag, 6)
+        print('INAV %d: "Parameters need INAV 9.0 or later" OK' % INAV_VER[0])
+    else:
+        assert PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi.inav.state, PRi.inav.ver)
+        assert PRi.inav.plat == 'AIRPLANE', ('platform read first', PRi.inav.plat)
+        _v = lambda n: PRi.valueOf(n)
+        assert abs(_v('max_angle_inclination_rll') - 45) < 1e-6 and abs(_v('fw_level_pitch_trim') - 1.5) < 1e-5, 'FLIGHT read and scaled'
+        assert _v('roll_rate') == 180, ('roll_rate x10 deg/s', _v('roll_rate'))
+        render('iparams_%s.png' % tag, 6)
+        _ip = os.path.join(SRC, 'x20', 'iplist.lua')
+        def _igoto(name):
+            import re as _re2
+            tabs, rows = [], {}
+            for _l in open(_ip, encoding='utf-8'):
+                m = _re2.match(r'\s*\{ "([^"]+)", "([a-z0-9_]+)"', _l)
+                if not m: continue
+                if m.group(1) not in rows: tabs.append(m.group(1)); rows[m.group(1)] = []
+                rows[m.group(1)].append(m.group(2))
+            for t in tabs:
+                if name in rows[t]: ti, ri = tabs.index(t), rows[t].index(name)
+            KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+            widget.page = 6
+            for _ in range(20): KEY('KEY_ROTARY_LEFT')
+            for _ in range(ti): KEY('KEY_ROTARY_RIGHT')
+            KEY('KEY_ENTER_BREAK')
+            for _ in range(ri): KEY('KEY_ROTARY_RIGHT')
+        # NAV THR: cruise throttle 1400 -> 1420 (2 wheel steps of 10), saved, read back, stored
+        _igoto('nav_fw_cruise_thr')
+        for _ in range(60): step(0.2)
+        assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))
+        KEY('KEY_ENTER_BREAK'); 
+        for _ in range(10): step(0.2)
+        KEY('KEY_ROTARY_RIGHT'); KEY('KEY_ROTARY_RIGHT')
+        _st0 = INAV_STORES[0]
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(40): step(0.2)
+        assert INAV_SET['nav_fw_cruise_thr']['v'] == 1420, ('INAV got 1420', INAV_SET['nav_fw_cruise_thr']['v'])
+        assert INAV_STORES[0] == _st0 + 1, ('EEPROM written once after the save', INAV_STORES[0] - _st0)
+        assert PRi.phase() == 'Saved, verified and stored', PRi.phase()
+        render('iparams_saved_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK')
+        # a lookup setting: INAV's own names, saved by index
+        _igoto('nav_rth_alt_mode')
+        for _ in range(40): step(0.2)
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(10): step(0.2)
+        KEY('KEY_ROTARY_LEFT')
+        render('iparams_lookup_%s.png' % tag, 6)
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(40): step(0.2)
+        assert INAV_SET['nav_rth_alt_mode']['v'] == 3, ('AT_LEAST -> MAX (index 3)', INAV_SET['nav_rth_alt_mode']['v'])
+        KEY('KEY_RTN_BREAK')
+        # VTOL, fixed-wing profile active: hover PIDs are locked; FW PIDs read profile 1
+        _igoto('mc_p_roll')
+        for _ in range(60): step(0.2)
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(20): step(0.2)
+        assert 'multirotor' in PRi.phase(), ('hover PID locked in plane mode', PRi.phase())
+        render('iparams_mclock_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        # the VTOL switch: mixer + control profile 2 (MULTIROTOR); the hover tune is read again
+        INAV_PROF['ctl'], INAV_PROF['mix'] = 1, 1
+        _igoto('mc_p_roll')
+        for _ in range(80): step(0.2)
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(40): step(0.2)
+        assert PRi.inav.plat == 'MULTIROTOR' and PRi.inav.profile == 1, ('platform / profile followed the switch', PRi.inav.plat, PRi.inav.profile)
+        assert _v('mc_p_roll') == 40, ('hover P from profile 2', _v('mc_p_roll'))
+        # armed, "Gains and trim": a hover gain changed in flight is set now, stored after the disarm
+        widget.flightEdit = 1
+        INAV_ARMED[0] = True; st['armed'] = True
+        _sumAuto0 = widget.sumAuto; widget.sumAuto = 0
+        for _ in range(5): step(0.2)
+        widget.page = 6
+        _st0 = INAV_STORES[0]
+        KEY('KEY_ROTARY_RIGHT')
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(40): step(0.2)
+        assert INAV_SET['mc_p_roll']['v'][1] == 41, ('in-flight set on profile 2', INAV_SET['mc_p_roll']['v'])
+        assert INAV_STORES[0] == _st0 and PRi.inav.dirty, 'not stored while armed'
+        render('iparams_inflight_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        widget.page = 1                                   # off the page: still stored after the disarm
+        INAV_ARMED[0] = False; st['armed'] = False
+        for _ in range(60): step(0.2)
+        assert INAV_STORES[0] == _st0 + 1 and not PRi.inav.dirty, ('stored after the disarm, page left', INAV_STORES[0] - _st0, PRi.inav.dirty)
+        widget.sumAuto, widget.flightEdit = _sumAuto0, 0
+        print('INAV params: read/scale, save+verify+EEPROM, lookup names, VTOL profile lock + switch, in-flight set stored at disarm OK')
+    widget.page = 1
+    G._SPORTPUSH, G._POPMSPSPORT = _ap_push, _ap_pop
 else:
     assert widget.page == 6, 'params page in the cycle for ArduPilot: %s' % widget.page
     _gets = [0]

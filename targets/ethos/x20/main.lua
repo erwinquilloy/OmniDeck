@@ -119,12 +119,12 @@ local function configure(w)
   line = form.addLine("Sensor check page")
   form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
     function() return w.checkPage end, function(v) w.checkPage = v end)
-  -- ArduPlane parameters (ArduPilot only)
-  line = form.addLine("ArduPilot params page")
+  -- parameters: ArduPlane (MAVlite) and INAV 9+ (MSP)
+  line = form.addLine("Params page (ArduPilot, INAV)")
   form.addChoiceField(line, nil, { { "Off", 0 }, { "On", 1 } },
     function() return w.paramsPage end, function(v) w.paramsPage = v end)
   -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
-  line = form.addLine("ArduPilot params: edit in flight")
+  line = form.addLine("Params: edit in flight")
   form.addChoiceField(line, nil, { { "Off", 0 }, { "Gains and trim", 1 } },
     function() return w.flightEdit end, function(v) w.flightEdit = v end)
   -- voice and alarms
