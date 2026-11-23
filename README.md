@@ -11,7 +11,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 ![Main page in flight](docs/screens/main.png)
 
-**Status:** 0.4.1, public beta. New in 0.4.1 for ArduPilot: the [PARAMS page](#params-page-parameter-editor) to read and change ArduPlane parameters from the radio, the aircraft's [mission on the map](#missions), and a [mission editor](#mission-editor) that sends a new mission to the aircraft. See [what you need](#parameters-and-missions-what-you-need) for the links and firmware they work with. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
+**Status:** 0.4.1. New in 0.4.1 for ArduPilot: the [PARAMS page](#params-page-parameter-editor) to read and change ArduPlane parameters from the radio, the aircraft's [mission on the map](#missions), and a [mission editor](#mission-editor) that sends a new mission to the aircraft. See [what you need](#parameters-and-missions-what-you-need) for the links and firmware they work with. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
 
 **Chat:** questions, ideas and flight reports on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
 
