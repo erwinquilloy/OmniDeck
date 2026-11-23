@@ -60,30 +60,41 @@ names = [L.eval('function(L, i) return L[i][2] end')(LIST, i) for i in range(1, 
 MISSING = {'KFF_RDDRMIX', 'YAW2SRV_DAMP'}
 for n in names:
     if n not in MISSING: ap.p.setdefault(n, 1.0)
+# since 0.4.0f (all three targets): two columns. The wheel on the tabs only moves a highlight; ENTER
+# opens the tab with the cursor on its first row; RTN goes back to the tabs.
+def to_tabs():
+    if P.editing(): P.key(S, 'back')
+    if P._focus() == 'rows': P.key(S, 'back')
+def hi_to(tab):
+    to_tabs()
+    for _ in range(60): P.key(S, 'left')
+    for _ in range(60):
+        if P._hi() == tab: return True
+        h = P._hi(); P.key(S, 'right')
+        if P._hi() == h: return False
+    return False
 def goto(name):
-    P.key(S, 'back')
-    for _ in range(100): P.key(S, 'left')
-    for _ in range(names.index(name) + 1): P.key(S, 'right')
+    """highlight the row's tab, ENTER, wheel down to the row"""
+    hi_to(next(t for t in tab_names() if name in rows_of(t)))
+    P.key(S, 'enter')
+    for _ in range(120):
+        if P._row() == name: break
+        P.key(S, 'right')
     run(1)
 
 def tab_names():
-    """the page's tabs in order, from walking the wheel (Q tabs only when shown)"""
-    P.key(S, 'back')
-    for _ in range(200): P.key(S, 'left')
-    seen = []
-    for _ in range(200):
-        P.key(S, 'right'); t = P._tab()
-        if not seen or seen[-1] != t: seen.append(t)
-    P.key(S, 'back')
+    """the page's tabs in order, walked with the highlight (Q tabs only when shown)"""
+    to_tabs()
+    for _ in range(60): P.key(S, 'left')
+    seen = [P._hi()]
+    for _ in range(60):
+        P.key(S, 'right')
+        if P._hi() == seen[-1]: break
+        seen.append(P._hi())
     return seen
 def open_tab(tab):
-    """wheel to the first row of a tab, then RTN: the page stays on that tab"""
-    P.key(S, 'back')
-    for _ in range(200): P.key(S, 'left')
-    for _ in range(200):
-        P.key(S, 'right')
-        if P._tab() == tab: break
-    P.key(S, 'back')
+    """highlight a tab, ENTER (opened, read), RTN: the page stays on that tab"""
+    hi_to(tab); P.key(S, 'enter'); P.key(S, 'back')
 TAB_OF = {}
 def rows_of(tab):
     if not TAB_OF:

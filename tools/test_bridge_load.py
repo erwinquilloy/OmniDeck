@@ -143,13 +143,18 @@ for _ in range(int(120 * HZ)):
     if all(val(P, n) is not None for n in nonq): fill = state['t']; break
 # 2 save AIRSPEED_CRUISE 18 -> 18.5 once everything is read
 def goto(name):
-    P.key(S, 'back')
-    for _ in range(200): P.key(S, 'left')
-    vis = [n for n, q in zip(names, qrow) if not q]
-    order = []
-    for g in dict.fromkeys(L.eval('function(L, i) return L[i][1] end')(LIST, i + 1) for i in range(len(names))):
-        order += [n for i, n in enumerate(names) if not qrow[i] and L.eval('function(L, i) return L[i][1] end')(LIST, i + 1) == g]
-    for _ in range(order.index(name) + 1): P.key(S, 'right')
+    """since 0.4.0f: highlight the row's tab, ENTER (cursor on its first row), wheel down to the row"""
+    if P.editing(): P.key(S, 'back')
+    if P._focus() == 'rows': P.key(S, 'back')
+    tab = L.eval('function(L, i) return L[i][1] end')(LIST, names.index(name) + 1)
+    for _ in range(60): P.key(S, 'left')
+    for _ in range(60):
+        if P._hi() == tab: break
+        P.key(S, 'right')
+    P.key(S, 'enter')
+    for _ in range(120):
+        if P._row() == name: break
+        P.key(S, 'right')
 def timed_save(name, steps):
     goto(name)
     for _ in range(int(20 * HZ)):         # the selected row's tab is read first: wait for its value
