@@ -11,7 +11,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 ![Main page in flight](docs/screens/main.png)
 
-**Status:** 0.3.0, public beta. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
+**Status:** 0.4.1, public beta. New in 0.4.1 for ArduPilot: the [PARAMS page](#params-page-parameter-editor) to read and change ArduPlane parameters from the radio, the aircraft's [mission on the map](#missions), and a [mission editor](#mission-editor) that sends a new mission to the aircraft. See [what you need](#parameters-and-missions-what-you-need) for the links and firmware they work with. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
 
 **Chat:** questions, ideas and flight reports on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
 
@@ -19,6 +19,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 - [What it does](#what-it-does)
 - [Radios and links](#radios-and-links)
+- [Parameters and missions: what you need](#parameters-and-missions-what-you-need)
 - [Install](#install)
 - [Flight controller setup](#flight-controller-setup)
 - [Main page and HUD](#main-page-and-hud)
@@ -27,10 +28,12 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 - [Messages](#messages)
 - [Flight summary and stats](#flight-summary-and-stats)
 - [Sensor check](#sensor-check)
+- [PARAMS page (parameter editor)](#params-page-parameter-editor)
 - [On EdgeTX](#on-edgetx)
 - [Settings](#settings)
 - [Map tiles](#map-tiles)
 - [Missions](#missions)
+- [Mission editor](#mission-editor)
 - [Voice and alarms](#voice-and-alarms)
 - [OmniDeck Mono (black-and-white radios)](#omnideck-mono-black-and-white-radios)
 - [Reporting a problem](#reporting-a-problem)
@@ -45,7 +48,8 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 - **Status messages** from ArduPilot with severity colours and a beep. A repeated message shows once with a count.
 - **Ready to arm** while disarmed, and voice call-outs for flight modes, arming, battery, failsafes and GPS.
 - **Flight summary** on disarm, an optional live **Flight stats** page, and a **flight log** file per flight on the SD card.
-- **Missions:** ArduPilot `.waypoints` files (Ethos) or waypoints learned from telemetry; INAV missions downloaded over the telemetry link.
+- **PARAMS page (ArduPilot):** read and change 77 ArduPlane parameters from the radio, in groups such as FLIGHT, TECS, PID and VTOL, plus rows of your own. Every save is read back to check it.
+- **Missions:** the ArduPilot mission downloaded from the aircraft onto the map, a mission editor that makes or changes one and sends it to the aircraft, ArduPilot `.waypoints` files (Ethos) or waypoints learned from telemetry; INAV missions downloaded over the telemetry link.
 
 ## Radios and links
 
@@ -89,15 +93,41 @@ What OmniDeck does about it (since 0.3.0), once ArduPilot has reported a TBS lin
 
 ELRS, mLRS, F.Port and S.Port are not affected. **For a live horizon on the radio, force Crossfire to 150 Hz on the transmitter.**
 
+## Parameters and missions: what you need
+
+The [PARAMS page](#params-page-parameter-editor), the [ArduPilot mission download](#missions) and the [mission editor](#mission-editor)'s Send don't just listen to telemetry: they send requests to ArduPilot and wait for its answers. That needs a link that carries messages both ways, and on some links firmware that answers them. These are the three paths tested on a radio:
+
+| Path | Link | PARAMS page | Mission download and Send | What it needs |
+|---|---|---|---|---|
+| **FrSky MAVlite** | FrSky S.Port or F.Port, ArduPilot passthrough | Any ArduPilot | ArduPlane Stratos v2.2.1 or later | ArduPilot answers parameter requests over FrSky passthrough (MAVlite) out of the box. The mission messages are a Stratos addition |
+| **MAVlite over CRSF** | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz | ArduPlane Stratos v2.2.1 or later | ArduPlane Stratos v2.2.1 or later | Stratos carries MAVlite over CRSF. Proposed for upstream ArduPilot as [ArduPilot#35160](https://github.com/ArduPilot/ardupilot/pull/35160) (parameters), still pending: upstream ArduPilot doesn't answer over CRSF yet |
+| **mLRS CRSF bridge** | mLRS with **Tx Ser Port = cbridge** | Any ArduPilot | Any ArduPilot | mLRS 1.4.04 (pre-release) or later. OmniDeck speaks standard MAVLink through the module, so no firmware support is needed |
+
+[ArduPlane Stratos](https://github.com/erwinquilloy/ardupilot) is an ArduPlane fork; its releases are on its [releases page](https://github.com/erwinquilloy/ardupilot/releases).
+
+**Setting up each path**
+
+- **FrSky S.Port / F.Port:** nothing beyond the telemetry setup (`SERIALn_PROTOCOL 10` for S.Port, `23` for F.Port). For the mission download and Send, flash Stratos v2.2.1 or later.
+- **ExpressLRS / TBS Crossfire:** flash Stratos v2.2.1 or later and keep the telemetry setup (`RC_OPTIONS` bit 8, CRSF passthrough). ExpressLRS: **Link Mode Normal**, 150 Hz packet rate or faster. Crossfire: **150 Hz forced**; at 50 Hz the link is too slow for these requests for now.
+- **mLRS:** update the module to 1.4.04 (pre-release) or later. In the mLRS Lua script, Tx section, set **Tx Ser Port = cbridge**, then store and reboot the module. The screens keep their telemetry as before. **Tx Ser Port2** has no cbridge in mLRS 1.4 and can stay on wbridge for Mission Planner over WiFi. Checked on a RadioMaster Nomad.
+
+**Not supported**
+
+- **ExpressLRS in MAVLink mode** (ELRS Lua "Link Mode" = MAVLink), with any firmware: the receiver passes only MAVLink to the flight controller, so OmniDeck's requests never arrive, and the module turns only telemetry back into CRSF. Switch Link Mode to Normal, or use S.Port / F.Port or mLRS. The telemetry screens still work in MAVLink mode, as fast as ArduPilot sends MAVLink on that port (1 Hz by default: raise `MAVn_EXTRA1`, `MAVn_EXTRA2` and `MAVn_EXT_STAT`).
+- **TBS Crossfire at 50 Hz:** too slow for now. Force 150 Hz.
+- **INAV and Betaflight:** the PARAMS page and the mission editor are ArduPilot only. INAV missions still [download onto the map](#missions).
+
+When requests go out and no answer comes back, the PARAMS page says **"The flight controller doesn't answer"**, with a hint for the link in use.
+
 ## Install
 
 Download the package for your radio from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases) and unzip it on the PC; the Ethos Suite zip goes to Ethos Suite as it is, unopened. The other two zips each hold an `INSTALL.txt` with the same steps.
 
 | Package | For |
 |---|---|
-| `OmniDeck_Ethos_Suite_0.3.0.zip` | Any Ethos colour radio, installed with **Ethos Suite**. Holds both screen sizes; the radio picks the right one. |
-| `OmniDeck_Ethos_0.3.0.zip` | The same Ethos files, to copy onto the radio by hand. |
-| `OmniDeck_EdgeTX_0.3.0.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
+| `OmniDeck_Ethos_Suite_0.4.1.zip` | Any Ethos colour radio, installed with **Ethos Suite**. Holds both screen sizes; the radio picks the right one. |
+| `OmniDeck_Ethos_0.4.1.zip` | The same Ethos files, to copy onto the radio by hand. |
+| `OmniDeck_EdgeTX_0.4.1.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
 
 **No SD card?** On radios that keep everything on built-in storage, the same folders go on the radio's internal drive: the one that already holds `scripts` (Ethos) or `WIDGETS` (EdgeTX). Wherever this guide says "card", read that drive. Put map tiles on the same drive as OmniDeck, and check the free space first: a satellite tile set can run to hundreds of MB.
 
@@ -105,15 +135,15 @@ Download the package for your radio from the [releases page](https://github.com/
 
 Two ways in: Ethos Suite, or copying the files yourself. Both end with the same `scripts/omnideck/` folder.
 
-**With Ethos Suite** (`OmniDeck_Ethos_Suite_0.3.0.zip`)
+**With Ethos Suite** (`OmniDeck_Ethos_Suite_0.4.1.zip`)
 
 1. Connect the radio by USB and start **Ethos Suite**.
-2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_0.3.0.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses.
+2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_0.4.1.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses.
 3. Disconnect and restart the radio, then carry on from step 4 below.
 
 If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPilot `.waypoints` files; the `logs` folder appears with the first flight log. Map tiles are never in a package; copy them as in [Map tiles](#map-tiles).
 
-**By hand** (`OmniDeck_Ethos_0.3.0.zip`)
+**By hand** (`OmniDeck_Ethos_0.4.1.zip`)
 
 1. Connect the radio by USB and choose the SD card, or use a card reader.
 2. Copy the `scripts` folder from the package to the **root** of the card. You should end up with:
@@ -127,7 +157,8 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
    ├── tones/        message beeps
    ├── logos/        panel logos; add your own PNG here
    ├── missions/     ArduPilot .waypoints files
-   └── logs/         one text file per flight
+   ├── logs/         one text file per flight
+   └── params_example.txt   your own PARAMS rows: rename to params.txt
    ```
 3. Eject the card and restart the radio.
 4. Add **OmniDeck** to a screen with a **full-screen** layout. In a smaller slot it shows only the minimap.
@@ -143,10 +174,12 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
    ```
    WIDGETS/OmniDeck/
    ├── main.lua  etx.lua  ui.lua  hud.lua  map.lua ...
+   ├── params.lua  plist.lua  medit.lua   PARAMS page and mission editor
    ├── audio/        voice packs: Aria, Guy
    ├── fixed/        pre-drawn panel and HUD frames
    ├── tones/  logos/  missions/
-   └── logs/         one text file per flight
+   ├── logs/         one text file per flight
+   └── params_example.txt   your own PARAMS rows: rename to params.txt
    SCRIPTS/TOOLS/
    ├── OmniDeck Setup.lua    the settings, per model
    └── OmniDeck Check.lua    load test that shows any error
@@ -156,7 +189,7 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
 5. Long-press the widget and choose **Full screen** to change pages and zoom. EdgeTX passes touch and keys to a widget only in full screen. Long-press RTN to leave.
 6. Settings: **SYS › Tools › OmniDeck Setup**.
 
-**Updating:** delete the `.luac` files in `WIDGETS/OmniDeck/` first, then copy the new folders.
+**Updating:** delete the `.luac` files in `WIDGETS/OmniDeck/` first, then copy the new folders. Your settings stay in `WIDGETS/OmniDeck/<model name>.cfg`; settings new in 0.4.1 start Off.
 
 **Not in the widget list?** Run **SYS › Tools › OmniDeck Check**: it loads the widget the way EdgeTX does and shows the exact error.
 
@@ -175,6 +208,7 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
 - **ArduPilot ground speed next to airspeed** needs `FRSKY_OPTIONS` bit 0; otherwise only one of the two is sent.
 - **Battery capacity:** ArduPilot sends `BATT_CAPACITY`. For INAV and Betaflight enter the pack size under **Battery mAh (INAV/BF only)**. The battery bar also needs a working current sensor.
 - **INAV virtual pitot** sends an estimate as if it were airspeed. Set the pitot to NONE if you would rather see ground speed on the tape.
+- **PARAMS page, mission download and mission editor:** see [what you need](#parameters-and-missions-what-you-need) for the firmware and link settings (Stratos v2.2.1 or later over CRSF; Tx Ser Port = cbridge on mLRS).
 
 ### Link settings on the transmitter
 
@@ -277,6 +311,7 @@ Tap the screen or press ENTER for the next page. The wheel zooms the map and scr
 | Messages | Setting **Messages page**: Auto (ArduPilot only, the default), On or Off. |
 | Flight stats | Setting **Flight stats page**, Off by default. On: always in the cycle, live during the flight. |
 | Sensor check | Setting **Sensor check page**, Off by default. Turn it on when you report a problem. |
+| PARAMS | Setting **ArduPilot params page**, Off by default. ArduPilot only. ENTER and the wheel work inside the page; RTN leaves it (see [keys](#keys-and-touch)). |
 
 The **flight summary** opens by itself on disarm (if **Flight summary on disarm** is On and the aircraft was armed for at least 10 s) and goes back to the main page after 15 s. Tap or turn to another page to leave sooner.
 
@@ -290,6 +325,7 @@ The **flight summary** opens by itself on disarm (if **Flight summary on disarm*
 - **Trail** in yellow. The **H** badge marks home; off the map it waits on the edge with the distance.
 - **Bottom bar:** the aircraft's latitude and longitude.
 - **Map view** and **Map orientation** settings: aircraft-centred or home-centred, north up or heading up. A tiled map is always north up.
+- **EDIT** (lower right, with **ArduPilot mission download** On and an ArduPilot flight controller): opens the [mission editor](#mission-editor) on EdgeTX colour radios and the Ethos X20 family.
 
 | | |
 |---|---|
@@ -321,6 +357,99 @@ Each value, the radio sensor it comes from, and its reading. "not found" in red 
 
 When the rows don't all fit (smaller screens such as the TX16S MK2, or the extra S.Port and EdgeTX link lines in the header), the list scrolls under the header: turn the wheel, or drag up and down. A scrollbar at the right edge shows there is more. A tap still turns the page.
 
+With ArduPilot and the PARAMS page or mission download On, the header also has a **Params:** line (messages sent, received and bad, and how many `params.txt` rows were read) and, once a mission is downloaded, **mission: N items**. Include them in a report about the PARAMS page or the mission editor.
+
+## PARAMS page (parameter editor)
+
+![PARAMS page, FLIGHT group](docs/screens/params.png)
+
+Read and change ArduPlane parameters from the radio at the field, without a laptop. Turn it on with **ArduPilot params page** (Off by default); the page then joins the page cycle whenever the flight controller is ArduPilot. It works on every colour radio: Ethos X20 family, X18, and EdgeTX. Check [what you need](#parameters-and-missions-what-you-need) first: over S.Port and F.Port any ArduPilot answers; over ELRS and Crossfire it needs ArduPlane Stratos v2.2.1 or later; over mLRS, the cbridge setting.
+
+### Groups
+
+The left column holds the groups, the right column the open group's rows: name, value and unit.
+
+| Group | Parameters |
+|---|---|
+| FLIGHT | `ROLL_LIMIT_DEG`, `PTCH_LIM_MAX_DEG`, `PTCH_LIM_MIN_DEG`, `ARSPD_USE`, `NAVL1_PERIOD`, `THR_MIN`, `PTCH_TRIM_DEG`, `KFF_THRAT2ELEV`, `KFF_RDDRMIX`, `YAW2SRV_DAMP` |
+| LAUNCH | `TKOFF_ALT`, `TKOFF_LVL_PITCH`, `TKOFF_THR_MINACC`, `TKOFF_THR_DELAY`, `TKOFF_THR_MAX` |
+| RETURN | `RTL_ALTITUDE`, `RTL_RADIUS`, `WP_LOITER_RAD`, `RTL_AUTOLAND` |
+| FAILSAFE | `FS_SHORT_ACTN`, `FS_LONG_ACTN`, `FS_LONG_TIMEOUT`, `BATT_LOW_VOLT`, `BATT_CRT_VOLT`, `BATT_FS_LOW_ACT` |
+| ARMING | `ARMING_SKIPCHK` (as a list of checks), `ARMING_RUDDER`, `ARMING_REQUIRE` |
+| TECS | `TRIM_THROTTLE`, `AIRSPEED_CRUISE`, `THR_MAX`, `AIRSPEED_MAX`, `TECS_PITCH_MAX`, `TECS_CLMB_MAX`, `FBWB_CLIMB_RATE`, `AIRSPEED_MIN`, `STAB_PITCH_DOWN`, `TECS_SINK_MIN`, `TECS_PITCH_MIN`, `TECS_SINK_MAX`, `KFF_THR2PTCH`: the TECS tuning helper's results, in its order |
+| LANDING | `LAND_FLARE_ALT`, `LAND_FLARE_SEC`, `LAND_PITCH_DEG`, `TECS_LAND_ARSPD` |
+| PID | `RLL_RATE_P`, `_I`, `_D`, `_FF`, `PTCH_RATE_P`, `_I`, `_D`, `_FF`, `RLL2SRV_TCONST`, `PTCH2SRV_TCONST`, `RLL2SRV_RMAX`, `PTCH2SRV_RMAX_UP`, `PTCH2SRV_RMAX_DN`, `AUTOTUNE_LEVEL` |
+| VTOL | `Q_ASSIST_SPEED`, `Q_ASSIST_ALT`, `Q_RTL_MODE`, `Q_TRANSITION_MS`, `Q_LAND_FINAL_SPD`, `Q_FS_EKF_HOLD`, `Q_A_ANGLE_MAX` |
+| Q PID | `Q_A_RAT_RLL_P`, `_I`, `_D`, `Q_A_RAT_PIT_P`, `_I`, `_D`, `Q_A_RAT_YAW_P`, `_I`, `Q_A_ANG_RLL_P`, `Q_A_ANG_PIT_P`, `Q_A_ANG_YAW_P` |
+
+VTOL and Q PID show only on a quadplane (`Q_ENABLE` 1). Choice parameters such as `ARSPD_USE`, `RTL_AUTOLAND` or `FS_LONG_ACTN` show their meaning ("Use", "RTL") rather than a number. A parameter the flight controller doesn't have shows **n/a** (for example `Q_FS_EKF_HOLD`, which only Stratos has); ENTER on an n/a row asks once more.
+
+### Reading
+
+- **Only the open group is read**, one value at a time, the selected row first. Values already read are kept when you open another group, so going back is instant.
+- While a group is read, a thin bar under the top bar and **reading n/m** in the lower right show how far it is; **n read** when done. A row not read yet shows **...**.
+- Values are read only while the page is open. Telemetry keeps coming in while it reads.
+- The page's code leaves the radio's memory 10 s after you leave the page (it stays while the mission download or the editor uses it), so the other pages keep their speed.
+
+### Keys and touch
+
+| Where | Wheel | ENTER | RTN | Touch |
+|---|---|---|---|---|
+| Group column (left) | Moves the highlight. Nothing is opened or read | Opens the group, cursor on its first row | Next page | Tap a group to open it |
+| Rows (right) | Moves the cursor, inside the open group | Opens the editor for that row | Back to the group column | Tap a row to edit it |
+| Editor | Changes the value by its step | Saves | Back, without saving | **-**, **+**, **Back**, **Save** (X18: also **-10**, **+10**) |
+
+- **< BACK** in the lower right does the same as RTN. When a group has more rows than fit, up and down arrows appear left of it; groups that fit show none.
+- A tap that hits no button does nothing, so the page is never left by a missed tap. Leave it with RTN or BACK: once from the group column, twice from a group's rows. Only the "doesn't answer" screen, which has no buttons, turns the page on a tap.
+- The bottom line shows the keys for where you are.
+- **X18 (480 x 320):** larger groups and rows for touch; drag either column to scroll.
+
+| | |
+|---|---|
+| ![TECS group, cursor on AIRSPEED_CRUISE](docs/screens/params_tecs.png) | ![Editor after a save](docs/screens/params_saved.png) |
+| The TECS group open, cursor on `AIRSPEED_CRUISE`. | The editor: name, description, range and step, and the value before. **Saved and verified** after Save. |
+
+### Editing and saving
+
+1. Open the group, move to the row and press ENTER (or tap the row).
+2. Turn the wheel, or tap **-** and **+**. The editor shows the allowed range, the step and the value before you started (**was**).
+3. Press ENTER or tap **Save**.
+
+- A save is sent **once**. **Saved and verified** shows only when the value read back from the flight controller matches.
+- **No answer: check the value in a GCS** means no reply came. OmniDeck never repeats a save by itself.
+- **Not saved: FC has ...** means ArduPilot kept another value, for example one outside its own limits.
+- Rows whose lowest value is -1 (`Q_ASSIST_SPEED`, `RTL_ALTITUDE`, `TECS_LAND_ARSPD`) step between 0 and -1.
+- ArduPilot stores the value at once, as from a GCS. Some parameters only take effect after a reboot, as in Mission Planner.
+
+### Armed and in flight
+
+- **While armed the page is view only:** the editor opens but says **Armed: view only**, and nothing is written.
+- Setting **ArduPilot params: edit in flight** = **Gains and trim** lets the PID and Q PID rows, `PTCH_TRIM_DEG` and `KFF_THRAT2ELEV` be changed while armed. Change one wheel click at a time, with height to spare, as when tuning from a GCS.
+
+### ARMING_SKIPCHK
+
+![ARMING_SKIPCHK check list](docs/screens/params_skipchk.png)
+
+`ARMING_SKIPCHK` opens as a list of ArduPlane's arming checks, each **CHECK** or **SKIP**, with the number skipped at the top. The wheel moves through the checks and the buttons, ENTER flips a check or presses a button; or tap a check to flip it. **All on** checks everything (0); **All off** skips every check (-1, shown as ALL SKIPPED). Save writes the new value.
+
+### Your own rows: params.txt
+
+Add parameters the built-in list doesn't have with a `params.txt` file, one for all models: `scripts/omnideck/params.txt` on Ethos, `WIDGETS/OmniDeck/params.txt` on EdgeTX. The package has a `params_example.txt` next to it with the rules; rename it to `params.txt` to start from it.
+
+```
+[PID] flight
+YAW_RATE_P | Yaw P | 0.005
+
+[NAV]
+NAVL1_DAMPING | L1 damping | 0.05
+WP_RADIUS | WP radius | 5
+```
+
+- `[GROUP]` puts the rows below it in that group. A built-in name (PID, TECS, ...) adds to it; a new name makes a new group after the built-in ones. `[GROUP] flight` lets its rows be changed in flight with **Gains and trim**.
+- Each row is `NAME`, optionally `| label | step` (the editor text and the wheel step). Without a step the wheel moves 1 for whole numbers, otherwise about 1 % of the value. Rows have no range of their own; ArduPilot keeps its limits.
+- Rows before any `[GROUP]` go to OTHER. `Q_` rows show only when `Q_ENABLE` is 1. A name already in the list is skipped.
+- At most 100 rows and 14 groups. Restart the radio, or select the model again, after editing. The Sensor check page's **Params:** line shows how many rows were read and the first line that couldn't be.
+
 ## On EdgeTX
 
 | | | |
@@ -331,16 +460,23 @@ The same pages, drawn a little lighter: the main-page minimap has no trail or mi
 
 ![EdgeTX main page on 800 x 480](docs/screens/edgetx_main_800x480.png)
 
+The PARAMS page and the mission editor work the same on EdgeTX, in full screen. The editor's buttons fit the 480 x 272 screen of the TX16S MK2.
+
+| | |
+|---|---|
+| ![EdgeTX PARAMS page, TECS group](docs/screens/edgetx_params.png) | ![EdgeTX mission editor](docs/screens/edgetx_medit.png) |
+| PARAMS page on a TX16S MK2: the TECS group, with row arrows and BACK in the bottom row. | Mission editor on a TX16S MK2: a loiter-turns item selected. |
+
 ### EdgeTX versions and the CPU limit
 
 EdgeTX stops a widget whose screen update runs more than about 20,000 Lua instructions (the "CPU limit" message). It counts instructions, not time, so a faster radio gets no extra room. Ethos has no such limit. OmniDeck lets EdgeTX draw the horizon ground and clipped lines in C where the version allows it.
 
 | EdgeTX | Horizon ground in C | Clipped lines in C | Heaviest main-page update |
 |---|---|---|---|
-| 2.11, 2.12 | Yes | All | 75 % of the limit |
-| 2.9, 2.10 | Yes | Only lines with no part left of or above the screen | 76 % of the limit |
+| 2.11, 2.12 | Yes | All | 72 % of the limit |
+| 2.9, 2.10 | Yes | Only lines with no part left of or above the screen | 73 % of the limit |
 
-0.3.0, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. S.Port peaks at 68 %, INAV and Betaflight at 62 %, and a typical main-page update in steady flight is about 48 %. The 800 x 480 screen costs the same as 480 x 272.
+0.4.1, worst case in the EdgeTX simulator (`tools/sim_edgetx.py`, run as EdgeTX 2.12.0 and 2.9.4): ArduPilot over CRSF with a 120-waypoint mission. The heaviest page of all is the map over S.Port while the ArduPilot mission is downloaded and edited: 80 % on 2.9, 77 % on 2.12. The PARAMS page peaks at 56 %, INAV at 62 %. The 800 x 480 screen costs the same as 480 x 272.
 
 **Recommendation:** use EdgeTX 2.11 or later, ideally the latest 2.12.x. Keep the radio's own telemetry alarms and the flight controller's failsafes as your safety net; OmniDeck is a display. Since 2.11.1, EdgeTX refuses sound files whose path is longer than 45 characters: the bundled packs fit, and your own pack's folder name should be 4 letters or fewer.
 
@@ -350,35 +486,49 @@ On Ethos: long-press the widget › **Configure widget**. On EdgeTX: **SYS › T
 
 | | | |
 |---|---|---|
-| ![OmniDeck Setup, first rows](docs/screens/edgetx_setup_1.png) | ![OmniDeck Setup, middle rows](docs/screens/edgetx_setup_2.png) | ![OmniDeck Setup, last rows](docs/screens/edgetx_setup_3.png) |
+| ![OmniDeck Setup, first rows](docs/screens/edgetx_setup_1.png) | ![OmniDeck Setup, missions, pages and ArduPilot parameters](docs/screens/edgetx_setup_2.png) | ![OmniDeck Setup, last rows](docs/screens/edgetx_setup_3.png) |
+| Link, units, main page and map. | Missions, pages and the ArduPilot parameter settings. | ArduPilot parameters, voice and alarms. |
+
+The list is grouped the same way on both systems: link, units, main page, map, missions, pages, ArduPilot parameters, then voice and alarms. Settings new in 0.4.1 start Off.
 
 | Setting | Choices | Notes |
 |---|---|---|
+| **Link** | | |
 | Telemetry link | Auto · CRSF / ELRS / mLRS · S.Port / F.Port / FBUS | Auto picks the link whose sensors are receiving. |
-| Voice | Off · voice packs on the card | Picking one plays a test clip. |
-| Message beep | Every message · Warnings and errors · Off | Works with the voice off. |
+| **Units** | | |
 | Speed units | km/h · m/s · knots · mph | |
 | Altitude units | metres · feet | |
 | Efficiency units | Wh/km · mAh/km · Wh/mi · mAh/mi | Shown in the THR block and the summary. |
+| **Main page** | | |
+| Start page | Main · Map | |
+| Main page top-right panel (Ethos) · Top-right panel (EdgeTX) | Minimap · Home arrow · Radar · OmniDeck logo · Logo file / Stratos logo | See [Top-right panel choices](#top-right-panel-choices). |
+| Logo file (Ethos) | None · PNGs in `logos/` | For the Logo file panel. |
+| **Map** | | |
 | Map orientation | North up · Heading up | A tiled map is always north up. |
 | Map view | Aircraft centred · Home centred | Home centred zooms out to keep the aircraft on the map. |
 | Zoom source (Ethos) · Map zoom control (EdgeTX) | A pot, slider or switch | Optional manual zoom. |
 | Map tiles | Off · the tile sets found on the card | EdgeTX also has Auto, the first set found. |
-| Mission file (Ethos) | None · `.waypoints` files | ArduPilot; without a file, waypoints are learned from telemetry. |
-| INAV mission download | Off · On | Off by default. Ethos also has a Reload button. |
 | Flight trail | On · Off | Ethos has a button to clear the trail and learned waypoints. |
-| Battery mAh (INAV/BF only) | 0 to 50,000 (EdgeTX 30,000) | ArduPilot sends its own capacity. |
-| Low / Critical voltage alarm | Volts per cell, 0 = off | "Low voltage" every 30 s, "Critical voltage" every 15 s, after 5 s below. |
-| Battery cells | 0 = auto, up to 14 | Set it for Li-ion or a part-charged pack. |
-| Low altitude alarm | 0 = off, up to 3,000 | "Terrain, pull up" when armed and below it, after having been above it once. |
-| Flight summary on disarm | On · Off | |
-| Start page | Main · Map | |
-| Top-right panel | Minimap · Home arrow · Radar · OmniDeck logo · Logo file / Stratos logo | See [Top-right panel choices](#top-right-panel-choices). |
-| Logo file (Ethos) | None · PNGs in `logos/` | For the Logo file panel. |
+| **Missions** | | |
+| Mission file (Ethos) | None · `.waypoints` files | ArduPilot; without a file, waypoints are learned from telemetry. |
+| ArduPilot mission download | Off · On | Off by default. The aircraft's mission on the map, and the map page's EDIT button for the [mission editor](#mission-editor). Needs [one of these paths](#parameters-and-missions-what-you-need). Off takes the mission off the map again. |
+| INAV mission download | Off · On | Off by default. Ethos also has a Re-download button. |
+| **Pages** | | |
+| Page switch, Page switch action (EdgeTX) | A switch · next page or position picks the page | Changes page outside full screen too. |
 | Messages page | Auto (ArduPilot only) · On · Off | |
 | Flight stats page | Off · On | On: in the cycle, live in flight. |
+| Flight summary on disarm | On · Off | |
 | Sensor check page | Off · On | |
-| Page switch, Page switch action (EdgeTX) | A switch · next page or position picks the page | Changes page outside full screen too. |
+| **ArduPilot parameters** | | |
+| ArduPilot params page | Off · On | Off by default. Puts the [PARAMS page](#params-page-parameter-editor) in the cycle (ArduPilot only). |
+| ArduPilot params: edit in flight | Off · Gains and trim | Off: view only while armed. Gains and trim: the PID, Q PID and pitch trim rows can be changed in flight. |
+| **Voice and alarms** | | |
+| Voice | Off · voice packs on the card | Picking one plays a test clip. |
+| Message beep | Every message · Warnings and errors · Off | Works with the voice off. |
+| Battery mAh (INAV/BF only) | 0 to 50,000 (EdgeTX 30,000) | ArduPilot sends its own capacity. |
+| Battery cells | 0 = auto, up to 14 | Set it for Li-ion or a part-charged pack. |
+| Low / Critical voltage alarm | Volts per cell, 0 = off | "Low voltage" every 30 s, "Critical voltage" every 15 s, after 5 s below. |
+| Low altitude alarm | 0 = off, up to 3,000 | "Terrain, pull up" when armed and below it, after having been above it once. |
 
 ## Map tiles
 
@@ -426,10 +576,81 @@ One tile: `/IMAGES/ethosmaps/maps/GOOGLE/Satellite/15/27470/15200.jpg`. In OmniD
   - Waypoints show numbered, holds as H and landings as L; the active waypoint is green.
   - A mission uploaded after the radio started shows within about 10 s while the aircraft is disarmed.
   - Only the first mission on the flight controller is shown. **Save it to EEPROM** in INAV Configurator, or the flight controller won't have it after a power cycle.
-- **ArduPilot:** ArduPilot's radio telemetry has no mission download.
+- **ArduPilot, downloaded from the aircraft:** turn on **ArduPilot mission download** (Off by default). It needs [one of these paths](#parameters-and-missions-what-you-need): ArduPlane Stratos v2.2.1 or later over S.Port, F.Port, ELRS or Crossfire at 150 Hz, or any ArduPilot over mLRS with cbridge.
+  - The whole mission draws on the map (and on the Ethos minimap), each item numbered as in Mission Planner, with T before the takeoff and L before a landing (T1, L9); the active waypoint is green. Items without a position (speed change, land start, jump, RTL) are in the mission but not on the map.
+  - While disarmed OmniDeck checks every 10 s whether the mission changed, for example after an upload from Mission Planner, and downloads it again. The first download also works armed.
+  - Up to 100 items. The Sensor check page shows **mission: N items**.
+  - It takes over from a mission file and from learned waypoints. Turning the setting Off takes it off the map again.
+  - On EdgeTX colour radios and the Ethos X20 family, the map page's **EDIT** button opens the [mission editor](#mission-editor). The X18 shows the mission but has no editor.
+- **ArduPilot, without the download:**
   - **Ethos:** copy a Mission Planner / QGC `.waypoints` file to `scripts/omnideck/missions/` and pick it under **Mission file**; the whole route draws, with the active waypoint in green.
   - **Without a file, and on EdgeTX:** each waypoint is placed on the map when it becomes active, from ArduPilot's distance and bearing to it, so the route builds up as you fly.
 - **Betaflight:** no missions.
+
+![ArduPilot mission downloaded onto the map](docs/screens/map_mission.png)
+
+A downloaded mission on the X20 map page: takeoff T1, waypoints 2, 4 and 6, loiter 5, approach waypoint 8 and the landing L9 (under the aircraft). Items 3 (speed change) and 7 (land start) have no position. EDIT is in the lower right.
+
+## Mission editor
+
+Make a mission on the radio, or change the one on the aircraft, and send it, without a laptop. On **EdgeTX colour radios** (TX16S MK2 480 x 272, MK3 and MK3 Max 800 x 480) and the **Ethos X20 family**. The X18's screen is too small for it.
+
+**Needs:** **ArduPilot mission download** On, an ArduPilot flight controller, and for Send [one of these paths](#parameters-and-missions-what-you-need): ArduPlane Stratos v2.2.1 or later over S.Port, F.Port, ELRS or Crossfire at 150 Hz, or any ArduPilot over mLRS with cbridge.
+
+![Mission editor with the downloaded mission](docs/screens/medit.png)
+
+### The screen
+
+- **Info line** (under the top bar): the selected item as **number/total**, its type and its values, for example `5/9 LOITER TURNS [ALT 120m] TURNS 2 RAD 80m`. The field that **-** and **+** change is in brackets. **<** and **>** at its ends: tap the left or right third of the line for the previous or next item, including the ones not on the map.
+- **Map:** the route in yellow, the selected item in green. The map centres on the selected item; for an item without a position, on the nearest one before it. The aircraft and home stay where they are. **+** and **-** on the right zoom.
+- **Buttons** along the bottom: **Type**, **Field**, **-**, **+**, **<**, **>**, **Del**, **Send**, **Done**.
+
+### Start
+
+1. On the map page, tap **EDIT**.
+2. The editor opens on the downloaded mission (**Editing the downloaded mission**), or on a new one with a takeoff at home (**New mission**) when the aircraft has none.
+
+A downloaded mission with commands the editor can't keep, such as servo or camera commands, is not opened: editing would drop them. Make a new one (Del twice on the takeoff) or change it in a GCS.
+
+### Make and change items
+
+| To | Do |
+|---|---|
+| Add a waypoint | Tap the map where it should go. It goes after the selected item, at the altitude of the last waypoint or loiter before it (100 m if there is none). |
+| Select an item | Tap its point on the map, or tap the left / right third of the info line. ENTER selects the next item. |
+| Change its type | **Type** steps through Waypoint, Loiter (unlimited), Loiter turns, Loiter time, Land, RTL, Speed change, Land start and Jump. On a quadplane (`Q_ENABLE` 1) also VTOL land and Transition, and Type on the first item switches Takeoff and VTOL takeoff. |
+| Change a value | **Field** picks the value, **-** and **+** change it; the wheel changes it in half steps. |
+| Move it in the list | **<** and **>** move it earlier or later. The takeoff stays first. |
+| Delete it | **Del**. The item before it becomes selected, so a tap on the map puts a new point in its place: to move a waypoint, Del it and tap where it should be. |
+| Start again | **Del** twice on the takeoff (within 4 s): a new mission with only the takeoff. |
+
+| Field | Items | - / + | Wheel |
+|---|---|---|---|
+| Altitude | Waypoint, loiters, land, takeoff | 1 m | 1 m |
+| Turns | Loiter turns | 1 | 1 |
+| Radius | Loiter unlimited, loiter turns (0 = `WP_LOITER_RAD`) | 10 m | 5 m |
+| Time | Loiter time | 10 s | 5 s |
+| Speed | Speed change (airspeed; -1 = no change) | 1 m/s, shown in your speed units | 1 m/s |
+| Target, Repeat | Jump: the item number to jump to, and how often (-1 = forever) | 1 | 1 |
+| Direction | Transition: to fixed wing or to VTOL | toggles | toggles |
+
+A timed loiter has no radius of its own: ArduPilot uses `WP_LOITER_RAD` for it. A mission holds up to 60 items in the editor.
+
+![Mission editor, a loiter-turns item selected](docs/screens/medit_loiter.png)
+
+### Send
+
+1. Disarm. Send is refused while armed ("Disarm to send"), and ArduPilot refuses it too.
+2. Tap **Send**. OmniDeck clears the mission on the aircraft, writes it item by item (**Sending n/m**), then downloads it again and compares.
+3. **Sent and verified**: the aircraft holds exactly what is on the screen. **Refused: ...** shows ArduPilot's reason (each item goes through ArduPilot's own checks, as an upload from Mission Planner). **No answer: check the mission in a GCS** means the link dropped part way.
+
+Over mLRS, Send uses ArduPilot's standard mission upload, the same as Mission Planner. Home stays as it is on the aircraft.
+
+### Leave
+
+**Done** or RTN leaves the editor. A mission not sent is dropped; the map shows the aircraft's mission again.
+
+**Before flying a mission made on the radio**, check it on the map once more, and in a GCS when you can. As with any mission upload, the aircraft flies what it holds.
 
 ## Voice and alarms
 
@@ -466,6 +687,9 @@ Post it on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp) with t
 - **Tiles not listed:** check the folder path and capitals, then restart the radio.
 - **Display steps every few seconds on TBS Crossfire with ArduPilot:** Crossfire is in its 50 Hz mode; see [ArduPilot over TBS Crossfire at 50 Hz](#ardupilot-over-tbs-crossfire-at-50-hz). Force 150 Hz on the transmitter for a smooth horizon.
 - **EdgeTX "CPU limit" or widget missing:** run OmniDeck Check; update to EdgeTX 2.11 or later.
+- **PARAMS page says "The flight controller doesn't answer":** check [what you need](#parameters-and-missions-what-you-need). Over ELRS or Crossfire it needs ArduPlane Stratos v2.2.1 or later; over mLRS, Tx Ser Port = cbridge; ELRS in MAVLink mode and Crossfire at 50 Hz can't carry it. Over S.Port / F.Port check the passthrough setting on the receiver's port.
+- **Rows stay "..." or turn "n/a" over a weak link:** ENTER on an n/a row asks again. "n/a" on a strong link means the flight controller has no such parameter.
+- **No mission on the map with ArduPilot mission download On:** the same requirements as the PARAMS page, but the download needs Stratos v2.2.1 or later on every link except mLRS.
 
 ## Development
 
