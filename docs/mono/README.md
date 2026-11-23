@@ -4,7 +4,7 @@ OmniDeck for EdgeTX radios with a 128 × 64 black-and-white screen. A free telem
 
 ![Main page in FBWA, 1.5 km out, on its way home](img/main.png)
 
-**Status:** 0.1.1, beta. Bench-tested on a RadioMaster TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04. Not flown yet, and not yet tried on the Pocket or Boxer.
+**Status:** 0.1.1, beta. Bench-tested on a RadioMaster TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04, and tested by a tester on a RadioMaster GX12. Not yet tried on the Pocket or Boxer.
 
 Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
 
@@ -31,6 +31,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 | Radio | Screen | Status |
 |---|---|---|
 | RadioMaster TX12 MK2 | 128 × 64 | Tested (bench) |
+| RadioMaster GX12 | 128 × 64 | Tested (tester) |
 | RadioMaster Pocket, Boxer | 128 × 64 | Not tested |
 
 | Flight controller | Links |
@@ -225,7 +226,7 @@ Report anything else on the [Arduplane Stratos Discord](https://discord.gg/NrfaP
 | INAV over ExpressLRS: arm and disarm cycles, flight log | Bench pass |
 | mLRS 1.4.04 on TX12 MK2: all pages, arming | Bench pass |
 | Freeze and "not enough memory" on the TX12 MK2 | Fixed in 0.1.1 (memory use cut): bench pass, armed over 30 min, ELRS |
-| Flight test | Not yet |
+| RadioMaster GX12 (tester) | Tested |
 | Pocket and Boxer | Not yet |
 
 ## Compared with colour OmniDeck

@@ -61,6 +61,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 | RadioMaster TX16S MK2 | EdgeTX | 480 x 272 | Tested |
 | RadioMaster TX16S MK3 / MK3 Max | EdgeTX | 800 x 480 | Tested |
 | RadioMaster TX12 MK2 | EdgeTX ([OmniDeck Mono](#omnideck-mono-black-and-white-radios)) | 128 x 64 | Tested (bench) |
+| RadioMaster GX12 | EdgeTX (OmniDeck Mono) | 128 x 64 | Tested (tester) |
 | RadioMaster Pocket, Boxer | EdgeTX (OmniDeck Mono) | 128 x 64 | Not tested |
 | OpenTX colour radios | OpenTX 2.3 | 480 x 272 | (in progress) |
 
@@ -666,7 +667,7 @@ OmniDeck Mono is OmniDeck for EdgeTX radios with a 128 x 64 black-and-white scre
 
 ![OmniDeck Mono main page](docs/mono/img/main.png)
 
-**Status:** 0.1.1, beta. Bench-tested on a TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04. Not flown yet, and not yet tried on the Pocket or Boxer.
+**Status:** 0.1.1, beta. Bench-tested on a TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04, and tested by a tester on a RadioMaster GX12. Not yet tried on the Pocket or Boxer.
 
 **Full guide: [OmniDeck Mono](docs/mono/README.md)** (install, keys, every page, settings, memory, problems).
 
