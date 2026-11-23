@@ -103,12 +103,14 @@ The [PARAMS page](#params-page-parameter-editor), the [ArduPilot mission downloa
 | **MAVlite over CRSF** | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz | ArduPlane Stratos v2.2.1 or later | ArduPlane Stratos v2.2.1 or later | Stratos carries MAVlite over CRSF. Proposed for upstream ArduPilot as [ArduPilot#35160](https://github.com/ArduPilot/ardupilot/pull/35160) (parameters), still pending: upstream ArduPilot doesn't answer over CRSF yet |
 | **mLRS CRSF bridge** | mLRS with **Tx Ser Port = cbridge** | Any ArduPilot | Any ArduPilot | mLRS 1.4.04 (pre-release) or later. OmniDeck speaks standard MAVLink through the module, so no firmware support is needed |
 
-[ArduPlane Stratos](https://github.com/erwinquilloy/ardupilot) is an ArduPlane fork; its releases are on its [releases page](https://github.com/erwinquilloy/ardupilot/releases).
+**Get Stratos v2.2.1:** [ArduPlane Stratos](https://github.com/erwinquilloy/ardupilot) is an ArduPlane fork. Download [v2.2.1 full](https://github.com/erwinquilloy/ardupilot/releases/tag/full-v2.2.1) for 2 MB flight controllers (F7, H7) or [v2.2.1 light](https://github.com/erwinquilloy/ardupilot/releases/tag/light-v2.2.1) for 1 MB F4 boards; each release lists its boards and which file to flash.
+
+**Staying on upstream ArduPilot?** Over S.Port / F.Port the PARAMS page works as it is, and mLRS with cbridge works for everything. Parameters over CRSF need the pull request [ArduPilot#35160](https://github.com/ArduPilot/ardupilot/pull/35160) ("AP_RCTelemetry: carry MAVlite parameter messages over CRSF"), still open: follow or support it there. Missions over CRSF and FrSky are Stratos only for now.
 
 **Setting up each path**
 
-- **FrSky S.Port / F.Port:** nothing beyond the telemetry setup (`SERIALn_PROTOCOL 10` for S.Port, `23` for F.Port). For the mission download and Send, flash Stratos v2.2.1 or later.
-- **ExpressLRS / TBS Crossfire:** flash Stratos v2.2.1 or later and keep the telemetry setup (`RC_OPTIONS` bit 8, CRSF passthrough). ExpressLRS: **Link Mode Normal**, 150 Hz packet rate or faster. Crossfire: **150 Hz forced**; at 50 Hz the link is too slow for these requests for now.
+- **FrSky S.Port / F.Port:** nothing beyond the telemetry setup (`SERIALn_PROTOCOL 10` for S.Port, `23` for F.Port). For the mission download and Send, flash Stratos v2.2.1 or later ([full](https://github.com/erwinquilloy/ardupilot/releases/tag/full-v2.2.1) · [light](https://github.com/erwinquilloy/ardupilot/releases/tag/light-v2.2.1)).
+- **ExpressLRS / TBS Crossfire:** flash Stratos v2.2.1 or later ([full](https://github.com/erwinquilloy/ardupilot/releases/tag/full-v2.2.1) · [light](https://github.com/erwinquilloy/ardupilot/releases/tag/light-v2.2.1)) and keep the telemetry setup (`RC_OPTIONS` bit 8, CRSF passthrough). ExpressLRS: **Link Mode Normal**, 150 Hz packet rate or faster. Crossfire: **150 Hz forced**; at 50 Hz the link is too slow for these requests for now.
 - **mLRS:** update the module to 1.4.04 (pre-release) or later. In the mLRS Lua script, Tx section, set **Tx Ser Port = cbridge**, then store and reboot the module. The screens keep their telemetry as before. **Tx Ser Port2** has no cbridge in mLRS 1.4 and can stay on wbridge for Mission Planner over WiFi. Checked on a RadioMaster Nomad.
 
 **Not supported**
