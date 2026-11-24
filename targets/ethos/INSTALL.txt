@@ -1,10 +1,20 @@
-OmniDeck 0.4.1 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 1.0.0c for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0c (after 1.0.0b)
+- INAV PARAMS page on the X18 too (and X18-size screens), same groups and rules as the X20.
+- In flight, the page now asks INAV itself whether it is armed (not only the radio's flight mode
+  sensor). With "Params: edit in flight" Off every value is view only while armed ("ARMED: view
+  only"); with "Gains and trim" only the gains and trims can be changed.
+- A value changed in flight is stored in INAV's EEPROM after the disarm, as soon as INAV reports
+  it is disarmed; if INAV refuses the write it is tried again, never given up (1.0.0b could lose
+  an in-flight change at the reboot). Keep the radio linked a few seconds after the disarm
+  before unplugging the battery.
 
 WHAT'S NEW IN 1.0.0b (after 0.4.1)
 - PARAMS page for INAV (X20 family; X18-size screens keep the ArduPilot-only page). Needs INAV

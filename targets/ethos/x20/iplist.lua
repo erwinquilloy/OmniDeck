@@ -9,7 +9,7 @@ local _ENV = OD_ENV or _ENV
   k:   shown value = INAV's raw value x k (INAV keeps decidegrees, cm, cm/s, tens of deg/s)
   min / max: placeholders; the flight controller's own limits replace them on the first read
   choices: nil here; a lookup setting gets INAV's own names on the first read (as the CLI shows)
-  fl:  may be changed in flight with "ArduPilot params: edit in flight" = "Gains and trim"
+  fl:  may be changed in flight with "Params: edit in flight" = "Gains and trim"
   pid: "fw" / "mc" - lives in the control profile; editable only while that profile's platform
        is active (VTOL with mixer_control_profile_linking: the radio's VTOL switch picks it)
 ]]

@@ -2046,13 +2046,11 @@ KEY = lambda k: wt['event'](widget, consts['EVT_KEY'], consts[k], 0, 0)
 assert widget.paramsPage == 0, 'params page off by default'
 widget.paramsPage = 1; widget.page = 2 if NATIVE else 3
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-if NATIVE and W <= 480:
-    assert widget.page != 6, 'X18: params page ArduPilot only, page %s' % widget.page
-    print('X18: params page not offered for INAV/Betaflight OK')
-elif NATIVE:
-    # ---- INAV PARAMS page (X20, INAV 9+ over MSPv2): read, save + EEPROM, VTOL profiles, old INAV
+if NATIVE:
+    # ---- INAV PARAMS page (X20 and X18 since 1.0.0c, INAV 9.1+ over MSPv2): read, save + EEPROM,
+    # VTOL profiles, old INAV, in-flight lock from INAV's own status
     G._SPORTPUSH, G._POPMSPSPORT = _old            # the INAV MSP fake, not the ArduPilot one
-    assert widget.page == 6, ('X20: params page in the cycle for INAV', widget.page)
+    assert widget.page == 6, ('params page in the cycle for INAV', widget.page)
     # params.lua as ui.lua holds it (upvalue PR of one of the widget's functions, at any depth)
     _PRg = L.eval('''function(wt)
       local seen = {}
