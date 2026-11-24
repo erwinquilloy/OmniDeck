@@ -260,6 +260,8 @@ def inav_reply2(cmd, p):
     """(payload, error) for an MSPv2 request"""
     if cmd == 2: return [ord(c) for c in 'INAV'], False
     if cmd == 3: return INAV_VER, False
+    if cmd == 0x2000:   # MSP2_INAV_STATUS: armingFlags u32 at bytes 10-13 (ARMED = bit 2), 8 box bytes, mixer profile
+        return [0] * 9 + list((4 if INAV_ARMED[0] else 0).to_bytes(4, 'little')) + [0] * 8 + [INAV_PROF['mix']], False
     if cmd == 250:
         if INAV_ARMED[0]: return [2], True
         INAV_STORES[0] += 1
@@ -2168,8 +2170,43 @@ elif NATIVE:
         INAV_ARMED[0] = False; st['armed'] = False
         for _ in range(60): step(0.2)
         assert INAV_STORES[0] == _st0 + 1 and not PRi.inav.dirty, ('stored after the disarm, page left', INAV_STORES[0] - _st0, PRi.inav.dirty)
+        widget.flightEdit = 0
+        # INAV armed while the radio's flight mode sensor reads disarmed (X20S + ELRS, 2026-11-24):
+        # "Edit in flight" Off -> view only, from INAV's own status
+        INAV_ARMED[0] = True; st['armed'] = False
+        widget.page = 6
+        for _ in range(30): step(0.2)
+        PRi = _PRg(wt)                                    # the module was unloaded off the page
+        assert PRi.inav.armed is True, ('INAV status read as armed', PRi.inav.armed)
+        _before = INAV_SET['mc_p_roll']['v'][1]
+        _igoto('mc_p_roll')
+        for _ in range(60): step(0.2)
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(20): step(0.2)
+        KEY('KEY_ROTARY_RIGHT')
+        assert PRi.phase() == 'Armed: view only', ('locked from INAV status', PRi.phase())
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(20): step(0.2)
+        assert INAV_SET['mc_p_roll']['v'][1] == _before, 'nothing set while INAV is armed'
+        render('iparams_inavarmed_%s.png' % tag, 6)
+        # "Gains and trim" On, radio still reads disarmed: set now, the refused EEPROM write waits
+        widget.flightEdit = 1
+        _st0 = INAV_STORES[0]
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(20): step(0.2)
+        KEY('KEY_ROTARY_RIGHT')
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(40): step(0.2)
+        assert INAV_SET['mc_p_roll']['v'][1] == _before + 1, ('in-flight set', INAV_SET['mc_p_roll']['v'])
+        for _ in range(40): step(0.2)
+        assert INAV_STORES[0] == _st0 and PRi.inav.dirty, ('not stored while INAV is armed', INAV_STORES[0] - _st0, PRi.inav.dirty)
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        widget.page = 1
+        INAV_ARMED[0] = False
+        for _ in range(60): step(0.2)
+        assert INAV_STORES[0] == _st0 + 1 and not PRi.inav.dirty, ('stored once INAV says disarmed', INAV_STORES[0] - _st0, PRi.inav.dirty)
         widget.sumAuto, widget.flightEdit = _sumAuto0, 0
-        print('INAV params: read/scale, save+verify+EEPROM, lookup names, VTOL profile lock + switch, in-flight set stored at disarm OK')
+        print('INAV params: read/scale, save+verify+EEPROM, lookup names, VTOL profile lock + switch, in-flight set stored at disarm, INAV-status arming lock OK')
     widget.page = 1
     G._SPORTPUSH, G._POPMSPSPORT = _ap_push, _ap_pop
 else:

@@ -754,9 +754,15 @@ end
   its platform (platform_type of the active mixer profile) is the active one.
 ]]
 local MSP_FC_VARIANT, MSP_FC_VERSION, MSP_EEPROM_WRITE = 2, 3, 250
+-- MSP2_INAV_STATUS 0x2000 -> cycle u16, i2c errors u16, sensors u16, load u16, profiles u8,
+-- armingFlags u32 (bytes 10-13; ARMED = bit 2), box modes, mixer profile. The arming state comes from
+-- INAV itself: the radio's flight mode sensor can read disarmed in flight, and then an in-flight
+-- change was not locked and its EEPROM write went out armed, was refused and never repeated (X20S +
+-- ELRS + INAV 9.1, 2026-11-24: the change was gone after the reboot)
+local MSP2_INAV_STATUS, STATUS_EVERY = 0x2000, 2
 local M_SETTING, M_SET_SETTING, M_SETTING_INFO = 0x1003, 0x1004, 0x1007
 local IN = { state = "off", variant = nil, ver = nil, meta = {}, profile = nil, plat = nil,
-             dirty = false, storeReq = false, stored = nil }
+             dirty = false, storeReq = false, stored = nil, armed = nil, armedAt = nil, statusAt = -10 }
 P.inav = IN
 local mSeq, mLast = 0, nil  -- request sequence; the last request (repeated on a timeout)
 local mOn, mSize, mCmd, mErr, mBuf, mRxSeq, mPrev = false, 0, 0, false, {}, 0, nil
@@ -828,7 +834,10 @@ local function mspReply(cmd, b, err)
   answered, silent, quietAt = true, 0, nil
   if not pend then return end
   local m = pend.m
+  -- each housekeeping answer must be for its own command: over ELRS a late or repeated reply to an
+  -- earlier request can arrive in between (an error with command 0 is INAV refusing the MSP version)
   if m == "variant" then
+    if cmd ~= MSP_FC_VARIANT and not (err and cmd == 0) then return end
     pend = nil
     if err then IN.state = "old" return end   -- an INAV before 9.0 answers a v2 request with an error
     IN.variant = string.char(b[1] or 63, b[2] or 63, b[3] or 63, b[4] or 63)
@@ -836,6 +845,7 @@ local function mspReply(cmd, b, err)
     return
   end
   if m == "version" then
+    if cmd ~= MSP_FC_VERSION and not (err and cmd == 0) then return end
     pend = nil
     if err then IN.state = "old" return end
     IN.ver = string.format("%d.%d.%d", b[1] or 0, b[2] or 0, b[3] or 0)
@@ -847,13 +857,29 @@ local function mspReply(cmd, b, err)
     IN.state = (maj > 9 or (maj == 9 and mnr >= 1)) and "ready" or (maj == 9 and "buggy" or "old")
     return
   end
-  if m == "store" then
+  if m == "status" then
+    if cmd ~= MSP2_INAV_STATUS then return end
     pend = nil
-    IN.dirty = err and IN.dirty or false
-    IN.stored = err and "fail" or "ok"
-    if edit then
-      phase, phaseCol = err and "Saved, NOT stored: disarm and save again" or "Saved, verified and stored", err and "bad" or "ok"
+    if not err and #b >= 13 then
+      IN.armed, IN.armedAt = floor(u32(b, 10) / 4) % 2 == 1, os.clock()
     end
+    return
+  end
+  if m == "store" then
+    -- only the EEPROM write's own answer (X20S + ELRS + INAV 9.1, 2026-11-24: another reply taken
+    -- as it said "NOT stored", yet the value was there after a reboot)
+    if cmd ~= MSP_EEPROM_WRITE then return end
+    pend = nil
+    if err then
+      -- INAV refuses the write only while armed: the change stays pending and is written once
+      -- INAV itself says it is disarmed (never given up)
+      IN.armed, IN.armedAt, IN.storeHold = true, os.clock(), os.clock() + STATUS_EVERY
+      IN.stored = "wait"
+      if edit then phase, phaseCol = "Set in INAV now, stored after the disarm", "warn" end
+      return
+    end
+    IN.dirty, IN.stored = false, "ok"
+    if edit then phase, phaseCol = "Saved, verified and stored", "ok" end
     return
   end
   local name = pend.name
@@ -865,6 +891,8 @@ local function mspReply(cmd, b, err)
       pend = nil
       return
     end
+    -- INAV took the value (in RAM): it needs the EEPROM write, whatever the read-back says
+    IN.dirty = true
     pend = { name = name, check = pend.set, checkRaw = pend.setRaw, tries = 0 }
     mspSend(M_SETTING, zname(name))
     return
@@ -878,9 +906,6 @@ local function mspReply(cmd, b, err)
     end
     local raw = decode(mt.t, b, 1)
     local same = (mt.t == 5) and sameBytes(f2b(raw), f2b(pend.checkRaw)) or raw == pend.checkRaw
-    if same then
-      if P.armedNow then IN.dirty = true else IN.storeReq = true end
-    end
     gotValue(name, raw * ((r and r.k) or 1), f2b(raw), same)
     return
   end
@@ -1023,6 +1048,10 @@ local function pidLock(r)
   return nil
 end
 readReqMsp, mspPollNow = mspRead, mspPoll
+-- armed as the radio's telemetry says, or as INAV itself said in its last status (MSP link)
+local function armedEff(s)
+  return s.armed == true or (link == "MSP" and IN.armed == true)
+end
 
 -- ---------------------------------------------------------------- page state
 local sel, top, grp = 0, 0, nil   -- selected row in vis (0 none), list scroll, group shown
@@ -1072,6 +1101,7 @@ function P.reset()
   mvSt, mvSkip = 0, 0
   IN.state, IN.variant, IN.ver, IN.meta, IN.profile, IN.plat = "off", nil, nil, {}, nil, nil
   IN.dirty, IN.storeReq, IN.stored, mspViaNow, mLast = false, false, nil, nil, nil
+  IN.armed, IN.armedAt, IN.statusAt = nil, nil, -10
   if APLIST then LIST = APLIST end
   if LIST then rebuild() end
 end
@@ -1221,7 +1251,7 @@ local function service(s, pageOpen)
   -- (X20S + Nomad 2026-11-14: no 0xAA at all until the test widget's first request). So a GCS
   -- HEARTBEAT goes out every 2 s on CRSF, as Mission Planner sends one: it wakes the bridge, and
   -- ELRS / TBS ignore the frame type.
-  P.armedNow = s.armed
+  P.armedNow = armedEff(s)
   local inav = s.fc == "INAV/BF" and ILIST ~= nil
   if not inav and s.link == "CRSF" and T.crsfPush and os.clock() - (MV.hbAt or -10) >= 2 then
     MV.hbAt = os.clock()
@@ -1284,8 +1314,16 @@ local function service(s, pageOpen)
       if IN.state == "variant" then pend = { m = "variant", tries = 0 } mspSend(MSP_FC_VARIANT) return end
       if IN.state == "version" then pend = { m = "version", tries = 0 } mspSend(MSP_FC_VERSION) return end
       if IN.state ~= "ready" then return end
-      if (IN.storeReq or (IN.dirty and not s.armed)) and not s.armed and now >= (IN.storeHold or 0) then
-        IN.storeReq = false
+      -- INAV's own arming state, every 2 s (1 s while a change waits for its EEPROM write)
+      if now - IN.statusAt >= (IN.dirty and 1 or STATUS_EVERY) then
+        IN.statusAt = now
+        pend = { m = "status", tries = 0 }
+        mspSend(MSP2_INAV_STATUS)
+        return
+      end
+      -- stored only when INAV said "disarmed" within the last 3 s (and the radio agrees)
+      if IN.dirty and not s.armed and IN.armed == false and now - (IN.armedAt or -10) < 3
+         and now >= (IN.storeHold or 0) then
         pend = { m = "store", tries = 0 }
         mspSend(MSP_EEPROM_WRITE)
         return
@@ -1434,7 +1472,7 @@ local FLIGHT_GROUPS = { ["PID"] = true, ["Q PID"] = true, ["TRIM"] = true, ["FW 
 P.flightEdit = false
 local function locked(s, r)
   if pidLock(r) then return true end   -- INAV VTOL: the other profile's PIDs
-  if not s.armed then return false end
+  if not armedEff(s) then return false end
   return not (P.flightEdit and r and (FLIGHT_GROUPS[r[1]] or r.fl))
 end
 
@@ -1453,7 +1491,7 @@ local function openEdit(s)
   edit, draft, editBase, phase, bitCur = r, v, v, "", 1
   if pidLock(r) then phase, phaseCol = pidLock(r), "warn"
   elseif locked(s, r) then phase, phaseCol = "Armed: view only", "warn"
-  elseif s.armed then phase, phaseCol = "In flight: saves go to the aircraft now", "warn" end
+  elseif armedEff(s) then phase, phaseCol = "In flight: saves go to the aircraft now", "warn" end
   -- read it again: the value may have been changed in a GCS since
   if not pend and #out == 0 then readReq(r[2]) end
   -- INAV PID row: the active platform is read again too (the VTOL switch may have moved it)
@@ -1721,7 +1759,7 @@ function P.paint(w, W, H, s, u, ctx)
       hint = edit[10] == "bits" and "Wheel: move   ENTER: CHECK/SKIP or button   RTN: back"
         or "Wheel: change   ENTER: save   RTN: back"
     end
-    if s.armed then hint = (P.flightEdit and "ARMED: gains/trim only   " or "ARMED: view only   ") .. hint end
+    if armedEff(s) then hint = (P.flightEdit and "ARMED: gains/trim only   " or "ARMED: view only   ") .. hint end
     local il = P.inavLine()
     if il then hint = il .. (IN.dirty and "  NOT STORED" or "") .. "   " .. hint end
     lcd.drawText(6, by, hint)
