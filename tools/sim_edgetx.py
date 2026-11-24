@@ -844,8 +844,107 @@ wd.paramsPage = 1
 wd.page = 3 if not NATIVE else 2
 frame(G.EVT_VIRTUAL_ENTER)
 if NATIVE:
-    assert wd.page != 6, 'params page: ArduPilot only, page %s' % wd.page
-    print('params page not offered for INAV/Betaflight OK')
+    # ---- INAV PARAMS page (EdgeTX since 1.0.0c, INAV 9.1+ over MSPv2; tools/fake_inav_settings.py)
+    from fake_inav_settings import FakeInav
+    _fi = FakeInav()
+    _lst = lambda t: [int(t[k]) for k in range(1, len(t) + 1)] if not isinstance(t, (list, tuple)) else list(t)
+    G.crossfireTelemetryPush = lambda cmd, data: _fi.crsf_push(int(cmd), _lst(data))
+    G.sportTelemetryPush = lambda *a: _fi.sport_push(*[int(x) for x in a[:4]]) if len(a) >= 4 else True
+    def _ipump(n=1, dt=0.05):
+        for _ in range(n):
+            while _fi.down:
+                d = _fi.down.pop(0)
+                if d[0] == 'crsf': crsf_q.append((0x7B, d[1]))
+                else: sport_q.append((0x1B, 0x32, d[1], d[2]))
+            step(dt)
+    _IPL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'targets', 'edgetx', 'WIDGETS', 'OmniDeck', 'iplist.lua')
+    def _igoto(name):
+        import re as _re
+        tabs, rows = [], {}
+        for _l in open(_IPL, encoding='utf-8'):
+            m = _re.match(r'\s*\{ "([^"]+)", "([a-z0-9_]+)"', _l)
+            if not m: continue
+            if m.group(1) not in rows: tabs.append(m.group(1)); rows[m.group(1)] = []
+            rows[m.group(1)].append(m.group(2))
+        t = [i for i, g in enumerate(tabs) if name in rows[g]][0]
+        r = rows[tabs[t]].index(name)
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)   # editor / rows -> tab column (or next page)
+        wd.page = 6; frame()
+        for _ in range(20): frame(G.EVT_VIRTUAL_PREV)
+        for _ in range(t): frame(G.EVT_VIRTUAL_NEXT)
+        frame(G.EVT_VIRTUAL_ENTER)
+        for _ in range(r): frame(G.EVT_VIRTUAL_NEXT)
+    _findPR = L.eval('''function(fs)
+      local seen = {}
+      local function find(f, d)
+        if type(f) ~= "function" or seen[f] or d > 5 then return nil end
+        seen[f] = true
+        for i = 1, 300 do
+          local n, v = debug.getupvalue(f, i)
+          if n == nil then break end
+          if n == "PR" and type(v) == "table" then return v end
+          local r = find(v, d + 1) if r then return r end
+        end
+      end
+      for _, f in pairs(fs) do local r = find(f, 0) if r then return r end end
+    end''')
+    assert wd.page == 6, ('params page in the cycle for INAV', wd.page)
+    _ipump(300)
+    PRi = _findPR(UIm) or _findPR(widget_def)
+    assert PRi is not None and PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi and PRi.inav.state)
+    _v = lambda n: PRi.valueOf(n)
+    def _iwait(name, n=600):
+        for _ in range(n):
+            if _v(name) is not None: return
+            _ipump(1)
+    _iwait('max_angle_inclination_rll')
+    assert abs(_v('max_angle_inclination_rll') - 45) < 1e-6, ('FLIGHT read and scaled', _v('max_angle_inclination_rll'))
+    render('etx_iparams_%s.png' % tag, 6)
+    # save: cruise throttle 1400 -> 1420, read back, EEPROM
+    _igoto('nav_fw_cruise_thr'); _iwait('nav_fw_cruise_thr'); _ipump(10)
+    assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    frame(G.EVT_VIRTUAL_NEXT); frame(G.EVT_VIRTUAL_NEXT)
+    _st0 = _fi.stores
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+    assert _fi.set['nav_fw_cruise_thr']['v'] == 1420, ('INAV got 1420', _fi.set['nav_fw_cruise_thr']['v'])
+    assert _fi.stores == _st0 + 1, ('EEPROM written once', _fi.stores - _st0)
+    assert PRi.phase() == 'Saved, verified and stored', PRi.phase()
+    render('etx_iparams_saved_%s.png' % tag, 6)
+    # lookup names from the flight controller
+    _igoto('nav_rth_alt_mode'); _iwait('nav_rth_alt_mode'); _ipump(10)
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    render('etx_iparams_lookup_%s.png' % tag, 6)
+    # INAV armed while the radio's flight mode reads disarmed: "Edit in flight" Off = view only
+    _fi.armed = True; st['armed'] = False
+    _igoto('fw_p_roll'); _iwait('fw_p_roll'); _ipump(60)
+    _before = _fi.set['fw_p_roll']['v'][0]
+    assert PRi.inav.armed is True, ('INAV status read as armed', PRi.inav.armed)
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    frame(G.EVT_VIRTUAL_NEXT)
+    assert PRi.phase() == 'Armed: view only', ('locked from INAV status', PRi.phase())
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(20)
+    assert _fi.set['fw_p_roll']['v'][0] == _before, 'nothing set while INAV is armed'
+    render('etx_iparams_inavarmed_%s.png' % tag, 6)
+    # "Gains and trim": set now, the refused EEPROM write waits for INAV's disarm, on any page
+    wd.flightEdit = 1
+    _st0 = _fi.stores
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    frame(G.EVT_VIRTUAL_NEXT)
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+    assert _fi.set['fw_p_roll']['v'][0] == _before + 1, ('in-flight set', _fi.set['fw_p_roll']['v'])
+    assert _fi.stores == _st0 and PRi.inav.dirty, ('not stored while INAV is armed', _fi.stores - _st0, PRi.inav.dirty)
+    render('etx_iparams_inflight_%s.png' % tag, 6)
+    frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+    wd.page = 1
+    _fi.armed = False
+    _ipump(300)
+    assert _fi.stores == _st0 + 1 and not PRi.inav.dirty, ('stored once INAV says disarmed', _fi.stores - _st0, PRi.inav.dirty)
+    wd.flightEdit = 0                                 # left disarmed: the voice test below arms
+    G.crossfireTelemetryPush = lambda cmd, data: True
+    G.sportTelemetryPush = _push
+    _ipump(250)                                       # params module unloaded off the page
+    print('INAV params (EdgeTX): read/scale, save+verify+EEPROM, lookup names, INAV-status arming lock, in-flight set stored at disarm OK')
 else:
     assert wd.page == 6, 'params page in the cycle for ArduPilot, page %s' % wd.page
     for _ in range(25):

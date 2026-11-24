@@ -45,10 +45,10 @@ C.ITEMS = {
   { "statsPage", "Flight stats page", { { 0, "Off" }, { 1, "On" } } },
   { "sumAuto", "Flight summary on disarm", { { 1, "On" }, { 0, "Off" } } },
   { "checkPage", "Sensor check page", { { 0, "Off" }, { 1, "On" } } },
-  -- ArduPlane parameters (params.lua)
-  { "paramsPage", "ArduPilot params page", { { 0, "Off" }, { 1, "On" } } },
+  -- parameters: ArduPlane (MAVlite) and INAV 9.1+ (MSP), params.lua
+  { "paramsPage", "Params page (ArduPilot, INAV)", { { 0, "Off" }, { 1, "On" } } },
   -- in flight: PID / Q PID / TRIM rows only; everything else stays view only while armed
-  { "flightEdit", "ArduPilot params: edit in flight", { { 0, "Off" }, { 1, "Gains and trim" } } },
+  { "flightEdit", "Params: edit in flight", { { 0, "Off" }, { 1, "Gains and trim" } } },
   -- voice and alarms
   { "voice", "Voice", "packs" },
   { "beep", "Message beep", { { 1, "Every message" }, { 2, "Warnings and errors" }, { 0, "Off" } } },

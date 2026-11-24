@@ -1,10 +1,33 @@
-OmniDeck 1.0.0b for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 1.0.0c for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0c (after 1.0.0b)
+- PARAMS page for INAV (as on Ethos). Needs INAV 9.1.0 or later: INAV 7 and 8 can't carry the
+  setting commands over the radio link, and INAV 9.0.x answers them without the values (an INAV
+  bug, fixed in 9.1.0); the page says "Parameters need INAV 9.1 or later" there. Over ELRS / TBS
+  Crossfire (150 Hz) and S.Port / F.Port; not over mLRS (its module doesn't pass the radio's MSP
+  requests on). Betaflight: not supported.
+- 62 INAV settings in 8 groups: FLIGHT, LAUNCH, NAV THR, RTH, LANDING, MISSION, FW PID, MC PID,
+  by their CLI names, in plain units (degrees, m, m/s; INAV keeps decidegrees, cm, cm/s).
+  Ranges and choice names (e.g. RTH alt mode AT_LEAST / MAX) come from the flight controller.
+  A setting the flight controller doesn't answer shows n/a.
+- Save: INAV sets the value, OmniDeck reads it back, then stores it in EEPROM while disarmed
+  ("Saved, verified and stored").
+- In flight: the page asks INAV itself whether it is armed. "Params: edit in flight" Off = view
+  only; "Gains and trim" = the PID groups, level trim and hover throttle can be changed. They
+  work at once and are stored after the disarm, as soon as INAV reports it is disarmed, on any
+  page (the hint line shows "NOT STORED" until then). Keep the radio linked a few seconds after
+  the disarm before unplugging the battery.
+- VTOL (mixer_control_profile_linking ON): INAV reads and writes the ACTIVE profile only. The
+  hint line shows e.g. "INAV 9.1.0  profile 2 MULTIROTOR". Hover PIDs (MC PID) can be edited
+  only with the VTOL in multirotor mode, plane PIDs (FW PID) only in fixed-wing mode.
+- Two settings renamed: "Params page (ArduPilot, INAV)", "Params: edit in flight".
+- INAV mission download pauses while the PARAMS page talks to INAV (one MSP request at a time).
 
 WHAT'S NEW IN 1.0.0b (after 0.4.1)
 - Version number only, to match the Ethos 1.0.0b. The PARAMS page for INAV is on the Ethos X20

@@ -618,8 +618,10 @@ local crsfSensor = {
 }
 E.crsf = crossfireTelemetryPop and { getSensor = function() return crsfSensor end } or nil
 
--- S.Port: MSP replies (primId 0x32) wait for mspclient; passthrough and the rest go to telem
-local spMsp = {}
+-- S.Port: MSP replies (primId 0x32) wait for mspclient / params.lua; passthrough and the rest go
+-- to telem. Up to 48 kept: one INAV setting reply (MSP2_COMMON_SETTING_INFO with choice names) is
+-- 18 frames of 5 bytes, and with 16 kept its last frames were dropped (1.0.0c simulator)
+local spMsp, SP_MSP_MAX = {}, 48
 -- passthrough values in a ring (four parallel arrays, no table per frame): taking the oldest is a
 -- step of the head index, where table.remove(t, 1) moved every entry up, 60 of them
 -- OpenTX decodes fewer values per update than arrive at times, so there only the newest 16 are
@@ -636,7 +638,7 @@ local function sportFill(wantMsp)
     ST.sp = ST.sp + 1
     got = true
     if primId == 0x32 then
-      if #spMsp < 16 then spMsp[#spMsp + 1] = { physId, primId, appId, value } end
+      if #spMsp < SP_MSP_MAX then spMsp[#spMsp + 1] = { physId, primId, appId, value } end
     else
       if spN >= SP_MAX then spHead = spHead % SP_MAX + 1 spN = spN - 1 ST.drop = ST.drop + 1 end
       local i = (spHead + spN - 1) % SP_MAX + 1
