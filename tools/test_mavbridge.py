@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""params.lua over the mLRS bridge (Tx Ser Port = cbridge): real MAVLink v2 in CRSF 0xAA frames.
+"""params.lua over the mLRS bridge (Tx Ser Port = cbridge): real MAVLink v2 in mLRS "mb" envelope
+frames (0x81 to the module, 0x82 back; 0xAA is never sent: mLRS 1.5.00 builds 0xAA wrong).
 
     python tools/test_mavbridge.py edgetx|x20|x18 [--lua54]
 
@@ -30,6 +31,7 @@ for k in ('RIGHT', 'CENTERED'): G[k] = 0
 
 
 ap = FakeAP()
+ap.mlrs15 = True   # the released mLRS 1.5.00: its 0xAA frames are broken, so only mb may be used
 T = L.eval('''function(push) local T = {}
   T.alive = function() return true end
   T.split32 = function(v) if v < 0 then v = v + 4294967296 end return v % 65536, math.floor(v / 65536) end
@@ -50,8 +52,8 @@ def run(sec, page=True, dt=0.05):
         state['t'] += dt
         ap.tick(state['t'])
         T.bridgeAt = state['t']            # telem.lua: an mLRS bridge frame came
-        for f in ap.frames():
-            T.onMavEnv(L.table_from(f))
+        for c, f in ap.frames():   # as telem.lua T.envFrame: 0x82 loses its 0x66 byte
+            T.onMavEnv(L.table_from(f[1:] if c == 0x82 else f))
         if page: P.wakeup(S)
         else: P.missionWakeup(S)
 
@@ -135,7 +137,8 @@ read_tabs()                  # every tab in turn (the mLRS waits are long on pur
 vals = P.debug() if hasattr(P, 'debug') else ''
 check('mLRS bridge: the link is MAVLink', str(P.mav.sys) == '1')
 got = L.eval('function(P, n) return P.value and P.value(n) end')
-check('all frames to the module are 0xAA, chunk 0, size <= 58 (%d sent)' % ap.frames_in, ap.frames_in > 10)
+check('all frames to the module are mb envelopes 0x81 (0x66, seq, size <= 57; %d sent, types %s)' % (ap.frames_in, sorted(ap.types_in)),
+      ap.frames_in > 10 and ap.types_in == {0x81})
 check('every row read (idle), no crc errors (%s)' % P.debug(), 'idle' in P.debug() and P.stats.bad == 0)
 nav = L.eval('function(P, n) local v = P._val and P._val(n) return v end')
 nonq = [n for i, n in enumerate(names) if L.eval('function(L, i) return L[i][10] end')(LIST, i + 1) != 'q']

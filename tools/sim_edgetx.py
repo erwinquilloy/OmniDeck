@@ -52,10 +52,16 @@ def sd_path(p): return os.path.join(SD, *[x for x in str(p).split('/') if x])
 if os.environ.get('OD_PANEL') is not None:
     with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('panel=%s\nvoice=Aria\n' % os.environ['OD_PANEL'])   # with the voice, as a real settings file (none = voice off)
 
+# OD_BATTMAIN=1: the battery block shows the average cell (OmniDeck Setup "Battery block shows")
+if os.environ.get('OD_BATTMAIN') is not None:
+    with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('battMain=%s\nvoice=Aria\n' % os.environ['OD_BATTMAIN'])
+
 # ------------------------------------------------------------------ drawing
 # approximate EdgeTX colour-screen font heights at 480x272 (pixels)
 FONT_PX = {0: 15, 0x200: 12, 0x300: 20, 0x400: 28, 0x500: 48, 0x600: 9}
-if W >= 800: FONT_PX = {0: 20, 0x200: 15, 0x300: 26, 0x400: 36, 0x500: 64, 0x600: 12}
+# 800x480 (TX16S MK3): EdgeTX's 'lrg' font set is 1.375x the 480x272 one (radio/src/fonts/lvgl/
+# make_fonts.sh: STD 22 vs 16, XS 18 vs 13, L 33 vs 24, XL 44 vs 32, XXL 88 vs 64, XXS 12 vs 9)
+if W >= 800: FONT_PX = {0: 21, 0x200: 17, 0x300: 28, 0x400: 39, 0x500: 66, 0x600: 12}
 fonts = {k: ImageFont.truetype('C:/Windows/Fonts/arialbd.ttf' if k != 0x600 else 'C:/Windows/Fonts/arial.ttf', v)
          for k, v in FONT_PX.items()}
 def font_of(flags): return fonts.get(int(flags or 0) & 0xF00, fonts[0])
@@ -83,9 +89,15 @@ def rgb(r, g=None, b=None):
     return (int(r) << 16) | (int(g) << 8) | int(b)
 def col(): c = colors.get(CUSTOM, 0); return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
 def set_color(i, c): DRAWS['setcolor'] += 1; colors[int(i)] = int(c)
+# EdgeTX's lcd.sizeText height is the LVGL font's line_height, and drawText puts the top of that
+# line box at y (baseline = y + line_height - base_line). Taken from EdgeTX radio/src/fonts/lvgl/
+# std (480x272, 480x320) and lrg (800x480) lv_font_en_*.c: { line_height, base_line } per size flag.
+LINE_M = {0: (21, 5), 0x200: (17, 4), 0x300: (29, 6), 0x400: (40, 9), 0x500: (69, 15), 0x600: (12, 3)}
+if W >= 800: LINE_M = {0: (27, 6), 0x200: (23, 5), 0x300: (42, 9), 0x400: (55, 12), 0x500: (93, 20), 0x600: (17, 4)}
+def line_m(flags): return LINE_M.get(int(flags or 0) & 0xF00, LINE_M[0])
 def size_text(t, flags=0):
     f = font_of(flags); b = f.getbbox(str(t))
-    return b[2] - b[0], f.size + 2
+    return b[2] - b[0], line_m(flags)[0]
 # OpenTX: text as the radio draws it, Roboto at OpenTX's sizes (radio/src/fonts/480x272/
 # CMakeLists.txt) with each glyph advanced by OpenTX's own widths, read from the W_* tables in
 # etx.lua so the simulator and the widget measure alike. The fonts are OpenTX's copies of
@@ -122,7 +134,9 @@ def draw_text(x, y, t, flags=0):
     if flags & 0x10000: x = x - w / 2          # CENTER
     elif flags & 0x20000: x = x - w            # RIGHT
     cv.check('text ' + str(t), x, y, x + w, y + h)
-    cv.d.text((x, y), str(t), fill=col(), font=font_of(flags))
+    lh, base = line_m(flags)
+    fnt = font_of(flags)
+    cv.d.text((x, y + lh - base - fnt.getmetrics()[0]), str(t), fill=col(), font=fnt)
 def frect(x, y, w, h, flags=0):
     DRAWS['frect'] += 1
     if w <= 0 or h <= 0: return
@@ -844,8 +858,120 @@ wd.paramsPage = 1
 wd.page = 3 if not NATIVE else 2
 frame(G.EVT_VIRTUAL_ENTER)
 if NATIVE:
-    assert wd.page != 6, 'params page: ArduPilot only, page %s' % wd.page
-    print('params page not offered for INAV/Betaflight OK')
+    # ---- INAV PARAMS page (EdgeTX since 1.0.0c, INAV 9.1+ over MSPv2; tools/fake_inav_settings.py)
+    from fake_inav_settings import FakeInav
+    # OD_MLRS_BRIDGE=1: mLRS cbridge with the MSP-over-cbridge Tx firmware (raw MSP in 0x81 / 0x82 frames)
+    _MLRS = os.environ.get('OD_MLRS_BRIDGE') == '1' and not SPORT
+    _fi = FakeInav(bridge=_MLRS)
+    _lst = lambda t: [int(t[k]) for k in range(1, len(t) + 1)] if not isinstance(t, (list, tuple)) else list(t)
+    G.crossfireTelemetryPush = lambda cmd, data: _fi.crsf_push(int(cmd), _lst(data))
+    G.sportTelemetryPush = lambda *a: _fi.sport_push(*[int(x) for x in a[:4]]) if len(a) >= 4 else True
+    def _ipump(n=1, dt=0.05):
+        for _ in range(n):
+            while _fi.down:
+                d = _fi.down.pop(0)
+                if d[0] == 'crsf': crsf_q.append((0x7B, d[1]))
+                elif d[0] == 'bridge': crsf_q.append(d[1])   # (0x82 or 0xAA, payload)
+                else: sport_q.append((0x1B, 0x32, d[1], d[2]))
+            step(dt)
+    _IPL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'targets', 'edgetx', 'WIDGETS', 'OmniDeck', 'iplist.lua')
+    def _igoto(name):
+        import re as _re
+        tabs, rows = [], {}
+        for _l in open(_IPL, encoding='utf-8'):
+            m = _re.match(r'\s*\{ "([^"]+)", "([a-z0-9_]+)"', _l)
+            if not m: continue
+            if m.group(1) not in rows: tabs.append(m.group(1)); rows[m.group(1)] = []
+            rows[m.group(1)].append(m.group(2))
+        t = [i for i, g in enumerate(tabs) if name in rows[g]][0]
+        r = rows[tabs[t]].index(name)
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)   # editor / rows -> tab column (or next page)
+        wd.page = 6; frame()
+        for _ in range(20): frame(G.EVT_VIRTUAL_PREV)
+        for _ in range(t): frame(G.EVT_VIRTUAL_NEXT)
+        frame(G.EVT_VIRTUAL_ENTER)
+        for _ in range(r): frame(G.EVT_VIRTUAL_NEXT)
+    _findPR = L.eval('''function(fs)
+      local seen = {}
+      local function find(f, d)
+        if type(f) ~= "function" or seen[f] or d > 5 then return nil end
+        seen[f] = true
+        for i = 1, 300 do
+          local n, v = debug.getupvalue(f, i)
+          if n == nil then break end
+          if n == "PR" and type(v) == "table" then return v end
+          local r = find(v, d + 1) if r then return r end
+        end
+      end
+      for _, f in pairs(fs) do local r = find(f, 0) if r then return r end end
+    end''')
+    assert wd.page == 6, ('params page in the cycle for INAV', wd.page)
+    # the Sensor check line (P.debug) at every step of INAV's start-up too: 1.0.0d stopped on the
+    # variant / version / status steps, which carry no name (TX16S MK3 2026-11-25)
+    _pr0, _dbg = None, set()
+    for _ in range(300):
+        _ipump(1)
+        _pr0 = _pr0 or _findPR(UIm) or _findPR(widget_def)
+        if _pr0 is not None: _dbg.add(str(_pr0.debug()).split('  ')[0][:40])
+    assert any('waiting variant' in d or 'waiting version' in d for d in _dbg) or _pr0 is not None, _dbg
+    PRi = _findPR(UIm) or _findPR(widget_def)
+    assert PRi is not None and PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi and PRi.inav.state)
+    _v = lambda n: PRi.valueOf(n)
+    if not SPORT:
+        assert ('MSP bridge' if _MLRS else 'MSP native') in PRi.debugCore(), ('MSP path picked', PRi.debugCore())
+        print('INAV MSP path (EdgeTX): %s OK' % ('mLRS bridge' if _MLRS else 'native CRSF'))
+    def _iwait(name, n=600):
+        for _ in range(n):
+            if _v(name) is not None: return
+            _ipump(1)
+    _iwait('max_angle_inclination_rll')
+    assert abs(_v('max_angle_inclination_rll') - 45) < 1e-6, ('FLIGHT read and scaled', _v('max_angle_inclination_rll'))
+    render('etx_iparams_%s.png' % tag, 6)
+    # save: cruise throttle 1400 -> 1420, read back, EEPROM
+    _igoto('nav_fw_cruise_thr'); _iwait('nav_fw_cruise_thr'); _ipump(10)
+    assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    frame(G.EVT_VIRTUAL_NEXT); frame(G.EVT_VIRTUAL_NEXT)
+    _st0 = _fi.stores
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+    assert _fi.set['nav_fw_cruise_thr']['v'] == 1420, ('INAV got 1420', _fi.set['nav_fw_cruise_thr']['v'])
+    assert _fi.stores == _st0 + 1, ('EEPROM written once', _fi.stores - _st0)
+    assert PRi.phase() == 'Saved, verified and stored', PRi.phase()
+    render('etx_iparams_saved_%s.png' % tag, 6)
+    # lookup names from the flight controller
+    _igoto('nav_rth_alt_mode'); _iwait('nav_rth_alt_mode'); _ipump(10)
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    render('etx_iparams_lookup_%s.png' % tag, 6)
+    # INAV armed while the radio's flight mode reads disarmed: "Edit in flight" Off = view only
+    _fi.armed = True; st['armed'] = False
+    _igoto('fw_p_roll'); _iwait('fw_p_roll'); _ipump(60)
+    _before = _fi.set['fw_p_roll']['v'][0]
+    assert PRi.inav.armed is True, ('INAV status read as armed', PRi.inav.armed)
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    frame(G.EVT_VIRTUAL_NEXT)
+    assert PRi.phase() == 'Armed: view only', ('locked from INAV status', PRi.phase())
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(20)
+    assert _fi.set['fw_p_roll']['v'][0] == _before, 'nothing set while INAV is armed'
+    render('etx_iparams_inavarmed_%s.png' % tag, 6)
+    # "Gains and trim": set now, the refused EEPROM write waits for INAV's disarm, on any page
+    wd.flightEdit = 1
+    _st0 = _fi.stores
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+    frame(G.EVT_VIRTUAL_NEXT)
+    frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+    assert _fi.set['fw_p_roll']['v'][0] == _before + 1, ('in-flight set', _fi.set['fw_p_roll']['v'])
+    assert _fi.stores == _st0 and PRi.inav.dirty, ('not stored while INAV is armed', _fi.stores - _st0, PRi.inav.dirty)
+    render('etx_iparams_inflight_%s.png' % tag, 6)
+    frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+    wd.page = 1
+    _fi.armed = False
+    _ipump(300)
+    assert _fi.stores == _st0 + 1 and not PRi.inav.dirty, ('stored once INAV says disarmed', _fi.stores - _st0, PRi.inav.dirty)
+    wd.flightEdit = 0                                 # left disarmed: the voice test below arms
+    G.crossfireTelemetryPush = lambda cmd, data: True
+    G.sportTelemetryPush = _push
+    _ipump(250)                                       # params module unloaded off the page
+    print('INAV params (EdgeTX): read/scale, save+verify+EEPROM, lookup names, INAV-status arming lock, in-flight set stored at disarm OK')
 else:
     assert wd.page == 6, 'params page in the cycle for ArduPilot, page %s' % wd.page
     for _ in range(25):
@@ -947,8 +1073,8 @@ if SPORT and not NATIVE:
     frame()
     tx, ty = W * 0.75, H * 0.40
     la_want, lo_want = UIm.MAP.toLatLon(tx, ty)     # the view the tap lands on
+    la_want, lo_want = UIm.MAP.toLatLon(int(tx), int(ty))   # the editor acts on the press, on the view shown
     frame(G.EVT_TOUCH_FIRST, {'x': int(tx), 'y': int(ty)})
-    la_want, lo_want = UIm.MAP.toLatLon(int(tx), int(ty))
     frame(G.EVT_TOUCH_BREAK, {'x': int(tx), 'y': int(ty)})
     d1, s1, _f1 = ED._draft()
     assert len(d1) == n0 + 1 and s1 == s0 + 1, ('tap on the map adds a waypoint after the selected one', len(d1), s1)
@@ -1428,6 +1554,7 @@ if os.path.isfile(sd_path('/SCRIPTS/TOOLS/OmniDeck Setup.lua')):
     st_t.init()
     G_ = L.globals()
     st_t.run(0)
+    cv.img.save(os.path.join(OUT, 'etx_setup_%s.png' % tag))   # the tool draws the whole screen
     # row 1 = Telemetry link: ENTER, NEXT (Auto -> CRSF), ENTER
     for e in ('EVT_VIRTUAL_ENTER', 'EVT_VIRTUAL_NEXT', 'EVT_VIRTUAL_ENTER'): st_t.run(G_[e])
     # down to Speed units (its row in cfg.lua's list, which is grouped and may move), ENTER,

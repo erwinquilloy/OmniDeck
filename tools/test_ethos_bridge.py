@@ -49,7 +49,7 @@ def pynew():
     return len(sensors) - 1
 G.PYNEW = pynew
 G.PYPOP = pop
-G.PYPUSH = lambda c, d: (ap.from_radio(c, [d[i] for i in range(1, len(d) + 1)]) if c == 0xAA else None, True)[1]
+G.PYPUSH = lambda c, d: (ap.from_radio(c, [d[i] for i in range(1, len(d) + 1)]) if c in (0x81, 0xAA) else None, True)[1]
 L.execute('''
 crsf = { getSensor = function()
   local qi = PYNEW()
@@ -96,8 +96,8 @@ for _ in range(int(90 / 0.05)):
     state['t'] += 0.05
     ap.tick(state['t'])
     passthrough(state['t'])
-    for f in ap.frames():
-        deliver(0xAA, f)
+    for c, f in ap.frames():
+        deliver(c, f)
     if COUNT:
         n = CNT(BOTH, T, P)
         COSTS.append(n)
@@ -136,8 +136,8 @@ for _ in range(int(40 / 0.05)):
     state['t'] += 0.05
     ap.tick(state['t'])
     passthrough(state['t'])
-    for f in ap.frames():
-        deliver(0xAA, f)
+    for c, f in ap.frames():
+        deliver(c, f)
     T.wakeup(T.LINK_CRSF)
     T.s.fc = 'ArduPilot'
     T.s.armed = False

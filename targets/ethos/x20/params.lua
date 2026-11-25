@@ -73,8 +73,10 @@ local function ck(c, b) c = c + b c = c + floor(c / 256) return c % 256 end
 
 -- ---------------------------------------------------------------- MAVLink (mLRS cbridge)
 --[[
-  mLRS with Tx Ser Port = cbridge passes the aircraft's MAVLink stream to the radio in CRSF frames
-  0xAA (chunk byte, size, up to 58 bytes) and takes MAVLink back the same way (telem.lua reads them,
+  mLRS with Tx Ser Port = cbridge passes the aircraft's MAVLink stream to the radio in mLRS "mb"
+  envelope frames 0x82 (0x66, seq, size, up to 57 bytes) and takes MAVLink from it in 0x81 (same
+  layout). 0xAA (the CRSF MAVLink envelope) is read too, never sent: mLRS answers in the type it
+  last got, and 1.5.00 sends broken 0xAA frames (telem.lua reads them,
   T.bridgeAt / T.onMavEnv). Then this page speaks real MAVLink v2 and works with any ArduPilot:
   the MAVlite requests below are translated on the way out and the answers on the way in, so the
   page, the mission download and the editor's Send are the same code for every link.
@@ -138,15 +140,15 @@ local function mavPacket(msgid, pl)
   p[#p + 1] = floor(crc / 256)
   return p
 end
--- queue one MAVLink message as mLRS bridge frames (58 bytes each)
+-- queue one MAVLink message as mLRS bridge frames (57 bytes each)
 local function mavSend(msgid, pl)
   local p = mavPacket(msgid, pl)
   local i = 1
   while i <= #p do
-    local n = math.min(58, #p - i + 1)
-    local e = { 0, n }
-    for k = 0, n - 1 do e[k + 3] = p[i + k] end
-    out[#out + 1] = { crsf = e, cmd = 0xAA }
+    local n = math.min(57, #p - i + 1)
+    local e = { 0x66, 0, n }   -- mLRS "mb" envelope 0x81 (see T.envFrame in telem.lua)
+    for k = 0, n - 1 do e[k + 4] = p[i + k] end
+    out[#out + 1] = { crsf = e, cmd = 0x81 }
     i = i + n
   end
 end
@@ -199,8 +201,20 @@ local function nameBytes(name, t)
   return t
 end
 
+local mspViaNow = nil   -- set by service(): the radio link the MSP chunks go over
+-- INAV MSP over the mLRS bridge: path ("native" / "bridge" / nil), raw-frame parser state (see mspSend)
+local BR = { path = nil, st = 0, v2 = true, err = false, hdr = {}, need = 0, buf = {}, crc_ = 0 }
 local function openSensors()
   tx, rx = nil, nil
+  if link == "MSP" and mspViaNow == "CRSF" then
+    -- INAV: a CRSF reader of its own for the 0x7B replies, as mspclient.lua has (on Ethos every
+    -- crsf.getSensor() object gets every frame); requests go out through it too
+    if crsf and crsf.getSensor then
+      local ok, sn = pcall(crsf.getSensor)
+      if ok and sn then tx, rx = sn, sn end
+    end
+    return tx ~= nil
+  end
   if link == "CRSF" or link == "MAVLINK" then
     -- telem.lua owns the one CRSF sensor: requests go out through it (T.crsfPush) and replies
     -- come back through it (P.onCrsf below). Never a second crsf.getSensor() (see telem.lua)
@@ -509,21 +523,17 @@ local function missionHandle(id, b)
   end
 end
 
-local function handle(id, b)
-  P.stats.rx = P.stats.rx + 1
-  answered, silent, quietAt = true, 0, nil
-  if id == MISSION_COUNT or id == MISSION_ITEM_INT or id == MISSION_ACK then missionHandle(id, b) return end
-  if id ~= PARAM_VALUE or #b < 5 then return end
-  local name = string.char(table.unpack(b, 5, math.min(#b, 20)))
-  local bytes = { b[1], b[2], b[3], b[4] }
-  local v = b2f(b[1], b[2], b[3], b[4])
+-- a value that arrived (ArduPilot PARAM_VALUE, or INAV's answer through the MSP link). same: the
+-- MSP link compares the raw values itself (nil = compare the float32 bytes)
+local function gotValue(name, v, bytes, same)
   for _, r in ipairs(LIST) do if r[2] == name then if r.free then autoStep(r, v) end break end end
   vals[name], vbytes[name] = v, bytes
   if name == "Q_ENABLE" then qOn = v >= 1 rebuild() end
   if pend and pend.name == name then
     local want = pend.set or pend.check
     if want then
-      if sameBytes(bytes, want) then
+      if same == nil then same = sameBytes(bytes, want) end
+      if same then
         phase, phaseCol = "Saved and verified", "ok"
         editBase = v
       else
@@ -536,6 +546,15 @@ local function handle(id, b)
     end
     pend = nil
   end
+end
+
+local function handle(id, b)
+  P.stats.rx = P.stats.rx + 1
+  answered, silent, quietAt = true, 0, nil
+  if id == MISSION_COUNT or id == MISSION_ITEM_INT or id == MISSION_ACK then missionHandle(id, b) return end
+  if id ~= PARAM_VALUE or #b < 5 then return end
+  local name = string.char(table.unpack(b, 5, math.min(#b, 20)))
+  gotValue(name, b2f(b[1], b[2], b[3], b[4]), { b[1], b[2], b[3], b[4] })
 end
 
 local function onFrame(b)
@@ -560,7 +579,9 @@ local function onFrame(b)
 end
 P._onFrame = onFrame
 
+local mspPollNow = nil   -- the MSP link's reader (INAV), set below
 local function poll()
+  if link == "MSP" then mspPollNow() return end
   if link == "CRSF" or link == "MAVLINK" then return end   -- these arrive through P.onCrsf / P.onMavEnv
   for _ = 1, 12 do
     local ok, f = pcall(function() return rx:popFrame() end)
@@ -661,6 +682,7 @@ end
 
 -- an mLRS bridge frame (telem.lua): chunk byte, size, MAVLink bytes. Packets run across frames.
 function P.onMavEnv(data)
+  if link == "MSP" and data and mspViaNow == "CRSF" then BR.input(data) return end
   if link ~= "MAVLINK" or not data then return end
   -- read only while the page, the mission download or a send uses it (service() ran lately);
   -- otherwise the stream is let go and picked up again at the next packet start
@@ -710,10 +732,401 @@ end
 
 local prefAt = {}   -- mLRS: when a row was last asked ahead of its turn (see service)
 local naAt = {}     -- when a row became n/a (or was last asked again, mLRS)
+local readReqMsp = nil   -- the MSP link's read (INAV), set below
 local function readReq(name)
+  if link == "MSP" then readReqMsp(name) return end
   -- an n/a row asked again (mLRS, every 30 s) gets one try, so it never holds up a save for long
   pend = { name = name, tries = (vals[name] == false and link == "MAVLINK") and 3 or 0 }
   send(REQ_READ, nameBytes(name, {}))
+end
+
+-- ---------------------------------------------------------------- INAV (link "MSP"), INAV 9.0+
+--[[
+  INAV settings by their CLI name, MSPv2 over the telemetry link (INAV msp_shared.c; MSPv2 over
+  CRSF and SmartPort since INAV 9.0, before that version 1 only, which can't carry these commands):
+    chunk:  status (0x40 = v2 | 0x10 first chunk | sequence 0-15; 0x80 = error, replies) + bytes
+    first:  flags, cmd lo, cmd hi, size lo, size hi, payload ...   (no checksum)
+    CRSF:   type 0x7A to the FC (dest 0xC8, origin 0xEA), replies 0x7B; up to 57 bytes a chunk
+    S.Port: physId 0x0D primId 0x30 (appId = bytes 1-2, value = bytes 3-6), replies primId 0x32
+  MSP2_COMMON_SETTING_INFO 0x1007 (name\0) -> name\0, pgn u16, type u8, section u8, mode u8,
+      min i32, max u32, index u16, profile u8, profile count u8, [lookup names\0 ...], value
+  MSP2_COMMON_SET_SETTING 0x1004 (name\0, value) -> empty, or an error (INAV checks min / max)
+  MSP2_COMMON_SETTING 0x1003 (name\0) -> value           (the read-back after a save)
+  MSP_EEPROM_WRITE 250 -> stores everything; INAV refuses it while armed
+  A value changed in flight works at once but is stored only by the EEPROM write after landing.
+  Control-profile settings (the PIDs) are read and written in the ACTIVE profile only; with
+  mixer_control_profile_linking the VTOL switch picks it, so a PID group is editable only while
+  its platform (platform_type of the active mixer profile) is the active one.
+]]
+local MSP_FC_VARIANT, MSP_FC_VERSION, MSP_EEPROM_WRITE = 2, 3, 250
+-- MSP2_INAV_STATUS 0x2000 -> cycle u16, i2c errors u16, sensors u16, load u16, profiles u8,
+-- armingFlags u32 (bytes 10-13; ARMED = bit 2), box modes, mixer profile. The arming state comes from
+-- INAV itself: the radio's flight mode sensor can read disarmed in flight, and then an in-flight
+-- change was not locked and its EEPROM write went out armed, was refused and never repeated (X20S +
+-- ELRS + INAV 9.1, 2026-11-24: the change was gone after the reboot)
+local MSP2_INAV_STATUS, STATUS_EVERY = 0x2000, 2
+local M_SETTING, M_SET_SETTING, M_SETTING_INFO = 0x1003, 0x1004, 0x1007
+local IN = { state = "off", variant = nil, ver = nil, meta = {}, profile = nil, plat = nil,
+             dirty = false, storeReq = false, stored = nil, armed = nil, armedAt = nil, statusAt = -10 }
+P.inav = IN
+local mSeq, mLast = 0, nil  -- request sequence; the last request (repeated on a timeout)
+-- over CRSF the MSP goes one of two ways: "native" (CRSF MSP frames 0x7A / 0x7B: ELRS, Crossfire) or
+-- "bridge" (raw MSP frames inside mLRS bridge frames 0x81 / 0x82: mLRS with Tx Ser Port = cbridge and the
+-- MSP-over-cbridge Tx firmware). nil = not known yet: each request goes both ways, the first
+-- answer decides. ELRS / Crossfire ignore 0x81; mLRS drops 0x7A.
+local mOn, mSize, mCmd, mErr, mBuf, mRxSeq, mPrev = false, 0, 0, false, {}, 0, nil
+local APLIST, ILIST = nil, nil
+
+local function zname(name)
+  local t = {}
+  for k = 1, #name do t[k] = string.byte(name, k) end
+  t[#t + 1] = 0
+  return t
+end
+-- MSPv2 checksum (crc8 dvb-s2) over flag .. payload
+function BR.crc(c, b)
+  c = c ~ b
+  for _ = 1, 8 do c = (c & 0x80) ~= 0 and (((c << 1) ~ 0xD5) & 0xFF) or ((c << 1) & 0xFF) end
+  return c
+end
+-- one request as a raw MSPv2 frame ($X<) in mLRS bridge frames (0x66, seq, size, up to 57 bytes)
+function BR.send(body)
+  local f, c = { 36, 88, 60 }, 0
+  for i = 1, #body do f[#f + 1] = body[i] c = BR.crc(c, body[i]) end
+  f[#f + 1] = c
+  local i = 1
+  while i <= #f do
+    local n = math.min(57, #f - i + 1)
+    local e = { 0x66, 0, n }   -- mLRS "mb" envelope 0x81 (see T.envFrame in telem.lua)
+    for k = 0, n - 1 do e[k + 4] = f[i + k] end
+    out[#out + 1] = { crsf = e, cmd = 0x81 }
+    i = i + n
+  end
+end
+local function mspSend(cmd, payload)
+  payload = payload or {}
+  mLast = { cmd, payload }
+  local body = { 0, cmd % 256, floor(cmd / 256), #payload % 256, floor(#payload / 256) }
+  for i = 1, #payload do body[#body + 1] = payload[i] end
+  if mspViaNow == "CRSF" and BR.path ~= "native" then
+    BR.send(body)
+    if BR.path == "bridge" then mOn = false return end
+  end
+  local per = mspViaNow == "S.Port" and 5 or 57
+  local i, first = 1, true
+  repeat
+    local c = { 0x40 + (first and 0x10 or 0) + mSeq }
+    mSeq = (mSeq + 1) % 16
+    for k = i, math.min(#body, i + per - 1) do c[#c + 1] = body[k] end
+    i, first = i + per, false
+    if mspViaNow == "S.Port" then
+      while #c < 6 do c[#c + 1] = 0 end
+      out[#out + 1] = c
+    else
+      local d = { 0xC8, 0xEA }
+      for k = 1, #c do d[k + 2] = c[k] end
+      out[#out + 1] = { crsf = d, cmd = 0x7A }
+    end
+  until i > #body
+  mOn = false
+end
+local function mspRepeat() if mLast then mspSend(mLast[1], mLast[2]) end end
+
+local function rowOf(name)
+  for _, r in ipairs(LIST) do if r[2] == name then return r end end
+  return nil
+end
+local function u16(b, o) return (b[o] or 0) + (b[o + 1] or 0) * 256 end
+local function u32(b, o) return u16(b, o) + u16(b, o + 2) * 65536 end
+local VSIZE = { [0] = 1, [1] = 1, [2] = 2, [3] = 2, [4] = 4, [5] = 4 }
+local function decode(t, b, o)
+  if t == 0 then return b[o] or 0 end
+  if t == 1 then local v = b[o] or 0 return v >= 128 and v - 256 or v end
+  if t == 2 then return u16(b, o) end
+  if t == 3 then local v = u16(b, o) return v >= 32768 and v - 65536 or v end
+  if t == 4 then return u32(b, o) end
+  if t == 5 then return b2f(b[o] or 0, b[o + 1] or 0, b[o + 2] or 0, b[o + 3] or 0) end
+  return nil
+end
+local function encode(t, raw, into)
+  if t == 5 then local f = f2b(raw) for k = 1, 4 do into[#into + 1] = f[k] end return into end
+  local n = VSIZE[t] or 1
+  raw = floor(raw + 0.5)
+  if raw < 0 then raw = raw + 2 ^ (8 * n) end
+  for _ = 1, n do into[#into + 1] = raw % 256 raw = floor(raw / 256) end
+  return into
+end
+local MC_PLAT = { MULTIROTOR = true, TRICOPTER = true, HELICOPTER = true }
+local function forgetPids()
+  for _, r in ipairs(LIST) do if r.pid then vals[r[2]] = nil end end
+end
+
+-- one complete INAV reply
+local function mspReply(cmd, b, err)
+  P.stats.rx = P.stats.rx + 1
+  answered, silent, quietAt = true, 0, nil
+  if not pend then return end
+  local m = pend.m
+  -- each housekeeping answer must be for its own command: over ELRS a late or repeated reply to an
+  -- earlier request can arrive in between (an error with command 0 is INAV refusing the MSP version)
+  if m == "variant" then
+    if cmd ~= MSP_FC_VARIANT and not (err and cmd == 0) then return end
+    pend = nil
+    if err then IN.state = "old" return end   -- an INAV before 9.0 answers a v2 request with an error
+    IN.variant = string.char(b[1] or 63, b[2] or 63, b[3] or 63, b[4] or 63)
+    IN.state = IN.variant == "INAV" and "version" or "notinav"
+    return
+  end
+  if m == "version" then
+    if cmd ~= MSP_FC_VERSION and not (err and cmd == 0) then return end
+    pend = nil
+    if err then IN.state = "old" return end
+    IN.ver = string.format("%d.%d.%d", b[1] or 0, b[2] or 0, b[3] or 0)
+    -- INAV 9.0.x speaks MSPv2 over the radio link but answers the setting commands without the
+    -- setting's name and value: msp_shared.c gave each reply a buffer of size 0, and the "Safe"
+    -- writes those two use skip a full buffer (fixed in 9.1.0-RC1, INAV commit 922536955).
+    -- X20S + ELRS + INAV 9.0.0, 2026-11-23: every value read as 0.
+    local maj, mnr = b[1] or 0, b[2] or 0
+    IN.state = (maj > 9 or (maj == 9 and mnr >= 1)) and "ready" or (maj == 9 and "buggy" or "old")
+    return
+  end
+  if m == "status" then
+    if cmd ~= MSP2_INAV_STATUS then return end
+    pend = nil
+    if not err and #b >= 13 then
+      IN.armed, IN.armedAt = floor(u32(b, 10) / 4) % 2 == 1, os.clock()
+    end
+    return
+  end
+  if m == "store" then
+    -- only the EEPROM write's own answer (X20S + ELRS + INAV 9.1, 2026-11-24: another reply taken
+    -- as it said "NOT stored", yet the value was there after a reboot)
+    if cmd ~= MSP_EEPROM_WRITE then return end
+    pend = nil
+    if err then
+      -- INAV refuses the write only while armed: the change stays pending and is written once
+      -- INAV itself says it is disarmed (never given up)
+      IN.armed, IN.armedAt, IN.storeHold = true, os.clock(), os.clock() + STATUS_EVERY
+      IN.stored = "wait"
+      if edit then phase, phaseCol = "Set in INAV now, stored after the disarm", "warn" end
+      return
+    end
+    IN.dirty, IN.stored = false, "ok"
+    if edit then phase, phaseCol = "Saved, verified and stored", "ok" end
+    return
+  end
+  local name = pend.name
+  if not name then return end
+  if pend.set then
+    if cmd ~= M_SET_SETTING then return end
+    if err then
+      phase, phaseCol = "Not saved: INAV refused the value", "bad"
+      pend = nil
+      return
+    end
+    -- INAV took the value (in RAM): it needs the EEPROM write, whatever the read-back says
+    IN.dirty = true
+    pend = { name = name, check = pend.set, checkRaw = pend.setRaw, tries = 0 }
+    mspSend(M_SETTING, zname(name))
+    return
+  end
+  if pend.check then
+    if cmd ~= M_SETTING then return end
+    local mt, r = IN.meta[name], rowOf(name)
+    if err or not mt or #b < (VSIZE[mt.t] or 1) then
+      if not err then P.stats.bad = P.stats.bad + 1 end
+      pend = nil phase, phaseCol = "No answer: check the value in INAV Configurator", "warn" return
+    end
+    local raw = decode(mt.t, b, 1)
+    local same = (mt.t == 5) and sameBytes(f2b(raw), f2b(pend.checkRaw)) or raw == pend.checkRaw
+    gotValue(name, raw * ((r and r.k) or 1), f2b(raw), same)
+    return
+  end
+  if cmd ~= M_SETTING_INFO then return end
+  if err then
+    pend = nil
+    if name == "platform_type" then IN.plat = "?" return end
+    vals[name], naAt[name] = false, os.clock()
+    return
+  end
+  -- name, pgn, type, section, mode, min, max, index, profile, count, [names], value. A reply
+  -- for another name, or without its value, is not taken (n/a, counted as bad): never a 0 made up
+  local i = 1
+  while b[i] and b[i] ~= 0 do i = i + 1 end
+  local bad = not b[i] or string.char((table.unpack or unpack)(b, 1, i - 1)) ~= name
+  i = i + 1
+  local t, sec, mode = (b[i + 2] or 0) % 8, (b[i + 3] or 0), (b[i + 4] or 0)
+  local mn = u32(b, i + 5)
+  if mn >= 2147483648 then mn = mn - 4294967296 end
+  local mx = u32(b, i + 9)
+  local prof = b[i + 15]
+  i = i + 17
+  local look = nil
+  if mode == 0x40 then
+    look = {}
+    for _ = mn, mx do
+      local s0 = i
+      while b[i] and b[i] ~= 0 do i = i + 1 end
+      look[#look + 1] = string.char((table.unpack or unpack)(b, s0, i - 1))
+      i = i + 1
+    end
+  end
+  if bad or #b < i + (VSIZE[t] or 1) - 1 or not VSIZE[t] then
+    P.stats.bad = P.stats.bad + 1
+    pend = nil
+    if name == "platform_type" then IN.plat = "?" return end
+    vals[name], naAt[name] = false, os.clock()
+    return
+  end
+  local raw = decode(t, b, i)
+  if sec == 0x10 and prof and IN.profile ~= prof then   -- CONTROL_VALUE: the active control profile
+    if IN.profile ~= nil then forgetPids() end
+    IN.profile = prof
+  end
+  if name == "platform_type" then
+    pend = nil
+    local p = look and look[(raw or 0) - mn + 1] or tostring(raw)
+    if IN.plat ~= nil and IN.plat ~= "?" and IN.plat ~= p then forgetPids() end
+    IN.plat = p
+    return
+  end
+  IN.meta[name] = { t = t, min = mn, max = mx, look = look }
+  local r = rowOf(name)
+  if r then
+    local k = r.k or 1
+    if look then
+      r[9], r.o, r[5], r[6], r[7], r[8] = "lookup", look, 0, #look - 1, 1, 0
+    elseif t ~= 5 then
+      r[5], r[6] = mn * k, mx * k
+    end
+  end
+  if look then raw = (raw or 0) - mn end
+  gotValue(name, (raw or 0) * ((r and not look and r.k) or 1), f2b(raw or 0))
+end
+
+-- one MSP chunk from the FC
+local function mspChunk(c)
+  if #c < 1 then return end
+  local st = c[1]
+  local start, sq = floor(st / 16) % 2 == 1, st % 16
+  local i = 2
+  if start then
+    local ver = floor(st / 32) % 4
+    mErr, mBuf, mOn = st >= 128, {}, true
+    if ver == 2 then
+      mCmd, mSize, i = u16(c, 3), u16(c, 5), 7
+    else
+      mCmd, mSize, i = c[3] or 0, c[2] or 0, 4
+    end
+  elseif not mOn or ((mRxSeq + 1) % 16) ~= sq then
+    mOn = false
+    return
+  end
+  mRxSeq = sq
+  while i <= #c and #mBuf < mSize do mBuf[#mBuf + 1] = c[i] i = i + 1 end
+  if #mBuf >= mSize then
+    mOn = false
+    if BR.path == nil and mspViaNow == "CRSF" then BR.path = "native" end
+    if BR.path ~= "bridge" then mspReply(mCmd, mBuf, mErr) end
+  end
+end
+
+-- raw MSP from the mLRS bridge ($X> / $X! version 2, $M> / $M! version 1), byte by byte
+function BR.byte(x)
+  if BR.st == 0 then if x == 36 then BR.st = 1 end return end
+  if BR.st == 1 then
+    if x == 88 or x == 77 then BR.v2, BR.st = x == 88, 2 else BR.st = 0 end
+    return
+  end
+  if BR.st == 2 then
+    if x == 62 or x == 33 then BR.err, BR.st, BR.hdr, BR.crc_ = x == 33, 3, {}, 0 else BR.st = 0 end
+    return
+  end
+  if BR.st == 3 then   -- header: v2 flag, cmd lo, cmd hi, size lo, size hi; v1 size, cmd
+    BR.hdr[#BR.hdr + 1] = x
+    BR.crc_ = BR.v2 and BR.crc(BR.crc_, x) or (BR.crc_ ~ x)
+    if #BR.hdr == (BR.v2 and 5 or 2) then
+      BR.need = BR.v2 and (BR.hdr[4] + BR.hdr[5] * 256) or BR.hdr[1]
+      BR.buf, BR.st = {}, BR.need > 0 and 4 or 5
+      if BR.need > 1024 then BR.st = 0 end
+    end
+    return
+  end
+  if BR.st == 4 then
+    BR.buf[#BR.buf + 1] = x
+    BR.crc_ = BR.v2 and BR.crc(BR.crc_, x) or (BR.crc_ ~ x)
+    if #BR.buf >= BR.need then BR.st = 5 end
+    return
+  end
+  BR.st = 0
+  if x ~= BR.crc_ then P.stats.bad = P.stats.bad + 1 return end
+  if BR.path == nil then BR.path = "bridge" end
+  if BR.path ~= "bridge" then return end
+  mspReply(BR.v2 and (BR.hdr[2] + BR.hdr[3] * 256) or BR.hdr[2], BR.buf, BR.err)
+end
+function BR.input(data)
+  local e = 2 + (data[2] or 0)
+  if e > #data then e = #data end
+  for i = 3, e do BR.byte(data[i]) end
+end
+P._mspChunk = mspChunk   -- test harness
+
+local function mspPoll()
+  for _ = 1, 12 do
+    if mspViaNow == "S.Port" then
+      local ok, f = pcall(function() return rx:popFrame() end)
+      if not ok or not f then return end
+      if f:primId() == 0x32 then
+        local a = f:appId()
+        local lo, hi = T.split32(f:value())
+        local c = { a % 256, floor(a / 256) % 256, lo % 256, floor(lo / 256), hi % 256, floor(hi / 256) }
+        local key = table.concat(c, ",")
+        if key ~= mPrev then mPrev = key mspChunk(c) end   -- receivers can repeat a frame
+      end
+    else
+      local ok, cmd, data = pcall(function() return rx:popFrame(0x7B, 0x7B) end)
+      if not ok or cmd == nil then return end
+      if cmd == 0x7B and data and #data >= 3 then
+        local c = {}
+        for k = 3, #data do c[#c + 1] = data[k] end
+        mspChunk(c)
+      end
+    end
+  end
+end
+
+local function mspRead(name)
+  pend = { name = name, tries = 0 }
+  mspSend(M_SETTING_INFO, zname(name))
+end
+local function mspSave(name, bytes)
+  local mt, r = IN.meta[name], rowOf(name)
+  if not mt then phase, phaseCol = "Read it first", "warn" return end
+  local v = b2f(bytes[1], bytes[2], bytes[3], bytes[4])
+  local raw
+  if mt.look then raw = floor(v + 0.5) + mt.min
+  else raw = v / ((r and r.k) or 1) if mt.t ~= 5 then raw = floor(raw + 0.5) end end
+  if mt.t ~= 5 then raw = math.max(mt.min, math.min(mt.max, raw)) end
+  pend = { name = name, set = bytes, setRaw = raw, tries = 0 }
+  mspSend(M_SET_SETTING, encode(mt.t, raw, zname(name)))
+end
+-- the profile line for the page: "INAV 9.1.0  profile 2 MULTIROTOR"
+function P.inavLine()
+  if link ~= "MSP" then return nil end
+  return string.format("INAV %s  profile %s %s", IN.ver or "?", IN.profile and tostring(IN.profile + 1) or "?", IN.plat or "?")
+end
+-- a PID row of the profile that isn't active: why it can't be edited (nil = it can)
+local function pidLock(r)
+  if link ~= "MSP" or not r or not r.pid or not IN.plat or IN.plat == "?" then return nil end
+  local mc = MC_PLAT[IN.plat] == true
+  if r.pid == "mc" and not mc then return "Hover PIDs: switch the VTOL to multirotor to edit" end
+  if r.pid == "fw" and mc then return "Plane PIDs: switch the VTOL to fixed wing to edit" end
+  return nil
+end
+readReqMsp, mspPollNow = mspRead, mspPoll
+-- armed as the radio's telemetry says, or as INAV itself said in its last status (MSP link)
+local function armedEff(s)
+  return s.armed == true or (link == "MSP" and IN.armed == true)
 end
 
 -- ---------------------------------------------------------------- page state
@@ -725,8 +1138,9 @@ local bitCur = 1
 local saveReq = nil
 local msgAt = 0
 
-function P.init(telem, list, extraPath)
+function P.init(telem, list, extraPath, ilist)
   T, LIST = telem, list
+  APLIST, ILIST = list, ilist
   T.onMavlite = P.onCrsf   -- telem.lua reads the CRSF queue and hands MAVlite replies here
   T.onMavEnv = P.onMavEnv  -- ... and the mLRS bridge frames (MAVLink)
   if extraPath then
@@ -761,12 +1175,35 @@ function P.reset()
   sel, top, grp, link, prev, rxSt = 0, 0, nil, nil, nil, nil
   focus, tabCur, lastSel = "tabs", nil, nil
   mvSt, mvSkip = 0, 0
+  IN.state, IN.variant, IN.ver, IN.meta, IN.profile, IN.plat = "off", nil, nil, {}, nil, nil
+  IN.dirty, IN.storeReq, IN.stored, mspViaNow, mLast, BR.path = false, false, nil, nil, nil, nil
+  IN.armed, IN.armedAt, IN.statusAt = nil, nil, -10
+  if APLIST then LIST = APLIST end
   if LIST then rebuild() end
 end
 
 -- why the page can't work now (nil = it can)
 local function blocked(s)
-  if s.fc ~= "ArduPilot" then return "Parameters need ArduPilot", "INAV and Betaflight are not supported" end
+  if s.fc == "INAV/BF" and ILIST then
+    if s.link ~= "S.Port" and s.link ~= "CRSF" then
+      return "Parameters need S.Port, F.Port, ELRS or Crossfire", "This link: " .. tostring(s.link or "none")
+    end
+    if T.alive() == false then return "No telemetry", "" end
+    if IN.state == "notinav" then
+      return "Parameters need ArduPilot or INAV", "This flight controller is " .. tostring(IN.variant) .. ": Betaflight has no settings by name over the radio link."
+    end
+    if IN.state == "buggy" then
+      return "Parameters need INAV 9.1 or later", "This one is INAV " .. tostring(IN.ver) .. ": 9.0 sends setting values over the radio link empty (fixed in INAV 9.1.0)."
+    end
+    if IN.state == "old" then
+      return "Parameters need INAV 9.1 or later", (IN.ver and ("This one is INAV " .. IN.ver) or "This INAV answers MSP version 1 only over the radio link") .. ". Update INAV, or use INAV Configurator."
+    end
+    if quietAt then
+      return "The flight controller doesn't answer", "INAV 9.1+ over ELRS / Crossfire 150 Hz or S.Port / F.Port.\nmLRS: Tx Ser Port = cbridge with the MSP-over-cbridge Tx firmware."
+    end
+    return nil
+  end
+  if s.fc ~= "ArduPilot" then return "Parameters need ArduPilot or INAV", "Betaflight is not supported" end
   if s.link ~= "S.Port" and s.link ~= "CRSF" then
     return "Parameters need S.Port, F.Port, ELRS or Crossfire", "This link: " .. tostring(s.link or "none")
   end
@@ -797,7 +1234,9 @@ end
 local function curGroup() return vis[sel] and vis[sel][1] or grp or groups[1] end
 
 local function nextRead(rowsShown)
-  if qOn == nil then return "Q_ENABLE" end
+  if link == "MSP" then
+    if IN.plat == nil then return "platform_type" end
+  elseif qOn == nil then return "Q_ENABLE" end
   if edit then return nil end
   local g = curGroup()
   local r = vis[sel]
@@ -816,6 +1255,12 @@ local function nextRead(rowsShown)
 end
 local shown = {}   -- rows on screen at the last paint
 
+-- seconds added to the timeouts: ELRS / Crossfire wait for an uplink slot and a telemetry slot
+local function slowness()
+  if link == "MAVLINK" or (link == "MSP" and BR.path == "bridge") then return 2 end
+  if link == "CRSF" or (link == "MSP" and mspViaNow == "CRSF") then return 1 end
+  return 0
+end
 local QUIET_RETRY_S = 15   -- with no answer at all, try again this often (firmware just flashed)
 
 -- next mission request, if any is due; true when one was sent
@@ -882,16 +1327,30 @@ local function service(s, pageOpen)
   -- (X20S + Nomad 2026-11-14: no 0xAA at all until the test widget's first request). So a GCS
   -- HEARTBEAT goes out every 2 s on CRSF, as Mission Planner sends one: it wakes the bridge, and
   -- ELRS / TBS ignore the frame type.
-  if s.link == "CRSF" and T.crsfPush and os.clock() - (MV.hbAt or -10) >= 2 then
+  P.armedNow = armedEff(s)
+  local inav = s.fc == "INAV/BF" and ILIST ~= nil
+  if not inav and s.link == "CRSF" and T.crsfPush and os.clock() - (MV.hbAt or -10) >= 2 then
     MV.hbAt = os.clock()
     local p = mavPacket(0, { 0, 0, 0, 0, 6, 8, 0, 0, 3 })   -- type GCS, autopilot invalid, MAVLink 3
-    local e = { 0, #p }
-    for k = 1, #p do e[k + 2] = p[k] end
-    pcall(T.crsfPush, 0xAA, e)
+    local e = { 0x66, 0, #p }
+    for k = 1, #p do e[k + 3] = p[k] end
+    pcall(T.crsfPush, 0x81, e)
   end
   local want = s.link
   if want == "CRSF" and T.bridgeAt and os.clock() - T.bridgeAt < 3 then want = "MAVLINK" end
-  if link ~= want then
+  if inav then want = "MSP" end
+  if link ~= want or (want == "MSP" and mspViaNow ~= s.link) then
+    if (link == "MSP") ~= (want == "MSP") or LIST ~= (want == "MSP" and ILIST or APLIST) then
+      -- ArduPilot <-> INAV: the other list, nothing read yet
+      LIST = want == "MSP" and ILIST or APLIST
+      vals, vbytes, qOn, edit = {}, {}, nil, nil
+      sel, top, grp, focus, tabCur, lastSel = 0, 0, nil, "tabs", nil, nil
+      rebuild()
+    end
+    if want == "MSP" then
+      mspViaNow, mOn, mPrev, BR.path, BR.st = s.link, false, nil, nil, 0
+      IN.state, IN.meta, IN.profile, IN.plat = "variant", {}, nil, nil
+    end
     link = want
     mvSt, mvSkip, MV.found = 0, 0, false
     out, pend = {}, nil
@@ -905,10 +1364,52 @@ local function service(s, pageOpen)
     if #out == 0 and pend then pend.at = now end
     return
   end
+  if link == "MSP" then
+    if pend and pend.m then
+      -- INAV housekeeping (variant, version, EEPROM write): three tries
+      if not pend.at then pend.at = now end
+      if now - pend.at < READ_TIMEOUT + slowness() then return end
+      pend.tries = pend.tries + 1
+      if pend.tries >= 3 then
+        local m = pend.m
+        pend = nil
+        if m == "store" then
+          IN.stored, IN.storeHold = "fail", now + 10
+          if edit then phase, phaseCol = "Saved, NOT stored yet (no answer): trying again", "warn" end
+        else
+          silent = silent + 1
+          if silent >= 2 then quietAt = now end
+        end
+        return
+      end
+      pend.at = nil
+      mspRepeat()
+      return
+    end
+    if not pend then
+      if IN.state == "variant" then pend = { m = "variant", tries = 0 } mspSend(MSP_FC_VARIANT) return end
+      if IN.state == "version" then pend = { m = "version", tries = 0 } mspSend(MSP_FC_VERSION) return end
+      if IN.state ~= "ready" then return end
+      -- INAV's own arming state, every 2 s (1 s while a change waits for its EEPROM write)
+      if now - IN.statusAt >= (IN.dirty and 1 or STATUS_EVERY) then
+        IN.statusAt = now
+        pend = { m = "status", tries = 0 }
+        mspSend(MSP2_INAV_STATUS)
+        return
+      end
+      -- stored only when INAV said "disarmed" within the last 3 s (and the radio agrees)
+      if IN.dirty and not s.armed and IN.armed == false and now - (IN.armedAt or -10) < 3
+         and now >= (IN.storeHold or 0) then
+        pend = { m = "store", tries = 0 }
+        mspSend(MSP_EEPROM_WRITE)
+        return
+      end
+    end
+  end
   if pend and pend.m then
     -- mission request: its own retries, never touches the parameter rows or "no answer"
     if not pend.at then pend.at = now end
-    local slow = (link == "MAVLINK" and 2) or (link == "CRSF" and 1) or 0
+    local slow = slowness()
     if now - pend.at < READ_TIMEOUT + slow then return end
     pend.tries = pend.tries + 1
     -- mLRS: an answer lost now and then, so two more tries
@@ -957,7 +1458,7 @@ local function service(s, pageOpen)
       return
     end
     -- ELRS / Crossfire: the request waits for an uplink slot and the answer for a telemetry slot
-    local slow = (link == "MAVLINK" and 2) or (link == "CRSF" and 1) or 0
+    local slow = slowness()
     if now - pend.at < (pend.set and SET_TIMEOUT or READ_TIMEOUT) + slow then return end
     if pend.set then
       -- mLRS: ArduPilot saves at once but sends its answer only when the link has room, so it
@@ -969,7 +1470,7 @@ local function service(s, pageOpen)
         return
       end
       -- never sent again by itself: the save may have happened
-      phase, phaseCol = "No answer: check the value in a GCS", "warn"
+      phase, phaseCol = link == "MSP" and "No answer: check the value in INAV Configurator" or "No answer: check the value in a GCS", "warn"
       vals[name], pend = nil, nil
       return
     end
@@ -992,8 +1493,13 @@ local function service(s, pageOpen)
       if name == "Q_ENABLE" then qOn = false rebuild() end
     else
       pend.at = nil
-      send(REQ_READ, nameBytes(name, {}))
+      if link == "MSP" then mspRepeat() else send(REQ_READ, nameBytes(name, {})) end
     end
+    return
+  end
+  if saveReq and link == "MSP" then
+    mspSave(saveReq.name, saveReq.bytes)
+    saveReq = nil
     return
   end
   if saveReq then
@@ -1027,7 +1533,7 @@ local function service(s, pageOpen)
       return
     end
   end
-  missionNext(s, now)
+  if link ~= "MSP" then missionNext(s, now) end
 end
 
 function P.wakeup(s) service(s, true) end          -- PARAMS page open
@@ -1038,10 +1544,11 @@ local function flash(t, c) status, statusCol, msgAt = t, c, os.clock() end
 
 -- in flight only the gains and trims can be changed, and only with "Edit in flight" set to
 -- "Gains and trim" (P.flightEdit, set by ui.lua); everything else is view only while armed
-local FLIGHT_GROUPS = { ["PID"] = true, ["Q PID"] = true, ["TRIM"] = true }
+local FLIGHT_GROUPS = { ["PID"] = true, ["Q PID"] = true, ["TRIM"] = true, ["FW PID"] = true, ["MC PID"] = true }
 P.flightEdit = false
 local function locked(s, r)
-  if not s.armed then return false end
+  if pidLock(r) then return true end   -- INAV VTOL: the other profile's PIDs
+  if not armedEff(s) then return false end
   return not (P.flightEdit and r and (FLIGHT_GROUPS[r[1]] or r.fl))
 end
 
@@ -1058,10 +1565,13 @@ local function openEdit(s)
     return
   end
   edit, draft, editBase, phase, bitCur = r, v, v, "", 1
-  if locked(s, r) then phase, phaseCol = "Armed: view only", "warn"
-  elseif s.armed then phase, phaseCol = "In flight: saves go to the aircraft now", "warn" end
+  if pidLock(r) then phase, phaseCol = pidLock(r), "warn"
+  elseif locked(s, r) then phase, phaseCol = "Armed: view only", "warn"
+  elseif armedEff(s) then phase, phaseCol = "In flight: saves go to the aircraft now", "warn" end
   -- read it again: the value may have been changed in a GCS since
   if not pend and #out == 0 then readReq(r[2]) end
+  -- INAV PID row: the active platform is read again too (the VTOL switch may have moved it)
+  if r.pid and link == "MSP" then IN.plat = nil end
 end
 
 local function nudge(d)
@@ -1089,6 +1599,7 @@ local function toggleBit(i)
 end
 
 local function save(s)
+  if pidLock(edit) then phase, phaseCol = pidLock(edit), "bad" return end
   if locked(s, edit) then phase, phaseCol = "Disarm to save", "bad" return end
   if pend and pend.set then return end
   local b = f2b(draft)
@@ -1205,7 +1716,19 @@ function P.paint(w, W, H, s, u, ctx)
     lcd.drawText(W / 2, floor(H * 0.42), why, CENTERED)
     lcd.font(fSmall)
     lcd.color(C.dim)
-    lcd.drawText(W / 2, floor(H * 0.56), more, CENTERED)
+    -- the explanation in lines that fit the screen ("\n" starts a new one, long ones wrap at a
+    -- space), as on the X18 (2026-11-25: the INAV / mLRS text ran off the sides)
+    local lines, maxW = {}, W - 12
+    for part in string.gmatch((more or "") .. "\n", "(.-)\n") do
+      local cur = ""
+      for word in string.gmatch(part, "%S+") do
+        local try = cur == "" and word or (cur .. " " .. word)
+        if cur ~= "" and lcd.getTextSize(try) > maxW then lines[#lines + 1] = cur cur = word else cur = try end
+      end
+      if cur ~= "" then lines[#lines + 1] = cur end
+    end
+    local _, lh = lcd.getTextSize("A")
+    for i, t in ipairs(lines) do lcd.drawText(W / 2, floor(H * 0.56) + (i - 1) * (lh + 2), t, CENTERED) end
     return
   end
   lcd.font(fMid)
@@ -1324,7 +1847,9 @@ function P.paint(w, W, H, s, u, ctx)
       hint = edit[10] == "bits" and "Wheel: move   ENTER: CHECK/SKIP or button   RTN: back"
         or "Wheel: change   ENTER: save   RTN: back"
     end
-    if s.armed then hint = (P.flightEdit and "ARMED: gains/trim only   " or "ARMED: view only   ") .. hint end
+    if armedEff(s) then hint = (P.flightEdit and "ARMED: gains/trim only   " or "ARMED: view only   ") .. hint end
+    local il = P.inavLine()
+    if il then hint = il .. (IN.dirty and "  NOT STORED" or "") .. "   " .. hint end
     lcd.drawText(6, by, hint)
   end
   lcd.color(got < nTab and C.warn or C.ok)
@@ -1481,7 +2006,9 @@ local function pendName()
   if pend.m == "item" then return "waiting mission item " .. pend.seq end
   if pend.m == "clear" then return "waiting mission clear" end
   if pend.m == "write" then return "waiting mission write " .. pend.seq end
-  return "waiting " .. pend.name
+  -- INAV steps (variant, version, status, store) and the mission upload carry no name, only
+  -- their step (TX16S MK3 + INAV 2026-11-25: the Sensor check page stopped on a nil name)
+  return "waiting " .. tostring(pend.name or pend.m or "?")
 end
 function P.missionDebug()
   if not P.missionOn then return nil end
@@ -1496,13 +2023,13 @@ end
 function P.debugCore()
   local X = P.extra
   if X.file then
-    return string.format("Params: %s%s tx %d rx %d bad %d  %s%s  params.txt +%d skipped %d%s", tostring(link or "-"),
+    return string.format("Params: %s%s tx %d rx %d bad %d  %s%s  params.txt +%d skipped %d%s", (link == "MSP" and BR.path) and ("MSP " .. BR.path) or tostring(link or "-"),
       (T and ((T.bridgeN or 0) > 0 or T.bridgeInfo)) and (" bridge " .. (T.bridgeN or 0) .. (T.bridgeInfo and (" (" .. T.bridgeInfo .. ")") or "")) or "",
       P.stats.tx, P.stats.rx, P.stats.bad, pendName(), quietAt and "  NO ANSWER" or "",
       X.added, X.skipped,
       X.badLine and (" (line " .. X.badLine .. ")") or "")
   end
-  return string.format("Params: %s%s tx %d rx %d bad %d  %s%s", tostring(link or "-"),
+  return string.format("Params: %s%s tx %d rx %d bad %d  %s%s", (link == "MSP" and BR.path) and ("MSP " .. BR.path) or tostring(link or "-"),
     (T and ((T.bridgeN or 0) > 0 or T.bridgeInfo)) and (" bridge " .. (T.bridgeN or 0) .. (T.bridgeInfo and (" (" .. T.bridgeInfo .. ")") or "")) or "", P.stats.tx, P.stats.rx,
     P.stats.bad, pendName(), quietAt and "  NO ANSWER" or "")
 end

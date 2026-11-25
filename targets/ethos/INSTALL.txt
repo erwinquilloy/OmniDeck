@@ -1,10 +1,62 @@
-OmniDeck 0.4.1 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 1.0.0d for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0d (after 1.0.0c)
+- mLRS 1.5.00: the PARAMS page, the ArduPilot mission download and the editor's Send work again
+  over the mLRS bridge (Tx Ser Port = cbridge). OmniDeck now uses mLRS's own bridge frames
+  (0x81 / 0x82); the CRSF MAVLink frames (0xAA) it used before are sent wrong by mLRS 1.5.00
+  (fixed in mLRS 1.5.01). Works with mLRS 1.4.04, 1.5.00 and later.
+- Battery block: a small line above the gauge shows the average cell ("AVE CELL 3.95V"); with the
+  widget setting "Battery block shows" = Average cell the gauge shows the cell voltage and the
+  line the pack ("BATT 15.8V"). Cells: the "Battery cells" setting, or auto from the voltage.
+- Top bar: the model name now changes when another model is picked (it kept the old one).
+- PARAMS page: the "doesn't answer" explanation wraps to the screen (the mLRS part on its own
+  line), on the X20 and the X18.
+- X18 INAV PARAMS: throttle rows (launch, idle, cruise, min, max, TPA, hover) step 1 us, so "+10"
+  is 10 us (it was 100 us).
+- INAV PARAMS over mLRS (mspX): needs the mLRS Tx firmware with "MSP over cbridge" (a test
+  build for the RadioMaster Nomad, based on mLRS v1.4.04) and Tx Ser Port = cbridge. OmniDeck
+  finds the way by itself: it asks both ways, the CRSF MSP frames (ELRS, Crossfire) and the mLRS
+  bridge, and keeps the one INAV answers on (Sensor check page: "Params: MSP native" or "MSP
+  bridge"). Stock mLRS drops the radio's MSP, and with cbridge stock mLRS also stops the
+  telemetry.
+
+WHAT'S NEW IN 1.0.0c (after 1.0.0b)
+- INAV PARAMS page on the X18 too (and X18-size screens), same groups and rules as the X20.
+- In flight, the page now asks INAV itself whether it is armed (not only the radio's flight mode
+  sensor). With "Params: edit in flight" Off every value is view only while armed ("ARMED: view
+  only"); with "Gains and trim" only the gains and trims can be changed.
+- A value changed in flight is stored in INAV's EEPROM after the disarm, as soon as INAV reports
+  it is disarmed; if INAV refuses the write it is tried again, never given up (1.0.0b could lose
+  an in-flight change at the reboot). Keep the radio linked a few seconds after the disarm
+  before unplugging the battery.
+
+WHAT'S NEW IN 1.0.0b (after 0.4.1)
+- PARAMS page for INAV (X20 family; X18-size screens keep the ArduPilot-only page). Needs INAV
+  9.1.0 or later: INAV 7 and 8 can't carry the setting commands over the radio link, and INAV
+  9.0.x answers them without the values (an INAV bug, fixed in 9.1.0); the page says
+  "Parameters need INAV 9.1 or later" there. Over ELRS / TBS Crossfire (150 Hz) and S.Port /
+  F.Port; not over mLRS (its module drops the MSP frames). Betaflight: not supported.
+- 62 INAV settings in 8 groups: FLIGHT, LAUNCH, NAV THR, RTH, LANDING, MISSION, FW PID, MC PID,
+  by their CLI names, in plain units (degrees, m, m/s; INAV keeps decidegrees, cm, cm/s).
+  Ranges and choice names (e.g. RTH alt mode AT_LEAST / MAX) come from the flight controller.
+  A setting the flight controller doesn't answer shows n/a.
+- Save: INAV sets the value, OmniDeck reads it back, then stores it in EEPROM while disarmed
+  ("Saved, verified and stored").
+- In flight ("Params: edit in flight" = "Gains and trim"): the PID groups, level trim and hover
+  throttle can be changed; they work at once and are stored automatically after the disarm
+  (the hint line shows "NOT STORED" until then), on any page.
+- VTOL (mixer_control_profile_linking ON): INAV reads and writes the ACTIVE profile only. The
+  hint line shows e.g. "INAV 9.1.0  profile 2 MULTIROTOR". Hover PIDs (MC PID) can be edited
+  only with the VTOL in multirotor mode, plane PIDs (FW PID) only in fixed-wing mode; flip the
+  VTOL switch (on the bench, disarmed) to edit the other set.
+- Two settings renamed: "Params page (ArduPilot, INAV)", "Params: edit in flight".
+- INAV mission download pauses while the PARAMS page talks to INAV (one MSP request at a time).
 
 WHAT'S NEW IN 0.4.1 (after 0.4.0f)
 - Mission editor (X20 family): - / + change the altitude by 1 m (was 10 m), the wheel by 1 m

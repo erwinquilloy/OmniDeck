@@ -23,16 +23,41 @@ class FakeAP:
         self.got_ack_download = 0
         self.rnd = random.Random(5)
         self.frames_in = 0
+        # mLRS: answers in the envelope type the radio last sent, "mb" (0x82) before any; mlrs15 =
+        # 1.5.00's 0xAA frames (size byte never written, data one byte off: crsf_interface_tx.h)
+        self.use_mb = True
+        self.mlrs15 = False
+        self.types_in = set()
+        self.seq = 0
+        self.stale = 0
 
     def emit(self, m, lossy=True):
         if lossy and self.rnd.random() < self.loss: return
         self.out += m.pack(self.mv)
 
     def from_radio(self, cmd, data):
-        assert cmd == 0xAA and data[0] == 0 and data[1] == len(data) - 2 and data[1] <= 58, (cmd, data[:3], len(data))
+        if cmd == 0x81:   # mLRS mb envelope: 0x66, seq, size, data (mLRS checks len == size + 5)
+            assert data[0] == 0x66 and data[2] == len(data) - 3 and data[2] <= 57, (cmd, data[:4], len(data))
+            self.use_mb, body = True, data[3:]
+        else:
+            assert cmd == 0xAA and data[1] == len(data) - 2 and data[1] <= 58, (cmd, data[:3], len(data))
+            self.use_mb, body = False, data[2:]
+        self.types_in.add(cmd)
         self.frames_in += 1
-        for m in self.rxp.parse_buffer(bytes(data[2:])) or []:
+        for m in self.rxp.parse_buffer(bytes(body)) or []:
             self.handle(m)
+
+    def envelope(self, chunk):
+        """one downlink frame (type, payload) for these MAVLink bytes, as the module builds it"""
+        self.seq = (self.seq + 1) & 15
+        if self.use_mb:
+            self.stale = self.seq          # the union's byte 1 (mb.seq): what 1.5.00's 0xAA reuses
+            return 0x82, [0x66, self.seq, len(chunk)] + list(chunk)
+        if not self.mlrs15:
+            return 0xAA, [self.seq, len(chunk)] + list(chunk)
+        buf = [self.seq, self.stale, len(chunk)] + list(chunk)   # mb.data_size / mb.data written
+        n = self.stale + 2                                       # sent with mavlink.data_size + 2
+        return 0xAA, (buf + [0] * n)[:n]
 
     def handle(self, m):
         t = m.get_type()
@@ -95,7 +120,7 @@ class FakeAP:
             return fr
         budget = getattr(self, 'bytes_per_tick', None)   # the link's capacity: the rest waits (queue)
         while self.out and (budget is None or budget > 0):
-            n = min(len(self.out), self.rnd.randint(10, 58))
+            n = min(len(self.out), self.rnd.randint(10, 57 if self.use_mb else 58))
             if budget is not None: budget -= n
-            fr.append([0, n] + list(self.out[:n])); self.out = self.out[n:]
-        return fr
+            fr.append(self.envelope(self.out[:n])); self.out = self.out[n:]
+        return fr   # (type, payload) pairs

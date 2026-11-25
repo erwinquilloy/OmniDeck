@@ -427,10 +427,10 @@ def runc(sec, dt=0.05):
 ap.p['Q_ENABLE'] = 0.0
 runc(30)
 check('CRSF: params.lua makes no CRSF sensor of its own (sends via telem.lua)', gets[0] == 0)
-_req = [(c, d) for c, d in crsf_frames if c != 0xAA]
-_hb = [(c, d) for c, d in crsf_frames if c == 0xAA]
+_req = [(c, d) for c, d in crsf_frames if c not in (0x81, 0xAA)]
+_hb = [(c, d) for c, d in crsf_frames if c in (0x81, 0xAA)]
 check('CRSF: every request is one 0x80 frame C8 EA F4 len msgid ...', _req and all(c == 0x80 and d[:3] == [0xC8, 0xEA, 0xF4] and d[3] == len(d) - 5 for c, d in _req))
-check('CRSF: a GCS HEARTBEAT in an mLRS bridge frame every 2 s (wakes cbridge; %d)' % len(_hb), len(_hb) >= 10 and all(d[2] == 0xFD and d[9] == 0 for c, d in _hb))
+check('CRSF: a GCS HEARTBEAT in an mLRS bridge frame every 2 s (wakes cbridge; %d)' % len(_hb), len(_hb) >= 10 and all(c == 0x81 and d[0] == 0x66 and d[2] == len(d) - 3 and d[3] == 0xFD and d[10] == 0 for c, d in _hb))
 check('CRSF: all rows read (idle, no bad frames)', 'idle' in P3.debug() and P3.stats.bad == 0)
 if NEW:
     assert goto_new('AIRSPEED_CRUISE', P3)

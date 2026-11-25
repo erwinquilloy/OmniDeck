@@ -559,7 +559,7 @@ end
 -- newest PASS_MAX; older ones are dropped (and counted) if the screen falls behind.
 local PASS_MAX = 24
 local crsfPass, crsfMsp = {}, {}
-local crsfEnv = {}   -- mLRS cbridge frames (0xAA), newest 16 kept
+local crsfEnv = {}   -- mLRS cbridge frames (0x82 with 0x66 first, or 0xAA), newest 16 kept
 -- OpenTX keeps only the newest few passthrough frames (it has no catch-up after drawing, so a
 -- long queue would show values a second old), in a ring of 4 that is overwritten in place, so
 -- emptying a backlog after a pause costs a few steps per frame, not a table each. Status text
@@ -575,7 +575,7 @@ local function crsfFill(want)
     ST.raw = ST.raw + 1
     if cmd == 0x7B then
       if #crsfMsp < 8 then crsfMsp[#crsfMsp + 1] = { cmd, data } end
-    elseif cmd == 0xAA then
+    elseif cmd == 0xAA or (cmd == 0x82 and data and data[1] == 0x66) then   -- (0x82 0x66: not mLRS's own Lua replies)
       if #crsfEnv >= 16 then table.remove(crsfEnv, 1) end
       crsfEnv[#crsfEnv + 1] = { cmd, data }
     elseif cmd == 0x80 or cmd == 0x7F then
@@ -601,7 +601,7 @@ end
 local crsfSensor = {
   popFrame = function(self, lo, hi)
     crsfFill(lo)
-    if OTX and lo == 0x7F then   -- (0x7B MSP and 0xAA bridge: the queues below)
+    if OTX and lo == 0x7F then   -- (0x7B MSP and the 0x82 / 0xAA bridge: the queues below)
       if #otxText > 0 then return 0x80, table.remove(otxText, 1) end   -- texts first, in order
       if ringN == 0 then return nil end
       local c, d = ringC[ringHead], ringD[ringHead]
@@ -618,8 +618,10 @@ local crsfSensor = {
 }
 E.crsf = crossfireTelemetryPop and { getSensor = function() return crsfSensor end } or nil
 
--- S.Port: MSP replies (primId 0x32) wait for mspclient; passthrough and the rest go to telem
-local spMsp = {}
+-- S.Port: MSP replies (primId 0x32) wait for mspclient / params.lua; passthrough and the rest go
+-- to telem. Up to 48 kept: one INAV setting reply (MSP2_COMMON_SETTING_INFO with choice names) is
+-- 18 frames of 5 bytes, and with 16 kept its last frames were dropped (1.0.0c simulator)
+local spMsp, SP_MSP_MAX = {}, 48
 -- passthrough values in a ring (four parallel arrays, no table per frame): taking the oldest is a
 -- step of the head index, where table.remove(t, 1) moved every entry up, 60 of them
 -- OpenTX decodes fewer values per update than arrive at times, so there only the newest 16 are
@@ -636,7 +638,7 @@ local function sportFill(wantMsp)
     ST.sp = ST.sp + 1
     got = true
     if primId == 0x32 then
-      if #spMsp < 16 then spMsp[#spMsp + 1] = { physId, primId, appId, value } end
+      if #spMsp < SP_MSP_MAX then spMsp[#spMsp + 1] = { physId, primId, appId, value } end
     else
       if spN >= SP_MAX then spHead = spHead % SP_MAX + 1 spN = spN - 1 ST.drop = ST.drop + 1 end
       local i = (spHead + spN - 1) % SP_MAX + 1
