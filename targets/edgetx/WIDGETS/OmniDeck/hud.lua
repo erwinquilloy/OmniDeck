@@ -1,0 +1,672 @@
+-- EdgeTX: run in the adapter's environment (etx.lua sets OD_ENV). EdgeTX 2.9 breaks loadScript's
+-- env argument (_ENV nil), so the module sets it itself; on Ethos OD_ENV is nil and nothing changes.
+local _ENV = OD_ENV or _ENV
+--[[
+  OmniDeck avionics: artificial horizon with pitch ladder and roll scale, speed tape
+  (left), altitude tape (right), heading tape (top) and a vertical-speed bar.
+]]
+
+local H = {}
+
+local C = {
+  sky = lcd.RGB(40, 110, 190), ground = lcd.RGB(130, 80, 40), line = lcd.RGB(255, 255, 255),
+  tape = lcd.RGB(0, 0, 0), tapeTxt = lcd.RGB(255, 255, 255), box = lcd.RGB(0, 0, 0),
+  sym = lcd.RGB(255, 210, 0), home = lcd.RGB(80, 200, 255), climb = lcd.RGB(80, 230, 80),
+  sink = lcd.RGB(255, 120, 60), dim = lcd.RGB(190, 190, 190), gs = lcd.RGB(90, 235, 140),
+  warn = lcd.RGB(255, 190, 40), bad = lcd.RGB(255, 70, 70),
+}
+H.C = C
+
+-- round to a pixel; where Lua time is short (EdgeTX) the radio's own floor() is used directly
+-- a NaN or infinite value (bad sensor data) would stop paint() on Ethos: drawn at 0 instead
+-- test41: Ethos too. The rounding helper this was (floor, then NaN and infinity tests) was half of
+-- the main page's Lua time on an X18; bad telemetry is now checked once per update where it comes
+-- in (H.draw), and coordinates floor straight away as EdgeTX's always did (at most 1 px apart)
+local I = math.floor
+-- displayed numbers: rounded to the nearest whole number on Ethos (NaN/inf shown as 0), as I() did
+-- before test41; EdgeTX/OpenTX floor them as they always did. A few calls per update, so not I().
+local R = OD_LITE and math.floor or function(v) v = math.floor(v + 0.5) if v ~= v or v == math.huge or v == -math.huge then return 0 end return v end
+-- a finite number, or nil: NaN and infinity from bad sensor data would stop a drawing call
+local function fin(v) if v == nil or v ~= v or v == math.huge or v == -math.huge then return nil end return v end
+-- Lighter drawing on every radio (EdgeTX / OpenTX since test17, Ethos since test36): numbers on
+-- every other tape tick, 15 deg heading ticks, 10 deg pitch rungs numbered on one side, no 45 deg
+-- roll ticks, one-pixel text shadows. The full set put a tester's X18 over Ethos's per-call Lua
+-- limit ("Max instructions count reached", INAV + TBS, 2026-11-05) where an X20S ran it clean.
+-- OD_LEAN = false brings the full drawing back (simulator comparisons).
+local LEAN = OD_LITE or OD_LEAN ~= false
+
+-- OpenTX 2.3 (set by etx.lua): no filled triangles, so each one is filled in Lua strip by strip,
+-- and a widget gets 10,000 Lua instructions per screen update. Shapes are kept simple there.
+local OTX = OD_OTX
+
+-- OpenTX: the ground below a tilted horizon in rectangles, as Yaapu fills it on OpenTX. Ground is
+-- where (X - px) * nx + (Y - py) * ny > 0. Only the band the horizon line crosses is filled in
+-- 6 px rows (columns when banked past 45 deg); the ground beyond it is one rectangle. Level
+-- flight takes two rectangles, 20 deg of bank about 16.
+local STRIP = 6
+local function groundRects(x, y, w, h, px, py, nx, ny)
+  local x2, y2 = x + w, y + h
+  if math.abs(ny) >= math.abs(nx) then
+    -- rows: the line's height at the left and right edges gives the band
+    local yl = py - (x - px) * nx / ny
+    local yr = py - (x2 - px) * nx / ny
+    local b1, b2 = math.max(y, math.min(yl, yr)), math.min(y2, math.max(yl, yr))
+    if ny > 0 then   -- ground below the band
+      if b2 < y2 then lcd.drawFilledRectangle(I(x), I(math.max(y, b2)), I(w), I(y2 - math.max(y, b2)) + 1) end
+    else             -- inverted: ground above the band
+      if b1 > y then lcd.drawFilledRectangle(I(x), I(y), I(w), I(math.min(y2, b1) - y) + 1) end
+    end
+    if nx ~= 0 then
+      local st = STRIP   -- 6 px: taller strips (fewer calls) showed as steps under the horizon line
+      local yy = math.floor(b1)
+      while yy < b2 do
+        local xb = px - (yy + st / 2 - py) * ny / nx
+        if nx > 0 then
+          if xb < x2 then lcd.drawFilledRectangle(I(math.max(x, xb)), yy, I(x2 - math.max(x, xb)) + 1, st) end
+        elseif xb > x then
+          lcd.drawFilledRectangle(I(x), yy, I(math.min(x2, xb) - x) + 1, st)
+        end
+        yy = yy + st
+      end
+    end
+  else
+    -- columns: steep horizon (banked past 45 deg)
+    local xt = px - (y - py) * ny / nx
+    local xb = px - (y2 - py) * ny / nx
+    local b1, b2 = math.max(x, math.min(xt, xb)), math.min(x2, math.max(xt, xb))
+    if nx > 0 then
+      if b2 < x2 then lcd.drawFilledRectangle(I(math.max(x, b2)), I(y), I(x2 - math.max(x, b2)) + 1, I(h)) end
+    else
+      if b1 > x then lcd.drawFilledRectangle(I(x), I(y), I(math.min(x2, b1) - x) + 1, I(h)) end
+    end
+    if ny ~= 0 then
+      local st = STRIP
+      local xx = math.floor(b1)
+      while xx < b2 do
+        local yb = py - (xx + st / 2 - px) * nx / ny
+        if ny > 0 then
+          if yb < y2 then lcd.drawFilledRectangle(xx, I(math.max(y, yb)), st, I(y2 - math.max(y, yb)) + 1) end
+        elseif yb > y then
+          lcd.drawFilledRectangle(xx, I(y), st, I(math.min(y2, yb) - y) + 1)
+        end
+        xx = xx + st
+      end
+    end
+  end
+end
+
+-- dark translucent backing for tapes; Ethos has no alpha fill, so a dotted look is avoided and a solid strip is used
+local function strip(x, y, w, h)
+  lcd.color(lcd.RGB(20, 20, 20))
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+end
+
+-- value box with a pointer on one side
+-- col: frame and number colour (default white; the GS green when the tape shows groundspeed)
+local function readout(x, y, w, h, text, pointRight, font, col)
+  lcd.color(C.box)
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  local tip = h / 2
+  if OTX then
+    -- OpenTX: the box alone (a pointer is a filled triangle, filled in Lua there)
+  elseif pointRight then
+    lcd.drawFilledTriangle(I(x + w), I(y), I(x + w + tip), I(y + h / 2), I(x + w), I(y + h))
+  else
+    lcd.drawFilledTriangle(I(x), I(y), I(x - tip), I(y + h / 2), I(x), I(y + h))
+  end
+  lcd.color(col or C.line)
+  lcd.drawRectangle(I(x), I(y), I(w), I(h))
+  lcd.font(font)
+  local _, th = lcd.getTextSize(text)
+  lcd.drawText(I(x + w / 2), I(y + (h - th) / 2), text, CENTERED)
+end
+
+-- ground speed box under the airspeed box: a size smaller, in its own colour
+local function subReadout(x, y, w, text, font)
+  lcd.font(FONT_XS)
+  local tagW, tagH = lcd.getTextSize("GS")
+  lcd.font(font)
+  local tw, th = lcd.getTextSize(text)
+  local bw, bh = math.max(w, tw + tagW + 12), th + 4
+  lcd.color(C.box)
+  lcd.drawFilledRectangle(I(x), I(y), I(bw), I(bh))
+  lcd.color(C.gs)
+  lcd.drawRectangle(I(x), I(y), I(bw), I(bh))
+  lcd.drawText(I(x + bw - 4), I(y + 2), text, RIGHT)
+  lcd.font(FONT_XS)
+  lcd.drawText(I(x + 4), I(y + (bh - tagH) / 2), "GS")
+end
+
+-- white text with a black outline, readable over both sky and ground
+local function outlined(x, y, text, flags, color)
+  x, y = I(x), I(y)
+  lcd.color(C.tape)
+  if LEAN then
+    lcd.drawText(x + 1, y + 1, text, flags)
+  else
+    lcd.drawText(x - 1, y - 1, text, flags)
+    lcd.drawText(x + 1, y - 1, text, flags)
+    lcd.drawText(x - 1, y + 1, text, flags)
+    lcd.drawText(x + 1, y + 1, text, flags)
+  end
+  lcd.color(color)
+  lcd.drawText(x, y, text, flags)
+end
+
+-- EdgeTX (etx.lua OD_RAW): the same two texts with EdgeTX's own call, measured once for both and
+-- placed the way the adapter does: with no clip box EdgeTX aligns the text itself; inside one the
+-- text is aligned here and drawn only when it fits whole. About half the Lua work of the above.
+local RAW = OD_RAW
+local rtext, rsize, rcolor, RCU = nil, nil, nil, nil
+if RAW and not OTX then
+  rtext, rsize, rcolor, RCU = RAW.text, RAW.size, RAW.color, RAW.CUSTOM
+  local clip, fflag, ALIGN = RAW.clip, RAW.fontFlag, RAW.ALIGN
+  outlined = function(x, y, text, flags, color)
+    x, y = I(x), I(y)
+    local f = fflag()
+    local cx1, cy1, cx2, cy2, full = clip()
+    if full then
+      local fl = RCU + f + (ALIGN[flags] or 0)
+      rcolor(C.tape) rtext(x + 1, y + 1, text, fl)
+      rcolor(color) rtext(x, y, text, fl)
+      return
+    end
+    local w, h = rsize(text, f)
+    if flags == 1 then x = x - w / 2 elseif flags == 2 then x = x - w end
+    local fl = RCU + f
+    if x + 1 >= cx1 and x + 1 + w <= cx2 + 1 and y + 1 >= cy1 and y + 1 + h <= cy2 + 1 then
+      rcolor(C.tape) rtext(x + 1, y + 1, text, fl)
+    end
+    if x >= cx1 and x + w <= cx2 + 1 and y >= cy1 and y + h <= cy2 + 1 then
+      rcolor(color) rtext(x, y, text, fl)
+    end
+  end
+end
+
+-- EdgeTX: a horizontal line from x1 to x2 at y with EdgeTX's own calls, as the adapter's drawLine
+-- would draw it inside the current clip box (x1 <= x2, all on screen): EdgeTX's clipped line on
+-- 2.11+, else the plain line when it is inside and the clipped one when it touches an edge
+local function hline(x1, x2, y, cx1, cy1, cx2, cy2)
+  if y < cy1 or y >= cy2 or x2 < cx1 or x1 >= cx2 then return end
+  if RAW.NATIVE or not (x1 >= cx1 and x2 < cx2) then
+    if RAW.clipLine then RAW.clipLine(x1, y, x2, y, cx1, cx2 - 1, cy1, cy2 - 1, RAW.LINE, RCU)
+    else lcd.drawLine(x1, y, x2, y) end
+  else
+    RAW.line(x1, y, x2, y, RAW.LINE, RCU)
+  end
+end
+
+-- EdgeTX: any line, as the adapter's drawLine draws it in the clip box given: EdgeTX's clipped
+-- line on 2.11+, the plain line when inside; one that crosses an edge goes through the adapter
+local function rline(x1, y1, x2, y2, cx1, cy1, cx2, cy2)
+  if RAW.NATIVE then RAW.clipLine(x1, y1, x2, y2, cx1, cx2 - 1, cy1, cy2 - 1, RAW.LINE, RCU) return end
+  if x1 >= cx1 and x2 >= cx1 and x1 < cx2 and x2 < cx2 and y1 >= cy1 and y2 >= cy1 and y1 < cy2 and y2 < cy2 then
+    RAW.line(x1, y1, x2, y2, RAW.LINE, RCU)
+    return
+  end
+  lcd.drawLine(x1, y1, x2, y2)
+end
+-- EdgeTX: one text inside the clip box given, as the adapter's drawText places it
+local function rtextIn(x, y, text, align, cx1, cy1, cx2, cy2, full)
+  local f = RAW.fontFlag()
+  if full then rtext(x, y, text, RCU + f + (RAW.ALIGN[align] or 0)) return end
+  local w, h = rsize(text, f)
+  if align == 1 then x = x - w / 2 elseif align == 2 then x = x - w end
+  if x >= cx1 and x + w <= cx2 + 1 and y >= cy1 and y + h <= cy2 + 1 then rtext(x, y, text, RCU + f) end
+end
+
+-- OpenTX: one draw, no outline (chosen here once, so EdgeTX and Ethos don't test for it per call)
+if OTX then
+  outlined = function(x, y, text, flags, color)
+    lcd.color(color)
+    lcd.drawText(I(x), I(y), text, flags)
+  end
+end
+H.outlined = outlined
+
+-- vertical tape: value in display units, step between labels, pixels per unit.
+-- It has no background, so the horizon shows through.
+local TL_T, TL_W, TL_H, TL_Y = {}, {}, {}, {}   -- EdgeTX: a tape's numbers, reused every update
+local function vtape(x, y, w, h, value, step, ppu, leftSide, font, boxFont, label, valCol)
+  -- the unit's font (one size above the ladder, see the label below) sets the strip kept clear
+  lcd.font((font == FONT_STD and FONT_L) or (font == FONT_S and FONT_STD) or (font == FONT_XS and FONT_S) or font)
+  local _, lh = lcd.getTextSize("A")
+  -- the ladder stops below the label, so a number scrolling past never runs into it
+  lcd.setClipping(I(x), I(y + lh + 3), I(w), I(h - lh - 3))
+  local cy = y + h / 2
+  lcd.font(font)
+  local _, th = lcd.getTextSize("0")
+  local first = math.floor((value - (h / 2) / ppu) / step) * step
+  local v = first
+  -- OpenTX: no moving ladder, only the current value box below (and the label)
+  if OTX then v = math.huge end
+  -- EdgeTX: the ticks with EdgeTX's own line call (hline), the clip box read once
+  local kx1, ky1, kx2, ky2 = nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2 = RAW.clip() end
+  -- EdgeTX: all the ticks, then all the numbers' shadows, then the numbers, one colour each
+  -- (they never overlap); each number placed as outlined() would place it in this clip box
+  if kx1 and LEAN then
+    local tick = w * 0.22
+    local x1 = leftSide and x + w - tick or x
+    local ix1, ix2 = I(x1), I(x1 + tick)
+    local itx = I(leftSide and (x + w - tick - 4) or (x + tick + 4))
+    local lim = value + (h / 2) / ppu + step
+    local f = RAW.fontFlag()
+    local n = 0
+    rcolor(C.tapeTxt)
+    while v <= lim do
+      local ty = cy - (v - value) * ppu
+      hline(ix1, ix2, I(ty), kx1, ky1, kx2, ky2)
+      if (v / step) % 2 == 0 then
+        n = n + 1
+        local t = string.format("%d", v)
+        local tw, tth = rsize(t, f)
+        TL_T[n], TL_W[n], TL_H[n], TL_Y[n] = t, tw, tth, I(ty - th / 2)
+      end
+      v = v + step
+    end
+    local fl = RCU + f
+    for o = 1, 0, -1 do
+      rcolor(o == 1 and C.tape or C.tapeTxt)
+      for i = 1, n do
+        local tw, tth = TL_W[i], TL_H[i]
+        local px, py = (leftSide and itx - tw or itx) + o, TL_Y[i] + o
+        if px >= kx1 and px + tw <= kx2 + 1 and py >= ky1 and py + tth <= ky2 + 1 then rtext(px, py, TL_T[i], fl) end
+      end
+    end
+    v = math.huge
+  end
+  while v <= value + (h / 2) / ppu + step do
+    local ty = cy - (v - value) * ppu
+    local tick = w * 0.22
+    local x1 = leftSide and x + w - tick or x
+    if not LEAN then
+      lcd.color(C.tape)
+      lcd.drawLine(I(x1), I(ty) + 1, I(x1 + tick), I(ty) + 1)
+    end
+    if kx1 then
+      rcolor(C.tapeTxt)
+      hline(I(x1), I(x1 + tick), I(ty), kx1, ky1, kx2, ky2)
+    else
+      lcd.color(C.tapeTxt)
+      lcd.drawLine(I(x1), I(ty), I(x1 + tick), I(ty))
+    end
+    -- LEAN (EdgeTX): a number on every other tick, to save Lua time (OpenTX skips the loop)
+    if LEAN and (v / step) % 2 ~= 0 then
+      -- tick only
+    elseif leftSide then
+      outlined(x + w - tick - 4, ty - th / 2, string.format("%d", v), RIGHT, C.tapeTxt)
+    else
+      outlined(x + tick + 4, ty - th / 2, string.format("%d", v), LEFT, C.tapeTxt)
+    end
+    v = v + step
+  end
+  local W, Hh = lcd.getWindowSize()
+  lcd.setClipping(0, 0, W, Hh)
+  -- current value box: a size up from the ladder, and wide enough for the digits
+  local text = string.format("%d", math.floor(value + 0.5))
+  lcd.font(boxFont)
+  local tw, bth = lcd.getTextSize(text)
+  local bh = bth + 6
+  local bw = math.max(w - bh / 2 - 2, tw + 10)
+  local bx = leftSide and x + 1 or x + w - bw - 1
+  readout(bx, cy - bh / 2, bw, bh, text, leftSide, boxFont, valCol)
+  if label then
+    -- the unit alone, a font size above the ladder numbers (it was "AS km/h" in the smallest
+    -- font); the ladder's own size if that does not fit the tape
+    local uf = (font == FONT_STD and FONT_L) or (font == FONT_S and FONT_STD) or (font == FONT_XS and FONT_S) or font
+    lcd.font(uf)
+    if lcd.getTextSize(label) > w - 2 then lcd.font(font) end
+    outlined(x + w / 2, y + 2, label, CENTERED, C.tapeTxt)
+  end
+  return bx, cy + bh / 2, bw, bh
+end
+
+-- the heading box under the heading tape; returns its text position
+local function headingBox(x, y, w, h, boxFont, frame)
+  local cx = x + w / 2
+  lcd.font(boxFont)
+  local tw, bth = lcd.getTextSize("000")
+  if frame then
+    lcd.color(C.box)
+    lcd.drawFilledRectangle(I(cx - tw / 2 - 4), I(y + h), I(tw + 8), I(bth + 2))
+    lcd.color(C.line)
+    lcd.drawRectangle(I(cx - tw / 2 - 4), I(y + h), I(tw + 8), I(bth + 2))
+  end
+  return cx, y + h + 1
+end
+
+local CARD = { [0] = "N", [45] = "NE", [90] = "E", [135] = "SE", [180] = "S", [225] = "SW", [270] = "W", [315] = "NW" }
+
+-- no background: the horizon shows through, as on the speed and altitude tapes
+local function headingTape(x, y, w, h, hdg, homeBrg, font, boxFont, fixedDone)
+  -- OpenTX: no moving tape and no home marker on it, only the heading box (the HOME block has
+  -- the home arrow)
+  if OTX then homeBrg = nil end
+  lcd.setClipping(I(x), I(y), I(w), I(h))
+  local cx = x + w / 2
+  local span = 90                       -- degrees across the tape
+  local ppd = w / span
+  lcd.font(font)
+  local _, th = lcd.getTextSize("N")
+  lcd.color(C.tapeTxt)
+  -- LEAN (EdgeTX): 15 deg ticks only, to save Lua time
+  local stepD = LEAN and 15 or 5
+  local start = math.floor((hdg - span / 2) / stepD) * stepD
+  local stop = OTX and start - 1 or start + span + stepD   -- OpenTX: the loop doesn't run
+  -- EdgeTX: the ticks with EdgeTX's own line call (rline), the clip box read once
+  local kx1, ky1, kx2, ky2 = nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2 = RAW.clip() end
+  local yb = I(y + h - 1)
+  for d = start, stop, stepD do
+    local tx = cx + (d - hdg) * ppd
+    local dd = d % 360
+    local y0 = (dd % 15 == 0) and y + h - h * 0.3 or y + h - h * 0.15
+    if not LEAN then
+      lcd.color(C.tape)
+      lcd.drawLine(I(tx) + 1, I(y0), I(tx) + 1, I(y + h - 1))
+    end
+    if kx1 then
+      rcolor(C.tapeTxt)
+      local itx = I(tx)
+      rline(itx, I(y0), itx, yb, kx1, ky1, kx2, ky2)
+    else
+      lcd.color(C.tapeTxt)
+      lcd.drawLine(I(tx), I(y0), I(tx), I(y + h - 1))
+    end
+    if dd % 15 == 0 then
+      -- LEAN (EdgeTX): the compass points only; the box below has the exact heading
+      local lbl = CARD[dd] or ((dd % 30 == 0 and not LEAN) and tostring(math.floor(dd / 10)) or nil)
+      if lbl then outlined(tx, y + 1, lbl, CENTERED, C.tapeTxt) end
+    end
+  end
+  if homeBrg then
+    local rel = (homeBrg - hdg + 540) % 360 - 180
+    local hx = cx + math.max(-span / 2, math.min(span / 2, rel)) * ppd
+    lcd.color(C.home)
+    if OTX then
+      lcd.drawFilledRectangle(I(hx - 3), I(y + h - 7), 7, 7)   -- OpenTX: a square, not a triangle
+    else
+      lcd.drawFilledTriangle(I(hx - 5), I(y + h - 1), I(hx), I(y + h - 8), I(hx + 5), I(y + h - 1))
+    end
+  end
+  local W, Hh = lcd.getWindowSize()
+  lcd.setClipping(0, 0, W, Hh)
+  -- heading box (its frame is in the OpenTX overlay bitmap when there is one)
+  local txt = string.format("%03d", math.floor(hdg + 0.5) % 360)
+  -- EdgeTX: the box frame is always drawn here, after the roll pointer, so near wings level the
+  -- box still covers the pointer (it is not in the fixed/ overlay); OpenTX: in its overlay
+  local tx, ty = headingBox(x, y, w, h, boxFont, not (fixedDone and OTX))
+  lcd.color(C.line)
+  lcd.drawText(I(tx), I(ty), txt, CENTERED)
+end
+
+-- roll scale ticks: sin, cos, length; worked out once
+local ROLL_TICKS = {}
+for _, a in ipairs((OTX and { -60, -30, 0, 30, 60 }) or (LEAN and { -60, -30, -20, -10, 0, 10, 20, 30, 60 })
+                   or { -60, -45, -30, -20, -10, 0, 10, 20, 30, 45, 60 }) do
+  local t = math.rad(a)
+  ROLL_TICKS[#ROLL_TICKS + 1] = { math.sin(t), math.cos(t), (a % 30 == 0) and 9 or 5 }
+end
+
+-- The fixed parts of the HUD: drawn live, or (OpenTX) once into a bitmap with the same code, so
+-- both look alike. Colours are set here, so the export needs nothing else.
+local function rollTicks(cx, cy, R)
+  lcd.color(C.line)
+  -- EdgeTX: EdgeTX's own line call (rline), the clip box read once
+  local kx1, ky1, kx2, ky2 = nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2 = RAW.clip() rcolor(C.line) end
+  for _, t in ipairs(ROLL_TICKS) do
+    local sn, cs, len = t[1], t[2], t[3]
+    local sx, sy = cx + sn * R, cy - cs * R
+    local ex, ey = cx + sn * (R + len), cy - cs * (R + len)
+    if kx1 then rline(I(sx), I(sy), I(ex), I(ey), kx1, ky1, kx2, ky2)
+    else lcd.drawLine(I(sx), I(sy), I(ex), I(ey)) end
+  end
+end
+local function aircraftSymbol(cx, cy, w)
+  lcd.color(C.sym)
+  local ww = w * 0.16
+  lcd.drawFilledRectangle(I(cx - ww - 2), I(cy - 2), I(ww * 0.7), 4)
+  lcd.drawFilledRectangle(I(cx + ww * 0.3 + 2), I(cy - 2), I(ww * 0.7), 4)
+  lcd.drawFilledRectangle(I(cx - 3), I(cy - 3), 6, 6)
+end
+
+-- horizon + ladder + roll scale inside (x,y,w,h)
+-- ov: the fixed-parts bitmap (overlayFor), drawn at (ovx, ovy) where the roll scale was drawn,
+-- so the roll pointer still goes on top of it as before
+local function horizon(x, y, w, h, roll, pitch, font, fixedDone, ov, ovx, ovy)
+  local cx, cy = x + w / 2, y + h / 2
+  local ppd = h / 50                    -- 50 deg of pitch over the full height
+  local r = math.rad(roll)
+  local sr, cr = math.sin(r), math.cos(r)
+  -- along-horizon direction and the "down" normal (screen y grows downwards)
+  local dx, dy = cr, -sr
+  local nx, ny = sr, cr
+  -- EdgeTX's own ground fill (lcd.drawHudGround, adapter) shifts the horizon by pitch along the
+  -- screen axes, the vertical part stretched 1.85x: horizon line and ladder follow the same rule,
+  -- so their sideways shift is ppd / 1.85 there (Yaapu's look) instead of ppd.
+  local hudGround = lcd.drawHudGround
+  local ppx = hudGround and ppd / 1.85 or ppd
+  local px, py = cx + nx * pitch * ppx, cy + ny * pitch * ppd
+  local L = (w + h) * 2
+
+  lcd.setClipping(I(x), I(y), I(w), I(h))
+  lcd.color(C.sky)
+  lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
+  local ax, ay = px - dx * L, py - dy * L
+  local bx, by = px + dx * L, py + dy * L
+  lcd.color(C.ground)
+  if hudGround then
+    hudGround(pitch * ppd / 1.85, roll, I(x), I(y), I(w), I(h))
+  elseif OTX then
+    groundRects(x, y, w, h, px, py, nx, ny)
+  else
+    local cx2, cy2 = bx + nx * L, by + ny * L
+    local dx2, dy2 = ax + nx * L, ay + ny * L
+    if lcd.drawFilledQuad then
+      lcd.drawFilledQuad(ax, ay, bx, by, cx2, cy2, dx2, dy2)   -- EdgeTX adapter: clipped once as one polygon
+    else
+      lcd.drawFilledTriangle(I(ax), I(ay), I(bx), I(by), I(cx2), I(cy2))
+      lcd.drawFilledTriangle(I(ax), I(ay), I(cx2), I(cy2), I(dx2), I(dy2))
+    end
+  end
+  lcd.color(C.line)
+  lcd.drawLine(I(ax), I(ay), I(bx), I(by))
+
+  -- pitch ladder every 10 deg (5 deg short marks)
+  lcd.font(font)
+  local _, th = lcd.getTextSize("0")
+  -- EdgeTX: rungs and their numbers with EdgeTX's own calls (rline, rtextIn), the clip box read once
+  local kx1, ky1, kx2, ky2, kfull = nil, nil, nil, nil, nil
+  if rcolor then kx1, ky1, kx2, ky2, kfull = RAW.clip() rcolor(C.line) end
+  for a = -40, 40, LEAN and 10 or 5 do
+    if a ~= 0 and math.abs(a - pitch) <= 22 then
+      local half = (a % 10 == 0) and w * 0.14 or w * 0.06
+      local lx, ly = px - nx * a * ppx, py - ny * a * ppd
+      if kx1 then
+        rline(I(lx - dx * half), I(ly - dy * half), I(lx + dx * half), I(ly + dy * half), kx1, ky1, kx2, ky2)
+      else
+        lcd.drawLine(I(lx - dx * half), I(ly - dy * half), I(lx + dx * half), I(ly + dy * half))
+      end
+      -- OpenTX: rungs without numbers, as Yaapu's horizon there
+      if a % 10 == 0 and not OTX and kx1 then
+        rtextIn(I(lx + dx * (half + 16)), I(ly + dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED, kx1, ky1, kx2, ky2, kfull)
+      elseif a % 10 == 0 and not OTX then
+        lcd.drawText(I(lx + dx * (half + 16)), I(ly + dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)
+        if not LEAN then   -- EdgeTX: one side only, to save Lua time
+          lcd.drawText(I(lx - dx * (half + 16)), I(ly - dy * (half + 16) - th / 2), tostring(math.abs(a)), CENTERED)
+        end
+      end
+    end
+  end
+
+  -- roll scale (fixed) and pointer (turns with the horizon)
+  local R = math.min(w, h) * 0.42
+  if ov then lcd.drawBitmap(I(ovx), I(ovy), ov)
+  elseif not fixedDone then rollTicks(cx, cy, R) end
+  local pr = math.rad(-roll)
+  local tipx, tipy = cx + math.sin(pr) * (R - 1), cy - math.cos(pr) * (R - 1)
+  local bxl, byl = cx + math.sin(pr - 0.06) * (R - 11), cy - math.cos(pr - 0.06) * (R - 11)
+  local bxr, byr = cx + math.sin(pr + 0.06) * (R - 11), cy - math.cos(pr + 0.06) * (R - 11)
+  lcd.color(C.sym)
+  if OTX then   -- OpenTX: the pointer as two lines from the tip
+    lcd.drawLine(I(tipx), I(tipy), I(bxl), I(byl))
+    lcd.drawLine(I(tipx), I(tipy), I(bxr), I(byr))
+  else
+    lcd.drawFilledTriangle(I(tipx), I(tipy), I(bxl), I(byl), I(bxr), I(byr))
+  end
+
+  -- fixed aircraft symbol
+  if not fixedDone then aircraftSymbol(cx, cy, w) end
+
+  local W, Hh = lcd.getWindowSize()
+  lcd.setClipping(0, 0, W, Hh)
+end
+
+-- vertical speed bar on the right edge of the horizon
+local function vario(x, y, w, h, vs)
+  if vs == nil then return end
+  local cy = y + h / 2
+  local full = 5                         -- m/s at the end of the bar
+  local len = math.max(-1, math.min(1, vs / full)) * (h / 2 - 2)
+  -- no background of its own (test42): the bar and the zero line over the horizon, as Marcin
+  -- asked (a dark strip down the HUD's right edge looked odd over the sky and ground)
+  lcd.color(vs >= 0 and C.climb or C.sink)
+  if len >= 0 then lcd.drawFilledRectangle(I(x + 1), I(cy - len), I(w - 2), I(len) + 1)
+  else lcd.drawFilledRectangle(I(x + 1), I(cy), I(w - 2), I(-len) + 1) end
+  lcd.color(C.line)
+  lcd.drawLine(I(x), I(cy), I(x + w), I(cy))
+end
+
+-- ready-to-arm status, centred on the horizon just below the aircraft symbol; (x,y,w,h) as for H.draw
+function H.armStatus(x, y, w, h, s)
+  local text, col
+  if s.armReady == true then
+    text, col = s.armNote and ("READY, " .. s.armNote) or "READY TO ARM", s.armNote and C.warn or C.climb
+  elseif s.armReady == false then
+    text, col = s.armNote or "NOT READY TO ARM", C.bad
+  elseif s.fc == "ArduPilot" then
+    text, col = "CHECKING ARMING", C.dim
+  else
+    return
+  end
+  lcd.font(h >= 350 and FONT_L or (h >= 240 and FONT_STD or FONT_S))
+  local tw, th = lcd.getTextSize(text)
+  local bw, bh = tw + 16, th + 8
+  local bx, by = x + (w - bw) / 2, y + h / 2 + h * 0.08
+  lcd.color(C.box)
+  lcd.drawFilledRectangle(I(bx), I(by), I(bw), I(bh))
+  lcd.color(col)
+  lcd.drawRectangle(I(bx), I(by), I(bw), I(bh))
+  lcd.drawRectangle(I(bx + 1), I(by + 1), I(bw - 2), I(bh - 2))
+  lcd.drawText(I(bx + 8), I(by + 4), text)
+end
+
+-- The HUD's fixed parts (roll scale, aircraft symbol, heading box frame) as one transparent
+-- bitmap per HUD size, made by tools/sim_edgetx.py --etx-panels from H.drawFixed (EdgeTX: in
+-- fixed/; OpenTX: otx/); one drawBitmap instead of about ten drawing calls, as Yaapu's hud.png.
+-- No file for this size (another screen, a layout zone): drawn live as before.
+local overlays = {}
+local function overlayFor(w, h)
+  local key = math.floor(w) .. "x" .. math.floor(h)
+  local b = overlays[key]
+  if b == nil then
+    local ok, bmp = pcall(lcd.loadBitmap, (OD_ROOT or "") .. (OTX and "otx/hud_" or "fixed/hud_") .. key .. ".png")
+    b = (ok and bmp) or false
+    overlays[key] = b
+  end
+  return b or nil
+end
+
+-- the layout both H.draw and H.drawFixed use
+local function hudLayout(w, h)
+  local big, med = h >= 350, h >= 240
+  local font = big and FONT_STD or (med and FONT_S or FONT_XS)        -- ladders
+  local boxFont = big and FONT_XL or (med and FONT_L or FONT_STD)     -- current speed/altitude
+  local hdgFont = big and FONT_L or (med and FONT_STD or FONT_S)      -- current heading
+  local tapeW = math.max(46, math.floor(w * 0.17))
+  local headH = math.max(18, math.floor(h * 0.08))
+  local varW = med and 8 or 6
+  return big, med, font, boxFont, hdgFont, tapeW, headH, varW
+end
+
+-- the fixed layer alone, on an empty canvas (for the OpenTX bitmap)
+function H.drawFixed(x, y, w, h)
+  local _, _, _, _, hdgFont, tapeW, headH, varW = hudLayout(w, h)
+  local cx, cy = x + w / 2, y + h / 2
+  rollTicks(cx, cy, math.min(w, h) * 0.42)
+  aircraftSymbol(cx, cy, w)
+  -- EdgeTX: the heading box frame stays live (drawn after the roll pointer, see headingTape)
+  if OTX then headingBox(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, hdgFont, true) end
+end
+
+-- u: { spd=fn(m/s)->display, spdLbl=, alt=fn(m)->display, altLbl= }
+function H.draw(x, y, w, h, s, u)
+  -- bodies are ~400 px tall on 800x480 and ~270 px on 480x320
+  local big, med, font, boxFont, hdgFont, tapeW, headH, varW = hudLayout(w, h)
+  -- Ethos: the telemetry this draws from, checked once (EdgeTX / OpenTX: as it was)
+  local roll, pitch, aspd, gspd, alt, vspd, yaw, homeBrg = s.roll, s.pitch, s.aspd, s.gspd, s.alt, s.vspd, s.yaw, s.homeBrg
+  if not OD_LITE then
+    roll, pitch, aspd, gspd, alt = fin(roll), fin(pitch), fin(aspd), fin(gspd), fin(alt)
+    vspd, yaw, homeBrg = fin(vspd), fin(yaw), fin(homeBrg)
+  end
+  local ov = (OTX or OD_LITE) and overlayFor(w, h) or nil   -- nil (not false): drawn live
+
+  local hx, hy, hw, hh = x, y, w, h
+  horizon(hx, hy, hw, hh, roll or 0, pitch or 0, big and FONT_S or (med and FONT_XS or FONT_XXS), ov ~= nil, ov, x, y)
+
+  local spd = aspd or gspd
+  if spd then
+    local bx, by, bw = vtape(x, y + headH + 16, tapeW, h - headH - 22, u.spd(spd), u.spdStep, u.spdPpu(h), true, font, boxFont,
+      u.spdLbl, (not aspd) and C.gs or nil)
+    if aspd and gspd then
+      subReadout(bx, by + 3, bw, string.format("%d", R(u.spd(gspd))), hdgFont)
+    end
+  end
+  if alt then
+    local ax, ay, aw, ah = vtape(x + w - tapeW - varW, y + headH + 16, tapeW, h - headH - 22, u.alt(alt), u.altStep, u.altPpu(h), false, font, boxFont,
+      u.altLbl)
+    if u.alarmA then   -- below the low altitude alarm: red frame round the altitude box
+      lcd.color(C.bad)
+      lcd.drawRectangle(I(ax - 2), I(ay - ah - 2), I(aw + 4), I(ah + 4))
+      lcd.drawRectangle(I(ax - 3), I(ay - ah - 3), I(aw + 6), I(ah + 6))
+    end
+  end
+  -- OpenTX: no vertical-speed bar (Lua budget); its strip keeps the layout, so the overlay fits
+  if not OTX then vario(x + w - varW, y + headH + 16, varW, h - headH - 22, vspd) end
+  if yaw then
+    headingTape(x + tapeW + 4, y, w - 2 * tapeW - varW - 8, headH, yaw, nil, font, hdgFont, ov ~= nil)
+  end
+  -- home marker: a white H in a black box with a home-blue frame, on a row under the heading box.
+  -- Its scale is its own, not the compass strip's: the strip's full width is 180 degrees, so home
+  -- 90 degrees off the nose puts the H at that end. Further round it stays parked on the end on
+  -- home's side, and goes only with home right behind (within 5 degrees of the tail). test42 used
+  -- the strip's 90 degree window and showed the H only within 45 degrees of the nose: it came up
+  -- late, with the aircraft already turned for home (X18 2026-11-10). Drawn last and kept between
+  -- the speed and altitude tapes, so nothing covers it.
+  if yaw and homeBrg then
+    local tx, tw = x + tapeW + 4, w - 2 * tapeW - varW - 8
+    local rel = (homeBrg - yaw + 540) % 360 - 180
+    if rel > -175 and rel < 175 then
+      rel = math.max(-90, math.min(90, rel))
+      lcd.font(hdgFont)
+      local _, hbh = lcd.getTextSize("000")
+      lcd.font(boxFont)
+      local cw, ch = lcd.getTextSize("H")
+      local bw, bh = cw + 10, ch + 4
+      local hx = tx + tw / 2 + rel * tw / 180
+      hx = math.max(tx + bw / 2, math.min(tx + tw - bw / 2, hx))
+      local by = y + headH + hbh + 2 + 4         -- under the heading box, which hangs below the strip
+      lcd.color(C.box)
+      lcd.drawFilledRectangle(I(hx - bw / 2), I(by), I(bw), I(bh))
+      lcd.color(C.home)
+      lcd.drawRectangle(I(hx - bw / 2), I(by), I(bw), I(bh))
+      lcd.drawRectangle(I(hx - bw / 2 + 1), I(by + 1), I(bw - 2), I(bh - 2))
+      lcd.color(lcd.RGB(255, 255, 255))
+      lcd.drawText(I(hx), I(by + 2), "H", CENTERED)
+    end
+  end
+end
+
+return H

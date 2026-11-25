@@ -1,7 +1,7 @@
 """
 Off-radio test harness for the OmniDeck Ethos widget.
 
-Runs scripts/omnideck/main.lua in Lua 5.4 (lupa) against a stubbed Ethos API,
+Runs targets/ethos/main.lua (which loads x18/ or x20/ by screen width) in Lua 5.4 (lupa) against a stubbed Ethos API,
 feeds ArduPilot passthrough packets encoded exactly like
 AP_Frsky_SPort_Passthrough.cpp (as CRSF 0x80/0xF2 frames or S.Port frames),
 checks the decoded state and renders each page to PNG.
@@ -13,7 +13,7 @@ from lupa import lua54
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, '..', 'scripts', 'omnideck')
+SRC = os.path.join(HERE, '..', 'targets', 'ethos')   # the loader picks x18/ or x20/ by screen width
 args = [a for a in sys.argv[1:] if not a.startswith('--')]
 OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out')
 SPORT = '--sport' in sys.argv
@@ -75,6 +75,7 @@ def font_of(f): return fonts.get(FONTS_BY_ID.get(int(f)), fonts['FONT_STD'])
 FONTS_BY_ID = {}
 consts = {'LEFT': 0, 'CENTERED': 1, 'RIGHT': 2, 'EVT_TOUCH': 100, 'EVT_KEY': 101, 'TOUCH_END': 2,
           'TOUCH_START': 1, 'TOUCH_MOVE': 3, 'KEY_ENTER_BREAK': 32, 'KEY_ROTARY_LEFT': 4100, 'KEY_ROTARY_RIGHT': 4101,
+          'KEY_RTN_BREAK': 33,
           'OPTION_LATITUDE': 1, 'OPTION_LONGITUDE': 2, 'CATEGORY_SYSTEM': 400, 'MAIN_VOLTAGE': 401,
           'CATEGORY_TELEMETRY_SENSOR': 500, 'CATEGORY_SYSTEM_EVENT': 600, 'TELEMETRY_ACTIVE': 601}
 for i, k in enumerate(FONT_PX): consts[k] = 200 + i; FONTS_BY_ID[200 + i] = k
@@ -90,9 +91,11 @@ def text_size(t):
     b = cv.font.getbbox(str(t))
     return b[2] - b[0], cv.font.size + 2
 drawn = []        # (text or 'rect', colour, x), cleared by the checks that read it
+texts_xy = []     # (text, x, y) of every text drawn, cleared by the checks that read it
 def draw_text(x, y, t, flags=0):
     t = str(t); tw, _ = text_size(t)
     drawn.append((t, cv.col, x))
+    texts_xy.append((t, x, y))
     flags = int(flags or 0)
     if flags == 1: x = x - tw / 2
     elif flags == 2: x = x - tw
@@ -129,13 +132,20 @@ bitmaps = {}
 def sd_path(p): return os.path.join(SD, *[x for x in str(p).split('/') if x])
 def load_bitmap(p):
     fp = sd_path(p)
-    if not os.path.isfile(fp): raise Exception('no file ' + str(p))
+    # Ethos (b14ckyy's ETHOS-API-QUIRKS, simulator 1.6.4-26.1.2): a missing file is no error and no nil,
+    # but a handle of width 0 that draws nothing
+    if not os.path.isfile(fp):
+        stats['loads'] += 1
+        return L.table_from({'_id': None, 'width': lambda self=None: 0, 'height': lambda self=None: 0})
     img = Image.open(fp).convert('RGB')
     bitmaps[id(img)] = img
     stats['loads'] += 1
     return L.table_from({'_id': id(img), 'width': lambda self=None: img.width, 'height': lambda self=None: img.height})
-def draw_bitmap(x, y, bmp):
+def draw_bitmap(x, y, bmp, w=None, h=None):
+    if bmp['_id'] is None: return             # a missing file's handle draws nothing
     img = bitmaps[bmp['_id']]
+    if w is not None and h is not None:   # Ethos scales the picture to w x h
+        img = img.resize((int(w), int(h)))
     def f(d, img=img, x=x, y=y):
         d._image.paste(img.convert('RGBA'), (int(x), int(y)))
     cv._clipped(f)
@@ -247,6 +257,7 @@ function _mkcrsf(q)
   return { getSensor = function() return {
       pushFrame = function(self, cmd, data) return _CRSFPUSH(cmd, data) end,
       popFrame = function(self, lo, hi)
+        if lo == 0xAA then return nil end   -- no mLRS bridge in this simulator
         if lo == 0x7B then
           local f = _POPMSPCRSF(); if f == nil then return nil end
           local t = {} for i = 1, #f do t[i] = f[i] end
@@ -283,8 +294,10 @@ G.crsf = L.eval('_mkcrsf')(None)
 G.sport = L.eval('_mksport')()
 native_vals = {}
 SPORT_APPIDS = {0x0100: 'Altitude', 0x0830: 'GPS speed', 0x0840: 'Yaw', 0x0480: 'GPS satellites',
-                0x0210: 'Rx Batt', 0xF101: 'RSSI', 0x0A00: 'Airspeed'}
-LINK_SENSORS = ('Rx Quality', 'Rx RSSI1', 'Flight mode')    # CRSF; these exist whatever the flight stack is
+                0x0210: 'Rx Batt', 0xF101: 'RSSI', 0xF010: 'VFR', 0x0A00: 'Airspeed'}
+LINK_SENSORS = ('Rx Quality', 'Rx RSSI1', 'Flight mode')
+# ArduPilot over CRSF also has the standard GPS and battery sensors (50 Hz test sets this)
+AP_EXTRA = [False]    # CRSF; these exist whatever the flight stack is
 TX_VOLTS = [8.1]
 # OD_R9=1 (with --native --sport): INAV over an R9 on Ethos. Ethos hasn't discovered INAV's mode,
 # roll, pitch and satellites sensors until the widget creates them (model.createSensor), and
@@ -324,7 +337,10 @@ def telem_members():
 def mksrc(key):
     return L.eval("""function(k, unit) return { value = function(self) return _NV(k) end, unit = function(self) return unit end,
         name = function(self) return k end, stringValue = function(self) return tostring(_NV(k)) end } end""")(key, native_units.get(key))
+STICK = [-1024]   # the radio's throttle stick, -1024..1024 (Ethos source "Throttle")
+_stick_src = L.eval('function(get) return { value = function(self) return get() end, unit = function() return nil end, name = function() return "Throttle" end } end')(lambda: STICK[0])
 def get_source(q):
+    if isinstance(q, str) and q == 'Throttle': return _stick_src
     if not isinstance(q, str) and 'category' in q and int(q['category']) == 500 and 'member' in q:   # telemetry sensor by member
         names = telem_members(); m = int(q['member'])
         if m >= len(names): return None
@@ -344,8 +360,10 @@ def get_source(q):
         return L.eval('function() return { value = function() return _TXV() end, unit = function() return nil end, name = function() return "Main voltage" end } end')()
     if not NATIVE:
         if isinstance(q, str):
-            if SPORT or q not in LINK_SENSORS: return None
-        elif not (SPORT and 'appId' in q and int(q['appId']) == 0xF101):
+            if SPORT or (q not in LINK_SENSORS and not (AP_EXTRA[0] and q in native_vals)): return None
+        elif not (SPORT and 'appId' in q and int(q['appId']) in (0xF101, 0xF010)) \
+                and not (not SPORT and 'name' in q and q['name'] == 'GPS' and 'GPS1' in native_vals):
+            # (ArduPilot over CRSF: the native GPS frame does exist; a test sets GPS1/GPS2 for it)
             return None
     if not isinstance(q, str) and 'crsfId' in q:      # CRSF link statistics only exist on CRSF
         if int(q['crsfId']) != 0x14: return None
@@ -373,7 +391,9 @@ G._NV = lambda k: native_vals.get(k)
 G._TXV = lambda: TX_VOLTS[0]
 TLM_ON = [True]
 G._TLMON = lambda: TLM_ON[0]
-G.system = L.table_from({'getSource': get_source, 'registerWidget': None, 'playFile': lambda f: played.append(os.path.basename(f)[:-4]), 'listFiles': list_files})
+G.system = L.table_from({'getSource': get_source, 'registerWidget': None, 'playFile': lambda f: played.append(os.path.basename(f)[:-4]), 'listFiles': list_files,
+    # the radio's screen, as Ethos reports it (the loader in targets/ethos/main.lua reads lcdWidth)
+    'getVersion': lambda: L.table_from({'lcdWidth': int(RES.split('x')[0]), 'lcdHeight': int(RES.split('x')[1]), 'board': 'X18' if int(RES.split('x')[0]) <= 480 else 'X20S'})})
 # SD-card paths ("/scripts/...", "/bitmaps/...") open inside the fake card
 G._SDROOT = SD.replace(chr(92), '/')
 L.execute('local o = io.open; io.open = function(p, m) if p:sub(1, 1) == "/" then p = _SDROOT .. p end return o(p, m) end')
@@ -389,6 +409,14 @@ def st_read(k):
 store = {}
 played = []
 os.makedirs(os.path.join(SD, 'scripts', 'omnideck', 'audio', 'Aria'), exist_ok=True)
+# logs/ comes empty in the package (test43 flight logs, one file per flight)
+LOGD = os.path.join(SD, 'scripts', 'omnideck', 'logs')
+_sh_ = __import__('shutil'); _sh_.rmtree(LOGD, ignore_errors=True); os.makedirs(LOGD)
+# the main page logos (X18-size screens, test41), as the install zip puts them on the card
+import shutil as _sh
+_LOGOS = os.path.join(SRC, 'logos')
+if os.path.isdir(_LOGOS):
+    _sh.copytree(_LOGOS, os.path.join(SD, 'scripts', 'omnideck', 'logos'), dirs_exist_ok=True)
 G.storage = L.table_from({'read': st_read, 'write': st_write})
 def do_write():
     del slots[:]; del wr_log[:]
@@ -407,7 +435,7 @@ def feed(pkts):
     feed_n[0] += 1
     TLM_ON[0] = True                  # frames arriving: Ethos says telemetry is active
     wob = feed_n[0] % 2
-    native_vals.update({'Rx Quality': 96, 'Rx RSSI1': -72 - wob, 'RSSI': 88 - wob})
+    native_vals.update({'Rx Quality': 96, 'Rx RSSI1': -72 - wob, 'RSSI': 88 - wob, 'VFR': 98})
     if not NATIVE and not SPORT:
         native_vals['Flight mode'] = 'FBWA' + ('' if st['armed'] else '*')   # ArduPilot's own CRSF mode text
     if NATIVE:
@@ -464,13 +492,63 @@ wt = registered['w']
 widget = wt['create']()
 do_read()
 if NATIVE: widget.batCap = 5000           # INAV and Betaflight send no capacity
+# OD_PANEL=n: the main page's top-right panel setting (test42: 0 minimap, 1 home arrow, 2 radar,
+# 3 OmniDeck logo, 4 logo file)
+if os.environ.get('OD_PANEL'): widget.topPanel = int(os.environ['OD_PANEL'])
+if os.environ.get('OD_LOGO'): widget.logoFile = os.environ['OD_LOGO']   # e.g. stratos_title.png
 
 HOME = (43.49323, 142.88785)
+if os.environ.get('OD_HOME'): HOME = tuple(float(v) for v in os.environ['OD_HOME'].split(','))
 st = dict(lat=HOME[0], lon=HOME[1], hlat=HOME[0], hlon=HOME[1], mode=5, armed=True, thr=55, sats=14, hdop=0.8,
           altmsl=160, volt=15.8, curr=12.3, mah=0, alt=0, vs=0, **{'as': 17.0}, gs=18.5, yaw=0, roll=0, pitch=0,
           wdir=270, wspd=4.2, wpn=0, wpd=0, wpb=0)
 
 PAINT = [False]
+# OD_COUNT=1: count the Lua instructions of every wakeup() / paint() / event() (what Ethos's
+# per-call "Max instructions count reached" limit counts) and print the worst per page at exit
+COUNT = os.environ.get('OD_COUNT') == '1'
+CNT = {}
+DIST = {}
+WORST = {}
+if COUNT:
+    _cnt = L.execute('''PROF = {} PROF_ON = false
+    return function(f, ...)
+        local n = 0
+        CALL = {}
+        if PROF_ON then
+          debug.sethook(function()
+            n = n + 25
+            local i = debug.getinfo(2, "Sl")
+            if i then local k = i.short_src:match("[^/]+$") .. ":" .. i.currentline PROF[k] = (PROF[k] or 0) + 25 CALL[k] = (CALL[k] or 0) + 25 end
+          end, "", 25)
+        else
+          debug.sethook(function() n = n + 1 end, "", 1)
+        end
+        local ok, e = pcall(f, ...)
+        debug.sethook()
+        if not ok then error(e, 0) end
+        return n end''')
+    def _counted(name, f):
+        def g(*a):
+            n = _cnt(f, *a)
+            DIST.setdefault('%s p%s' % (name, widget.page), []).append(n)
+            k0 = '%s p%s' % (name, widget.page)
+            if n > WORST.get(k0, (0, None))[0]:
+                c = L.eval('CALL')
+                WORST[k0] = (n, sorted(((str(k), int(v)) for k, v in c.items()), key=lambda kv: -kv[1])[:25])
+            if name == 'paint': MEM[0] = max(MEM[0], float(L.eval('collectgarbage("count")')))
+            k = '%s p%s' % (name, widget.page)
+            CNT[k] = max(CNT.get(k, 0), n)
+        return g
+    import atexit
+    atexit.register(lambda: print('INSTRUCTIONS worst per call:', sorted(CNT.items(), key=lambda kv: -kv[1])))
+    _mem = L.eval('function() collectgarbage("collect") return collectgarbage("count") end')
+    MEM = [0.0]
+    atexit.register(lambda: print('LUA MEMORY KB now %.0f, peak seen %.0f' % (_mem(), MEM[0])))
+if COUNT:
+    wt['event0'], wt['wakeup0'], wt['paint0'] = wt['event'], wt['wakeup'], wt['paint']
+    for _k in ('wakeup', 'paint', 'event'):
+        wt[_k] = _counted(_k, wt[_k])
 def step(dt=0.2):
     global cv
     sim_time[0] += dt
@@ -560,7 +638,7 @@ getS = L.execute('''
 return function()
   local p = package.loaded
   for i = 1, 200 do
-    local n, v = debug.getupvalue(_W.wakeup, i)
+    local n, v = debug.getupvalue(_W.wakeup0 or _W.wakeup, i)
     if n == nil then break end
     if n == "T" then return v.s end
   end
@@ -595,7 +673,7 @@ def render(name, page, **kw):
 
 tag = ('native' if NATIVE else ('sport' if SPORT else 'crsf')) + '_' + RES
 if INAV:
-    getU = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup, i)
+    getU = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
         if n == nil then break end if n == name then return v end end end''')
     MSPC = getU(wt, 'MSPC'); MIm = getU(wt, 'MI')
     print('  msp state', MSPC.state(), 'variant', MSPC.variant(), 'count', MSPC.count(), 'active', MSPC.active())
@@ -631,7 +709,7 @@ if INAV:
     print('INAV checks OK')
     sys.exit(0)
 if TILES:
-    getMI = L.execute('''return function(W) for i = 1, 200 do local n, v = debug.getupvalue(W.wakeup, i)
+    getMI = L.execute('''return function(W) for i = 1, 200 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
         if n == nil then break end if n == "MI" then return v end end end''')
     MIm = getMI(wt)
     cur, kind = MIm.current(); print("  mission source", kind)
@@ -645,14 +723,26 @@ if TILES:
     for _ in range(40): step(0.2)      # let the queue fill the view
     tag = ('tiles_native_' if NATIVE else 'tiles_') + RES
     print('  tile zoom', widget.tz, 'loads', stats['loads'])
+    # test43: the map page asks for a bigger window than the minimap; the loader fills it (and
+    # its ring of one tile) within a few wakeups - the render shows the result, not the first frame
+    getTL = L.execute('''return function(W) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
+        if n == nil then break end if n == "TL" then return v end end end''')
+    TLm = getTL(wt)
+    widget.page = 2
+    for _ in range(3): step(0.2)
+    assert TLm.pending() == 0 and TLm.cached() >= 20, 'map window loaded in 3 steps: pending %s cached %s' % (TLm.pending(), TLm.cached())
+    print('  map page window: %d tiles cached after 3 steps' % TLm.cached())
     render('map_learned_%s.png' % tag, 2)
     widget.missionFile = 'test.waypoints'
     do_write(); do_read()
     for _ in range(40): step(0.2)
     render('main_%s.png' % tag, 1)
     for _ in range(40): step(0.2)
+    widget.page = 2
+    for _ in range(3): step(0.2)
     render('map_%s.png' % tag, 2)
     for _ in range(3): wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
+    widget.page = 2
     for _ in range(40): step(0.2)
     render('map_zoomed_%s.png' % tag, 2)
     print('  manual zoom ->', widget.tz, 'view', widget.zoomMode)
@@ -714,28 +804,78 @@ wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.plus.x + 5, b.pl
 assert widget.level == lvl0 - 1, 'plus button'
 wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.minus.x + 5, b.minus.y + 5)
 assert widget.level == lvl0, 'minus button'
-assert widget.zoomMode == 0 and b.auto.label == 'PLANE', 'aircraft-centred by default'
-wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.auto.x + 5, b.auto.y + 5)
-assert widget.zoomMode == 1, 'view button -> home-centred'
-wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], b.auto.x + 5, b.auto.y + 5)
-assert widget.zoomMode == 0, 'view button -> aircraft-centred'
+# test43: no PLANE / HOME view button (the "Map view" setting stays); + and - square, >= 48 px
+assert widget.zoomMode == 0 and b.auto is None, 'aircraft-centred by default, no view button'
+assert b.plus.w == b.plus.h and b.plus.w >= 48 and b.minus.w == b.plus.w, 'big square zoom buttons %s' % b.plus.w
+assert b.minus.y > b.plus.y + b.plus.h, 'minus under plus'
+# near misses (tester, X18 2026-11-11): a quarter of the button around it, the gap split in the middle,
+# the press point counts; a tap away from the buttons still turns the page
+def tapxy(x0, y0, x1=None, y1=None):
+    wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_START'], x0, y0)
+    wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], x0 if x1 is None else x1, y0 if y1 is None else y1)
+pad = b.plus.w // 4
+gap_mid = (b.plus.y + b.plus.h + b.minus.y) / 2
+cxb = b.plus.x + b.plus.w // 2
+for (tx, ty, d, what) in ((cxb, b.plus.y - pad + 2, -1, 'above +'), (b.plus.x - pad + 2, b.plus.y + 5, -1, 'left of +'),
+                          (cxb, gap_mid - 1, -1, 'gap, upper half'), (cxb, gap_mid + 1, 1, 'gap, lower half'),
+                          (cxb, b.minus.y + b.minus.h + pad - 2, 1, 'below -')):
+    widget.level = 5
+    tapxy(tx, ty)
+    assert widget.page == 2 and widget.level == 5 + d, 'near miss %s: page %s level %s' % (what, widget.page, widget.level)
+widget.level = 5
+tapxy(cxb, b.plus.y + 5, b.plus.x - pad - 8, b.plus.y + 5)        # pressed on +, lifted off to the left
+assert widget.page == 2 and widget.level == 4, 'press on +, lift outside: %s %s' % (widget.page, widget.level)
+widget.level = lvl0
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
 assert widget.level == lvl0 - 1, 'rotary'
+# test42 page cycle: main, map, messages for ArduPilot only (INAV/BF send none); the flight stats
+# and sensor check pages only when switched on (both off by default)
+ENTER = lambda: wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+assert widget.msgPage == 0 and widget.statsPage == 0 and widget.checkPage == 0, 'page settings default'
 wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_START'], 200, 200)
 wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], 200, 200)
-assert widget.page == 3, 'tap changes page'
-wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 5, 'enter goes on to the sensor check (no flight yet)'
+assert widget.page == (1 if NATIVE else 3), 'tap changes page (messages for ArduPilot only): %s' % widget.page
+if not NATIVE:
+    ENTER()
+    assert widget.page == 1, 'stats and sensor check are off by default: %s' % widget.page
+widget.checkPage = 1; widget.page = 2
+ENTER()
+if not NATIVE:
+    assert widget.page == 3, 'messages before the sensor check'
+    ENTER()
+assert widget.page == 5, 'sensor check page switched on: %s' % widget.page
 cv = Canvas(); drawn.clear(); wt['paint'](widget); cv.img.save(os.path.join(OUT, 'check_%s.png' % tag))
 assert any('SENSOR CHECK' in t for t, c, x in drawn), 'sensor check page draws'
-wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+# rows that don't fit scroll: wheel right = further down, drag up = further down; zoom untouched
+mx, rh, lv0, tz0 = widget.chkMax, widget.chkRowH, widget.level, widget.tz
+for _ in range(50): wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_RIGHT'], 0, 0)
+assert widget.chkScroll == mx, ('wheel to the end', widget.chkScroll, mx)
+drawn.clear(); wt['paint'](widget)
+assert any(t == 'rssi' for t, c, x in drawn), 'last sensor row visible at the end of the list'
+if mx > 0:
+    cv = Canvas(); drawn.clear(); wt['paint'](widget); cv.img.save(os.path.join(OUT, 'check_scrolled_%s.png' % tag))
+    TE = consts['EVT_TOUCH']
+    wt['event'](widget, TE, consts['TOUCH_START'], 300, 100)
+    wt['event'](widget, TE, consts['TOUCH_MOVE'], 300, 100 + 2 * rh)
+    wt['event'](widget, TE, consts['TOUCH_END'], 300, 100 + 2 * rh)
+    assert widget.chkScroll == max(0, mx - 2) and widget.page == 5, ('drag down shows earlier rows', widget.chkScroll, widget.page)
+for _ in range(50): wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_LEFT'], 0, 0)
+assert widget.chkScroll == 0, 'wheel back to the top'
+assert widget.level == lv0 and widget.tz == tz0, 'wheel on the sensor check page does not zoom the map'
+print('sensor check scroll OK (rows hidden at the top: %d)' % mx)
+ENTER()
 assert widget.page == 1, 'enter wraps to page 1'
+widget.msgPage = 1 if NATIVE else 2; widget.page = 2      # messages forced On (INAV) / Off (ArduPilot)
+ENTER()
+assert widget.page == (3 if NATIVE else 5), 'messages page setting On/Off: %s' % widget.page
+widget.msgPage, widget.checkPage, widget.page = 0, 0, 1
 os.remove(os.path.join(OUT, '_tmp.png'))
-MAPmod = L.execute(open('map.lua', encoding='utf8').read())
+MAPmod = L.execute(open(os.path.join('x18' if W <= 480 else 'x20', 'map.lua'), encoding='utf8').read())   # the copy the loader picked
 print('input checks OK')
 
+
 # ------------------------------------------------------------------ flight summary
-getV = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup, i)
+getV = L.execute('''return function(W, name) for i = 1, 300 do local n, v = debug.getupvalue(W.wakeup0 or W.wakeup, i)
     if n == nil then break end if n == name then return v end end end''')
 FS = getV(wt, 'FS')
 wt_alive = getV(wt, 'T').alive
@@ -752,11 +892,23 @@ assert widget.page == 2 and FS.last() is None, 'disarm flicker ended the flight'
 st['armed'] = False
 for _ in range(10): step(0.2)
 assert widget.page == 4, 'disarm opens the summary, page %s' % widget.page
+# test43: the flight is also added to flights.txt (one entry per summary)
+# test43: the flight is saved as logs/<model>-<YYYY-MM-DD>-<HHMMSS>.txt, a file per flight
+import re as _re
+def log_entries(): return len(os.listdir(LOGD))
+_logs = sorted(os.listdir(LOGD))
+assert len(_logs) == 1 and _re.match(_re.escape(SIM_MODEL) + r'-\d{4}-\d\d-\d\d-\d{6}\.txt$', _logs[0]), 'log file name %s' % _logs
+last_entry = open(os.path.join(LOGD, _logs[0]), encoding='utf8').read()
+assert ('Model          ' + SIM_MODEL) in last_entry and 'Flight time' in last_entry and 'Last position' in last_entry, 'flight log %s' % last_entry
+log_n = log_entries()
 f = FS.last()
 print('summary: time %.0f dist %.0f home %s alt %s gspd %s as %s used %s volt %s curr %s lq %s rssi %s lost %s' % (
     f.time, f.dist, f.maxHome, f.maxAlt, f.maxGspd, f.maxAspd, f.used, f.minVolt, f.maxCurr, f.minLq, f.minRssi, f.lost))
 if SPORT:
-    assert S.rssi in (87, 88) and S.lq is None, 'S.Port has RSSI, no LQ (%s %s)' % (S.rssi, S.lq)
+    # both Ethos copies (test40 change; X20 since test41b, X18 since test42): LQ = VFR (0xF010),
+    # RSSI as the FC's own F.Port % (INAV/BF 0-100, ArduPilot 0-50 so x2, max 100)
+    want = (100,) if S.fc == 'ArduPilot' else (87, 88)
+    assert S.rssi in want and S.lq == 98, 'S.Port: LQ from VFR, RSSI %% (%s %s %s)' % (S.rssi, S.lq, S.fc)
 elif not INAV:
     assert S.lq == 96 and S.rssi in (-72, -73), 'CRSF has LQ and RSSI (%s %s)' % (S.lq, S.rssi)
 assert f.time > 100 and f.dist > 3000 and abs(f.maxAlt - 120) < 1 and f.lost == 0, 'summary values'
@@ -766,12 +918,15 @@ first_time = f.time
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ROTARY_LEFT'], 0, 0)
 assert widget.page == 4, 'rotary stays on the summary'
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 5, 'enter leaves the summary (on to the sensor check)'
+assert widget.page == 1, 'enter leaves the summary (sensor check off by default: back to page 1)'
+widget.page = 3 if not NATIVE else 2
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 1, 'then back to page 1'
-widget.page = 3
+assert widget.page == 1, 'the summary is not in the cycle with "Flight stats page" Off: %s' % widget.page
+widget.statsPage = 1                       # test42: switched on, it joins the cycle after a flight
+widget.page = 3 if not NATIVE else 2
 wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
-assert widget.page == 4, 'summary joins the cycle'
+assert widget.page == 4, 'summary joins the cycle with "Flight stats page" On'
+widget.statsPage = 0
 
 st['armed'] = True                        # arming closes it, back to the main page
 for _ in range(5): step(0.2)
@@ -780,6 +935,7 @@ for _ in range(15): step(0.2)             # 3 s on the bench: too short to count
 st['armed'] = False
 for _ in range(10): step(0.2)
 assert widget.page == 1 and FS.last().time == first_time, 'short arm shows nothing'
+assert log_entries() == log_n, 'short arm adds no log file'
 
 st['armed'] = True                        # link lost mid-flight, then found disarmed
 for _ in range(100): step(0.2)
@@ -897,24 +1053,35 @@ if NATIVE:
 
 ops = main_drawn()
 txt = [t for t, c, x in ops]
-assert 'ALT' not in txt and not any(t.startswith('GSPD') for t in txt), 'ALT and GSPD tiles are gone'
-assert any(t.startswith('ALT ') for t in txt), 'altitude tape stays'
+# test42: the tapes are labelled with the unit alone; the blocks' second row is ALT | AS / GS
+assert 'km/h' in txt and 'm' in txt and not any(t.startswith('ALT ') or t.startswith('AS km') for t in txt), 'unit-only tape labels'
+assert not any(t.startswith('GSPD') for t in txt), 'no GSPD block'
+assert 'ALT' in txt and '%dm' % round(S.alt) in txt, 'ALT block %s' % txt
 f = FS.live()
 def dist_txt(m): return '%dm' % int(m + 0.5) if m < 999.5 else '%.2fkm' % (m / 1000)
 assert dist_txt(999.4) == '999m' and dist_txt(999.6) == '1.00km' and dist_txt(3293.79) == '3.29km'
 NOTES = H >= 320            # the small notes are left out only on the narrowest screens
-assert 'HOME' in txt and (not NOTES or 'TOTAL ' + dist_txt(f.dist) in txt), 'total distance in the home block %s' % txt
+assert 'HOME' in txt and (not NOTES or 'TOT ' + dist_txt(f.dist) in txt), 'total distance in the home block %s' % txt
 assert 'TOTAL DIST' not in txt, 'TOTAL DIST block gave its place to FLIGHT TIME %s' % txt
 import re
 assert 'FLIGHT TIME' in txt and any(re.fullmatch(r'\d\d:\d\d', t) for t in txt), 'flight time block %s' % txt
-assert 'MAX GS km/h' in txt and '%.1f' % (f.maxGspd * 3.6) in txt, 'max GS %s' % txt
-assert 'MAX AS km/h' in txt, 'max AS block %s' % txt
+assert 'MAX GS km/h' not in txt and 'MAX AS km/h' not in txt, 'max speeds are on the summary only %s' % txt
+if S.aspd is not None:
+    assert 'AS / GS km/h' in txt and '%d / %d' % (round(S.aspd * 3.6), round(S.gspd * 3.6)) in txt, 'AS / GS block %s' % txt
+else:
+    assert 'GS km/h' in txt and str(round(S.gspd * 3.6)) in txt, 'GS block %s' % txt
 assert f.maxCurr is None or not NOTES or 'MAX %.1fA' % f.maxCurr in txt, 'max current in the current block %s' % txt
 assert cv.img.getpixel((3, H // 3)) != (20, 20, 20), 'horizon shows through the speed tape'
+# test42: the vario strip has no background, the horizon shows through it (top of the strip,
+# away from the bar, which grows from the middle)
+_bodyY = round(H * 0.09); _bodyH = H - _bodyY - round(H * 0.075)
+_vy = _bodyY + max(18, math.floor(_bodyH * 0.08)) + 16 + 3
+assert cv.img.getpixel((round(W * 0.56) - 3, _vy)) != (20, 20, 20), 'horizon shows through the vario strip'
 if NATIVE:
-    assert f.maxAspd is None and not any(c == GS_COL for t, c, x in ops), 'no second box when the tape already shows ground speed'
+    # no airspeed: the tape's own value box is in the GS green, and no second GS box
+    gs = [t for t, c, x in ops if c == GS_COL]
+    assert f.maxAspd is None and gs == [str(round(S.gspd * 3.6))], 'tape shows ground speed in green, no GS box %s' % gs
 else:
-    assert '%.1f' % (f.maxAspd * 3.6) in txt, 'max AS %s' % txt
     gs = [t for t, c, x in ops if c == GS_COL]
     assert gs == [str(round(S.gspd * 3.6)), 'GS'] and float(gs[0]) != round(S.aspd * 3.6), 'GS box %s' % gs
     st['nogs'] = True
@@ -1056,17 +1223,16 @@ if NATIVE:
 # nothing on the main page or the map spills out of its box at this size
 widget.page = 2
 cv = Canvas(); wt['paint'](widget)
-auto = widget.btns.auto
-cv.font = font_of(consts['FONT_STD'])
-assert text_size('AUTO')[0] + 4 <= auto.w, 'AUTO fits its button (%d px in %d)' % (text_size('AUTO')[0], auto.w)
+mb = widget.btns.minus
+assert mb.x + mb.w <= W and mb.y + mb.h <= H, 'zoom buttons on the screen'
 widget.page = 1
 
 # no GPS fix: ArduPilot sends 0,0, which is no position; the map centres on the last good one
 if not NATIVE and not TILES:
+    # test43: kept in memory only (a reboot or a model switch clears it); no lastpos.txt
     posf = os.path.join(SD, 'scripts', 'omnideck', 'lastpos.txt')
-    assert os.path.isfile(posf), 'last position saved'
-    la, lo = map(float, open(posf).read().split(','))
-    assert abs(la - st['lat']) < 0.05 and abs(lo - st['lon']) < 0.05, 'saved position near the aircraft'
+    assert not os.path.isfile(posf), 'lastpos.txt is no longer written'
+    la, lo = S.lat, S.lon
     keep_pos = (st['lat'], st['lon'], st.get('fix', 3))
     st['lat'], st['lon'], st['fix'] = 0.0, 0.0, 1
     for _ in range(6): step(0.2)
@@ -1104,6 +1270,141 @@ for la, lo in (() if NATIVE else ((14.1749166, 121.2435277), (-33.86, 151.21), (
 for _ in range(6): step(0.2)          # back to the simulated aircraft
 print('mLRS coordinates OK')
 
+# ArduPilot over CRSF (ELRS) sends no 0x0800 in passthrough, only the native CRSF GPS frame:
+# the position must follow the native sensor (X20 + ELRS, 2026-11-08: map kept the saved position).
+# X20 and X18 (both copies have the fix since test42).
+if not NATIVE and not SPORT:
+    keep_pos = (st['lat'], st['lon'])
+    def step_no800(dt=0.2):
+        sim_time[0] += dt
+        feed([(a, v) for a, v in packets(st) if a != 0x0800])
+        native_vals.update({'GPS1': st['lat'], 'GPS2': st['lon']})
+        for _ in range(4): wt['wakeup'](widget)
+    for k in range(20):
+        st['lat'], st['lon'] = project(keep_pos[0], keep_pos[1], 30 * (k + 1), 70)
+        step_no800(0.2)
+    assert S.fc == 'ArduPilot', 'still passthrough: %s' % S.fc
+    assert abs(S.lat - st['lat']) < 1e-6 and abs(S.lon - st['lon']) < 1e-6, \
+        'native CRSF position followed (%s, %s) vs (%s, %s)' % (S.lat, S.lon, st['lat'], st['lon'])
+    native_vals.pop('GPS1', None); native_vals.pop('GPS2', None)
+    st['lat'], st['lon'] = keep_pos
+    for _ in range(12): step(0.2)
+    assert abs(S.lat - st['lat']) < 1e-5, '0x0800 back in charge'
+    print('ArduPilot CRSF native position OK')
+
+# ArduPilot over Crossfire at 50 Hz: passthrough every 3 s, but the CRSF GPS frame every 1 s and the
+# battery frame every 2 s. Between bursts ground speed, satellites, distance to home and the battery
+# follow those sensors; at 150 Hz (passthrough every 0.2 s) they stay on passthrough.
+if not NATIVE and not SPORT:
+    S2 = Tm.s
+    assert S2.homeLat is not None, 'home known before the 50 Hz test'
+    AP_EXTRA[0] = True
+    native_units['GPS speed'] = consts['UNIT_KILOMETER_PER_HOUR']
+    def crsf_sensors(gs_kmh, sats, volt, curr, mah, lat, lon):
+        native_vals.update({'GPS speed': gs_kmh, 'GPS Satellites': sats, 'Rx Batt': volt,
+                            'Rx Current': curr, 'Rx Cons': mah, 'GPS1': lat, 'GPS2': lon})
+    def tick(burst):
+        sim_time[0] += 0.2
+        feed([(a, v) for a, v in packets(st) if a != 0x0800] if burst else [])
+        for _ in range(4): wt['wakeup'](widget)
+    def link_msg(t):
+        crsf_q.append([0xF1, 6] + list(t.encode()) + [0])
+    # ELRS: ArduPilot keeps it on its fast schedule, so nothing here may change (3 s windows)
+    link_msg('ELRS: Link rate 500Hz, Telemetry rate 62Hz')
+    tick(True)
+    crsf_sensors(72.0, 11, 15.1, 7.5, 3333, st['lat'], st['lon'])
+    for _ in range(8): tick(False)
+    assert S2.sats == min(st['sats'], 15), 'ELRS: no fill from CRSF sensors (sats %s)' % S2.sats
+    for _ in range(9): tick(False)            # 3.4 s without passthrough
+    assert not Tm.alive(), 'ELRS: lost after 3 s as before'
+    for _ in range(5): tick(True)
+    # TBS Crossfire at 50 Hz: ArduPilot's own message switches the slow-link handling on
+    link_msg('CRSFv3: Link rate 50Hz, Telemetry rate 50Hz')
+    tick(True)
+    assert S2.crsfSlow == True, 'CRSFv3 50 Hz message read'
+    # 150 Hz: passthrough every 0.2 s, CRSF sensors deliberately different: passthrough wins
+    crsf_sensors(999.0, 3, 99.0, 99.0, 9999, st['lat'], st['lon'])
+    for _ in range(10): tick(True)
+    assert abs(S2.gspd - st['gs']) < 1.0 and S2.sats == min(st['sats'], 15) and abs(S2.volt - st['volt']) < 0.2,         '150 Hz: passthrough values kept (gs %s sats %s volt %s)' % (S2.gspd, S2.sats, S2.volt)
+    # a 50 Hz message on a link that never pauses (an ELRS link named before the receiver answered):
+    # still off - it also takes one real gap that ends with a burst
+    assert not S2.crsfGap, 'no gap seen yet on a fast link'
+    for _ in range(10): tick(False)           # 2 s gap ...
+    tick(True)                                # ... ended by a burst: a slow link
+    assert S2.crsfGap == True, 'gap seen'
+    # 50 Hz: one burst, then CRSF frames only. The aircraft has moved 400 m since the burst.
+    tick(True)
+    lat1, lon1 = project(st['lat'], st['lon'], 400, 200)
+    crsf_sensors(72.0, 11, 15.1, 7.5, 3333, lat1, lon1)
+    for _ in range(3): tick(False)            # 0.6 s: passthrough still fresh enough
+    assert S2.sats == min(st['sats'], 15), 'no fill within 1 s of a burst: sats %s' % S2.sats
+    for _ in range(5): tick(False)            # 1.6 s after the burst
+    exp_d = Tm.distBrg(lat1, lon1, S2.homeLat, S2.homeLon)[0]
+    assert abs(S2.gspd - 20.0) < 0.05, '50 Hz: ground speed from CRSF GPS speed, got %s' % S2.gspd
+    assert S2.sats == 11 and abs(S2.volt - 15.1) < 1e-6 and abs(S2.curr - 7.5) < 1e-6 and S2.mah == 3333,         '50 Hz: sats/battery from CRSF (%s %s %s %s)' % (S2.sats, S2.volt, S2.curr, S2.mah)
+    assert abs(S2.homeDist - exp_d) < 1, '50 Hz: home distance from the CRSF position %s vs %s' % (S2.homeDist, exp_d)
+    assert Tm.alive(), '50 Hz: link still alive 1.6 s after a burst'
+    for _ in range(9): tick(False)            # 3.4 s: past the old 3 s window, no lost-link flash
+    assert Tm.alive(), '50 Hz: still alive 3.4 s after a burst'
+    crsf_sensors(90.0, 12, 15.0, 7.0, 3400, lat1, lon1)
+    for _ in range(5): tick(False)            # 4.4 s: the next GPS / battery values come through
+    assert abs(S2.gspd - 25.0) < 0.05 and S2.sats == 12 and S2.mah == 3400, '50 Hz: values keep moving'
+    tick(True)                                # the next burst takes over again
+    assert S2.sats == min(st['sats'], 15) and abs(S2.volt - st['volt']) < 0.2, 'burst: passthrough back in charge'
+    link_msg('CRSFv3: Link rate 150Hz, Telemetry rate 150Hz')
+    tick(True)
+    assert not S2.crsfSlow, '150 Hz message: slow-link handling off'
+    AP_EXTRA[0] = False
+    for k in ('GPS speed', 'GPS Satellites', 'Rx Batt', 'Rx Current', 'Rx Cons', 'GPS1', 'GPS2'): native_vals.pop(k, None)
+    for _ in range(12): step(0.2)
+    print('ArduPilot CRSF 50 Hz fill OK')
+
+# more than 15 satellites: passthrough has 4 bits, ArduPilot sends at most 15. S.Port: "15+";
+# CRSF: the real count from the standard GPS frame's "GPS Satellites"
+if not NATIVE:
+    st['sats'] = 18
+    for _ in range(6): step(0.2)
+    assert Tm.s.sats == 15 and Tm.s.satsPlus == True, 'capped at 15: %s %s' % (Tm.s.sats, Tm.s.satsPlus)
+    assert any(t.endswith(' 15+') for t, c, x in main_drawn()), 'top bar shows 15+'
+    if not SPORT:
+        AP_EXTRA[0] = True
+        native_vals['GPS Satellites'] = 18
+        for _ in range(8): step(0.2)
+        assert Tm.s.sats == 18 and not Tm.s.satsPlus, 'CRSF real count: %s %s' % (Tm.s.sats, Tm.s.satsPlus)
+        ops = main_drawn()
+        assert any(t == '3D 18' for t, c, x in ops) and not any(t.endswith('15+') for t, c, x in ops), 'top bar shows 3D 18'
+        native_vals.pop('GPS Satellites', None); AP_EXTRA[0] = False
+    st['sats'] = 14
+    for _ in range(20): step(0.2)
+    assert Tm.s.sats == 14 and not Tm.s.satsPlus, 'back under 15: %s' % Tm.s.sats
+    print('satellites above 15 OK')
+
+# Betaflight 4.5: CRSF "GPS alt" is the GPS's sea-level altitude while disarmed and the height
+# above the arming point once armed (flight/position.c). The reading at the arm edge was sea
+# level, so everything after it came out a field elevation too low (X18 + BF + TBS, MAX ALT -278 m,
+# 2026-11-08). Newer Betaflight sends sea level all along, which must still be subtracted.
+if NATIVE and not SPORT and not INAV:
+    FIELD = 300.0
+    def gstep(v, n=1):
+        for _ in range(n):
+            native_vals['GPS alt'] = v
+            step(0.2)
+    st['armed'] = False
+    gstep(FIELD, 35)                    # 7 s: "GPS alt" is found (sources are looked up again every 5 s)
+    st['armed'] = True
+    gstep(FIELD, 2)                     # armed in the mode text before the GPS frame jumps
+    gstep(0.0, 3); gstep(25.0, 5)
+    assert abs(S.alt - 25) < 1, 'BF 4.5: height above the arming point, not %s' % S.alt
+    st['armed'] = False
+    gstep(FIELD, 10)
+    st['armed'] = True
+    gstep(FIELD, 5); gstep(FIELD + 40, 5)
+    assert abs(S.alt - 40) < 1, 'sea level all along: height above home, not %s' % S.alt
+    st['armed'] = False
+    native_vals.pop('GPS alt', None)
+    for _ in range(30): step(0.2)
+    print('Betaflight GPS altitude OK')
+
 # home-centred view: armed -> closest step; flying out only zooms out, keeping the aircraft
 # inside the map; flying back does not zoom in again
 if not TILES:
@@ -1112,12 +1413,14 @@ if not TILES:
     widget.zoomMode = 0; widget.page = 2; widget.level = 1
     st['lat'], st['lon'] = project(HOME[0], HOME[1], 600, 30)     # well away from home
     for _ in range(10): step(0.2)
-    cv = Canvas(); tris.clear(); wt['paint'](widget)
+    cv = Canvas(); tris.clear(); texts_xy.clear(); wt['paint'](widget)
     rx, ry, rw_, rh_ = 0, round(H * 0.09), W, H - round(H * 0.09)
-    homes = [p for c, p in tris if c == (80, 200, 255)]
-    assert homes, 'home marker drawn'
-    hx, hy = homes[-1][2], homes[-1][3]          # the roof's apex
-    assert hx < 25 or hx > W - 25 or hy < ry + 30 or hy > H - 45, 'home icon on the edge (%s, %s)' % (hx, hy)
+    # test43: home is the HUD's white H in a framed box (with the distance) kept inside the map
+    homes = [(x, y) for tt, x, y in texts_xy if tt == 'H']
+    assert len(homes) == 1, 'one home H on the map %s' % homes
+    hx, hy = homes[0]
+    assert hx < 60 or hx > W - 60 or hy < ry + 40 or hy > H - 70, 'home H on the edge (%s, %s)' % (hx, hy)
+    assert not [p for c, p in tris if c == (80, 200, 255)], 'no house icon any more'
     cv.img.save(os.path.join(OUT, 'map_homeedge_%s.png' % tag))
     widget.zoomMode = 1; widget.page = 2
     st['armed'] = False; st['lat'], st['lon'] = HOME
@@ -1161,33 +1464,62 @@ if not TILES:
     import shutil; shutil.rmtree(os.path.join(SD, 'bitmaps', 'ethosmaps', 'maps', 'Google'))
     print('tile folders: capitals ignored OK')
 
-# home arrow in the HOME block: points to home relative to the nose
+# home direction (test42): the top-right "Home arrow" panel - the OmniDeck mark's arrow, two
+# triangles sharing the tip and the notch - and the HUD's H (only while home is within 45 degrees)
+ARROW_FILL = (242, 245, 248)
 def arrow_deg():
     main_drawn()
     tiles_y = round(H * 0.09) + min(W - round(W * 0.56) - 3, round((H - round(H * 0.09) - round(H * 0.075)) * 0.46))
-    pts = [p for c, p in tris if c == (80, 200, 255) and min(p[1], p[3], p[5]) > tiles_y and p[0] > W * 0.56]
+    pts = [p for c, p in tris if c == ARROW_FILL and max(p[1], p[3], p[5]) <= tiles_y + 1 and p[0] > W * 0.56]
     if not pts: return None
-    assert len(pts) == 2 and pts[0][:2] == pts[1][:2], 'arrow is two triangles sharing the tip %s' % pts
-    tx, ty = pts[0][0], pts[0][1]
-    cx = sum(p[i] for p in pts for i in (2, 4)) / 4      # the tail points sit around the centre line
-    cy = sum(p[i] for p in pts for i in (3, 5)) / 4
-    return math.degrees(math.atan2(tx - cx, cy - ty)) % 360
+    assert len(pts) == 2 and pts[0][:2] == pts[1][:2] and pts[0][4:6] == pts[1][2:4], 'arrow: tip and notch shared %s' % pts
+    tx, ty, nx, ny = pts[0][0], pts[0][1], pts[0][4], pts[0][5]
+    return math.degrees(math.atan2(tx - nx, ny - ty)) % 360
+HUD_W = round(W * 0.56)
+HUD_TAPE = max(46, math.floor(HUD_W * 0.17))
+HUD_CX = HUD_TAPE + 4 + (HUD_W - 2 * HUD_TAPE - (8 if (H - round(H * 0.09) - round(H * 0.075)) >= 240 else 6) - 8) / 2
+def h_x():
+    xs = [x for t, c, x in main_drawn() if t == 'H']
+    return xs[0] if xs else None
+keep_panel = widget.topPanel
+widget.topPanel = 1
 lat0 = st['lat']
-st['lat'] = lat0 + 0.006                  # ~670 m north of where it stands, so home is not underfoot
+st['lat'] = lat0 + 0.006                  # ~670 m north of where it stands: home ~670 m south
 st['armed'] = False
 step(0.2); step(0.2)
-assert arrow_deg() is not None or S.homeDist is None or S.homeDist == 0, 'arrow away from home'
-for yaw in (0, 90, 200, 315):
+assert arrow_deg() is None, 'Home arrow panel shows the logo before arming'
+# arm where it stood (INAV/BF set home where they arm), then fly the 670 m north again
+st['lat'] = lat0
+st['armed'] = True
+step(0.2); step(0.2)
+st['lat'] = lat0 + 0.006
+step(0.2); step(0.2)
+for yaw in (0, 20, 340, 90, 200, 160):   # home is south (bearing ~180)
     st['yaw'] = yaw
     step(0.2); step(0.2)
     got = arrow_deg()
     want = (S.homeBrg - S.yaw) % 360
     assert got is not None and abs((got - want + 180) % 360 - 180) < 8, 'yaw %d: arrow %s, want %.0f' % (yaw, got, want)
+    rel = (want + 180) % 360 - 180
+    hx = h_x()
+    # test43: the strip's width is +-90 deg for the H; past 90 it parks on home's end, and it goes
+    # only with home within 5 deg of the tail
+    tw_h = 2 * (HUD_CX - HUD_TAPE - 4)
+    if abs(rel) <= 174:
+        assert hx is not None, 'yaw %d: H shown for home %.0f deg off the nose' % (yaw, rel)
+        assert abs(rel) < 10 or (hx > HUD_CX) == (rel > 0), 'yaw %d: H on the side of home (%.0f, x %s)' % (yaw, rel, hx)
+        want_x = HUD_CX + max(-90, min(90, rel)) * tw_h / 180
+        assert abs(hx - want_x) <= 24, 'yaw %d: H at %s, want ~%.0f (rel %.0f)' % (yaw, hx, want_x, rel)
+        if abs(rel) >= 90:
+            assert abs(abs(hx - HUD_CX) - tw_h / 2) <= 24, 'yaw %d: H parked on the end' % yaw
+    elif abs(rel) >= 176:
+        assert hx is None, 'yaw %d: no H for home %.0f deg off the nose' % (yaw, rel)
+    if yaw == 160: render('main_homearrow_%s.png' % tag, 1)   # home 20 deg right: H and the panel arrow
 st['lat'] = lat0
 st['yaw'] = 0
+st['armed'] = False
+widget.topPanel = keep_panel
 step(0.2); step(0.2)
-if S.homeDist is not None and S.homeDist < 1:
-    assert arrow_deg() is None, 'no arrow when at home'
 print('home arrow OK')
 render('main_arrow_%s.png' % tag, 1)
 tris.clear()
@@ -1297,13 +1629,23 @@ if NATIVE and not SPORT:
              'CRSH': 'coursehold', 'WP': 'waypoint', 'AH': 'althold', 'ANGL': 'angle', 'HOR': 'horizon',
              'ANGH': 'anglehold', 'TURT': 'turtle', 'GEO': 'geozone', 'LAND': 'land', 'ACRO': 'acro',
              'WRTH': 'rtl', 'PASS': 'passthrough', 'POSH': 'poshold', 'PHFL': 'posholdfail',
-             'ALTH': 'althold', 'CHIR': 'chirp', 'AIR': 'airmode'}
+             'ALTH': 'althold', 'CHIR': 'chirp',
+             'AIR': 'airmode'}   # acro with airmode on: shown as AIR, spoken "airmode" (test35-42 said ACRO)
     clips = {l.split('|')[0] for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'phrases.psv'), encoding='utf8') if '|' in l and l[0] != '#'}
     for m, clip in MODES.items():
         st['fm'] = m
         assert hear() == [clip], '%s -> %s' % (m, played)
         assert clip in clips, 'no phrase for ' + clip
         assert S.armed is True, m + ' reads as armed'
+        if m == 'AIR': assert S.mode == 'AIR', 'AIR shown as AIR, not %s' % S.mode
+        if m == 'ACRO': assert S.mode == 'ACRO', 'ACRO shown as ACRO, not %s' % S.mode
+    # Betaflight disarmed: airmode on (permanent or by switch) "AIR*", airmode off "ACRO*"
+    for raw, want in (('AIR*', 'AIR'), ('ACRO*', 'ACRO')):
+        st['fm'] = raw
+        hear()
+        assert S.mode == want and S.armed is False, '%s -> %s armed %s' % (raw, S.mode, S.armed)
+    st['fm'] = 'ACRO'                         # armed again for the checks below
+    hear()
     st['fm'] = 'HRST'
     assert hear() == [], 'HRST silent, got %s' % played
     st['fm'] = '!FS!'
@@ -1418,10 +1760,370 @@ S_before = getS()
 S_before.odMarker = 1
 wt['create']()                    # another widget on the same model
 assert getS().odMarker == 1, 'same model: state kept'
+assert FS.last() is None, 'Talon Pro -> Plane A: the earlier flights are gone'
+st['armed'] = True
+for _ in range(60): step(0.2)
+st['armed'] = False
+for _ in range(10): step(0.2)
+assert FS.last() is not None and widget.page == 4, 'a flight on Plane A before the switch'
 MODEL_NAME[0] = 'Plane B'
 wt['create']()                    # selecting a model re-creates its widgets
 S_after = getS()
 assert S_after.odMarker is None, 'new model: state cleared'
+# test43: a fresh start - no last flight or flight time from the old model
+assert FS.last() is None and FS.live() is None, 'new model: flight summary cleared'
+# nor the old model's last position: with no fix yet the map has no LAST position
+_pg = widget.page; widget.page = 2
+cv = Canvas(); drawn.clear(); wt['paint'](widget)
+assert 'LAST' not in [t for t, c, x in drawn], 'new model: no last position on the map'
+widget.page = _pg
+if True:
+    # the welcome is said again after a model switch, as Yaapu does (X20 since test41b, X18 since test42)
+    vmod.setVoice('Aria'); del played[:]
+    for _ in range(6): wake_only(0.3)
+    assert 'omniready' in played, 'welcome after a model switch, got %s' % played
+    MODEL_NAME[0] = 'Plane B'; wt['create'](); del played[:]   # same model again: no welcome
+    for _ in range(6): wake_only(0.3)
+    assert 'omniready' not in played, 'no welcome without a switch, got %s' % played
+    vmod.setVoice('off')
+# the 1 s check in wakeup (Ethos re-creates the widget before model.name() changes) also clears
+# the flight and leaves the summary page
+st['armed'] = True
+for _ in range(60): step(0.2)
+st['armed'] = False
+for _ in range(10): step(0.2)
+assert FS.last() is not None and widget.page == 4, 'flight on Plane B'
+# X18: Ethos builds the new model's widget ~2 s before model.name() changes, so the switch is
+# seen by this check, not create(): the welcome must come from here too
+vmod.setVoice('Aria'); del played[:]
+MODEL_NAME[0] = 'Plane C'
+for _ in range(3): wake_only(0.4)
+assert FS.last() is None and widget.page != 4, 'wakeup model check: fresh start, page %s' % widget.page
+for _ in range(6): wake_only(0.3)
+assert 'omniready' in played, 'welcome after a switch seen by the wakeup check, got %s' % played
+vmod.setVoice('off')
 S_before.odMarker2 = 2
 assert getS().odMarker2 == 2, 'the state table is reset in place (the UI holds it)'
 print('model switch OK')
+
+# THR: ArduPilot's own throttle output (0x5001); INAV / Betaflight send none, so the radio's
+# throttle stick (label THR either way)
+widget.page = 1
+for stick, want in ((-1024, 0), (0, 50), (1024, 100), (410, 70)):
+    STICK[0] = stick
+    for _ in range(3): step(0.2)
+    cv = Canvas(); drawn.clear(); wt['paint'](widget)
+    txt = [t for t, c, x in drawn]
+    S = getS()
+    if NATIVE:
+        assert S.thr == want and 'THR' in txt and '%d%%' % want in txt, 'stick %d -> %s %s' % (stick, S.thr, txt[-12:])
+    else:
+        assert 'THR' in txt and S.thr == st['thr'], 'ArduPilot THR %s (sent %s)' % (S.thr, st['thr'])
+print('throttle OK (%s)' % ('stick' if NATIVE else 'ArduPilot output'))
+
+# Flight stats page (user 2026-11-10): On = always in the page cycle, in flight too (the flight in
+# progress); Off = never. Either way the disarm opens the summary, and it goes back to the main page
+# after SUM_SHOW_S (15 s); a stats page opened by hand stays.
+def page_txt(page):
+    widget.page = page
+    global cv
+    cv = Canvas(); drawn.clear(); wt['paint'](widget)
+    return [t for t, c, x in drawn]
+MODEL_NAME[0] = 'Stats Plane'
+for _ in range(3): wake_only(0.4)               # a fresh model: no flight yet
+widget.statsPage, widget.sumAuto = 1, 1
+st['armed'] = False
+for _ in range(5): step(0.2)
+assert 'No flight yet' in page_txt(4), 'stats page before any flight'
+widget.page = 3 if not NATIVE else 2
+for _ in range(4):
+    if widget.page == 4: break
+    wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+assert widget.page == 4, 'On: stats page in the cycle before the first flight (page %s)' % widget.page
+st['armed'] = True
+for _ in range(100): step(0.2)                  # 20 s armed
+txt = page_txt(4)
+assert 'FLIGHT TIME (NOW)' in txt, 'in flight the stats page shows the flight in progress %s' % txt[:12]
+for _ in range(100): step(0.2)                  # opened by hand: stays, also past 15 s
+assert widget.page == 4, 'stats page opened by hand stays in flight (page %s)' % widget.page
+for statsPage in (1, 0):
+    widget.statsPage = statsPage
+    widget.page = 1
+    st['armed'] = True
+    for _ in range(60): step(0.2)
+    st['armed'] = False
+    for _ in range(10): step(0.2)
+    assert widget.page == 4, 'statsPage %d: disarm opens the summary' % statsPage
+    assert 'FLIGHT TIME' in page_txt(4)
+    for _ in range(40): step(0.2)               # 8 s more (about 10 s open): still there
+    assert widget.page == 4, 'statsPage %d: summary still open before 15 s' % statsPage
+    for _ in range(40): step(0.2)               # past 15 s (opened ~1 s into the disarm steps): back to main
+    assert widget.page == 1, 'statsPage %d: summary closed to main after 15 s (page %s)' % (statsPage, widget.page)
+# moving away first cancels the timer
+st['armed'] = True
+for _ in range(60): step(0.2)
+st['armed'] = False
+for _ in range(10): step(0.2)
+assert widget.page == 4
+page_txt(4)                                     # drawn (on the radio every update): seen
+widget.page = 2
+for _ in range(100): step(0.2)
+assert widget.page == 2, 'left the summary by hand: no jump back to main'
+widget.statsPage = 0
+print('flight stats page OK')
+
+# ---- PARAMS page (6): ArduPilot only, S.Port / F.Port (MAVlite to a copy of ArduPilot's code)
+sys.path.insert(0, HERE)
+from fake_mavlite import FakeAP
+
+def _plist_row(name, qon, path):
+    # the row number (1-based) of a parameter on the PARAMS page, from plist.lua (Q rows hidden when not qon)
+    import re as _re
+    n = 0
+    for _l in open(path, encoding='utf-8'):
+        m = _re.match(r'\s*\{ "[^"]+", "([A-Z0-9_]+)"', _l)
+        if not m: continue
+        if not qon and '"q" }' in _l: continue
+        n += 1
+        if m.group(1) == name: return n
+    raise KeyError(name)
+_PL = os.path.join(SRC, 'x20' if W > 480 else 'x18', 'plist.lua')
+NEWNAV = True   # two-column PARAMS page on X20 and X18 (Marcin 2026-11-15)
+
+def _plist_pos(name, qon, path):
+    # (tab number, row in that tab), both 0-based, on the two-column PARAMS page (X20 / EdgeTX)
+    import re as _re
+    tabs, rows = [], {}
+    for _l in open(path, encoding='utf-8'):
+        m = _re.match(r'\s*\{ "([^"]+)", "([A-Z0-9_]+)"', _l)
+        if not m: continue
+        if not qon and '"q" }' in _l: continue
+        if m.group(1) not in rows: tabs.append(m.group(1)); rows[m.group(1)] = []
+        rows[m.group(1)].append(m.group(2))
+        if m.group(2) == name: return tabs.index(m.group(1)), rows[m.group(1)].index(name)
+    raise KeyError(name)
+def _goto(name, qon):
+    if not NEWNAV:
+        for _ in range(_plist_row(name, qon, _PL)): KEY('KEY_ROTARY_RIGHT')
+        return
+    t, r = _plist_pos(name, qon, _PL)
+    for _ in range(20): KEY('KEY_ROTARY_LEFT')
+    for _ in range(t): KEY('KEY_ROTARY_RIGHT')
+    KEY('KEY_ENTER_BREAK')
+    for _ in range(r): KEY('KEY_ROTARY_RIGHT')
+_ap = FakeAP({'Q_ENABLE': 1.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
+              'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
+              'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'Q_A_RAT_RLL_P': 0.135}, dup=True)
+def _ap_push(t):
+    if int(t['primId']) == 0x30: _ap.uplink(int(t['appId']), int(t['value']))
+    return True
+def _ap_pop():
+    for tx in _ap.texts: send_text(tx, 4) if 'send_text' in globals() else None
+    _ap.texts.clear()
+    if not _ap.down: return None
+    return L.table_from(list(_ap.down.pop(0)))
+_old = (G._SPORTPUSH, G._POPMSPSPORT)
+G._SPORTPUSH, G._POPMSPSPORT = _ap_push, _ap_pop
+KEY = lambda k: wt['event'](widget, consts['EVT_KEY'], consts[k], 0, 0)
+assert widget.paramsPage == 0, 'params page off by default'
+widget.paramsPage = 1; widget.page = 2 if NATIVE else 3
+wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+if NATIVE:
+    assert widget.page != 6, 'params page: ArduPilot only, page %s' % widget.page
+    print('params page not offered for INAV/Betaflight OK')
+else:
+    assert widget.page == 6, 'params page in the cycle for ArduPilot: %s' % widget.page
+    _gets = [0]
+    _orig_crsf = G.crsf
+    G.crsf = L.eval('function(c, count) return { getSensor = function(...) count() return c.getSensor(...) end } end')(_orig_crsf, lambda: _gets.__setitem__(0, _gets[0] + 1))
+    for _ in range(40): step(0.2)
+    G.crsf = _orig_crsf
+    if not SPORT:
+        assert _gets[0] == 0, 'params page over CRSF made %d CRSF sensor(s) of its own' % _gets[0]
+        print('params page over CRSF: no second CRSF sensor (sends through telem.lua) OK')
+    render('params_%s.png' % tag, 6)
+    if NEWNAV:
+        for _ in range(_plist_pos('TECS_CLMB_MAX', True, _PL)[0]): KEY('KEY_ROTARY_RIGHT')
+        step(0.2)
+        render('params_tabhi_%s.png' % tag, 6)       # TECS highlighted, FLIGHT still open
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(30): step(0.2)
+        for _ in range(20): KEY('KEY_ROTARY_RIGHT')   # stops at the last TECS row
+        step(0.2)
+        render('params_tecs_%s.png' % tag, 6)
+        wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_START'], W // 2, 4)   # the top bar: no button there
+        wt['event'](widget, consts['EVT_TOUCH'], consts['TOUCH_END'], W // 2, 4)
+        if SPORT:
+            assert widget.page == 6, ('a tap off the buttons keeps the params page', widget.page)
+        else:   # CRSF here = the FC doesn't answer: that screen has no buttons, a tap still turns the page
+            assert widget.page == 1, ('a tap on the doesnt-answer screen turns the page', widget.page)
+            widget.page = 6
+        KEY('KEY_RTN_BREAK')                          # rows -> tab column
+    if SPORT:
+        _armed0, _sum0 = st['armed'], widget.sumAuto
+        widget.sumAuto = 0     # no flight summary on the disarm below (the sim never draws it, so it keeps opening)
+        st['armed'] = True; step(0.2)
+        _goto('AIRSPEED_CRUISE', True)
+        for _ in range(40): step(0.2)   # the selected row is read first
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        for _ in range(4): KEY('KEY_ROTARY_RIGHT')
+        render('params_armed_%s.png' % tag, 6)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        assert _ap.sets == 0, 'armed: nothing written'
+        st['armed'] = False
+        for _ in range(3): step(0.2)
+        widget.page = 6        # the disarm opened the flight summary (summary on disarm)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        for _ in range(4): KEY('KEY_ROTARY_RIGHT')
+        render('params_edit_%s.png' % tag, 6)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(10): step(0.2)
+        assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('saved', _ap.p['AIRSPEED_CRUISE'])
+        render('params_saved_%s.png' % tag, 6)
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        _goto('ARMING_SKIPCHK', True)
+        for _ in range(10): step(0.2)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)
+        for _ in range(5): step(0.2)
+        render('params_skipchk_%s.png' % tag, 6)
+        for _ in range(3): KEY('KEY_ROTARY_LEFT')          # cursor 1 -> Save -> Back -> All off
+        KEY('KEY_ENTER_BREAK')                             # All off
+        render('params_skipchk_alloff_%s.png' % tag, 6)
+        for _ in range(2): KEY('KEY_ROTARY_RIGHT')         # -> Save
+        KEY('KEY_ENTER_BREAK')
+        for _ in range(10): step(0.2)
+        assert abs(_ap.p['ARMING_SKIPCHK'] - -1.0) < 1e-6, ('All off saves -1', _ap.p['ARMING_SKIPCHK'])
+        print('ARMING_SKIPCHK All off: -1 saved and verified')
+        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        for _ in range(60): step(0.2)                         # the rest, Q rows included (Q_ENABLE 1)
+        render('params_q_%s.png' % tag, 6, )
+        st['armed'], widget.sumAuto = _armed0, _sum0
+        for _ in range(3): step(0.2)
+        print('params page S.Port: armed view-only, read, edit, save verified OK')
+    if not NATIVE: widget.page = 6   # (the re-arm above can open the flight summary first)
+    _pg0 = widget.page
+    _r = wt['event'](widget, consts['EVT_KEY'], consts['KEY_RTN_BREAK' if NEWNAV else 'KEY_ENTER_BREAK'], 0, 0)
+    assert widget.page == 1, ('RTN in the tab column (X18: ENTER, no row) leaves the params page', _pg0, widget.page, _r)
+    if widget.apMission != 1:
+        # the PARAMS code leaves memory 10 s after the page is left, and comes back when opened
+        _mem = lambda: L.eval('function() collectgarbage("collect") return collectgarbage("count") end')()
+        _m_open = _mem()
+        for _ in range(25): step(0.2)          # 5 s on the main page: still loaded
+        _m5 = _mem()
+        for _ in range(35): step(0.2)          # past 10 s: unloaded
+        _m12 = _mem()
+        assert _m_open - _m12 > 100, ('params unloaded after 10 s', round(_m_open), round(_m5), round(_m12))
+        assert _m_open - _m5 < 50, ('params kept for 10 s', round(_m_open), round(_m5))
+        widget.page = 6
+        for _ in range(25): step(0.2)
+        render('params_reopen_%s.png' % tag, 6)
+        print('params page: freed %d KB 10 s after leaving (%d -> %d KB), reopens OK' % (_m_open - _m12, _m_open, _m12))
+        widget.page = 1
+# ---- ArduPilot mission download + editor: editor on the X20 family only (X18: none)
+if SPORT and not NATIVE:
+    _ap.mission = [(16, 0, 0.0, 0.0, 0.0, 0.0, 0.0), (22, 3, st['lat'] + 0.001, st['lon'] + 0.001, 40.0, 0.0, 0.0)]
+    for _i in range(4):
+        _ap.mission.append((16, 3, st['lat'] + 0.003 * (_i + 1), st['lon'] + 0.002 * (_i % 2) - 0.001, 60.0, 0.0, 0.0))
+    _ap.mission.append((21, 3, st['lat'] - 0.001, st['lon'], 0.0, 0.0, 0.0))
+    if os.environ.get('OD_WPFILE'):   # a QGC WPL 110 file instead (item 0 = home)
+        _ap.mission = []
+        for _ln in open(os.environ['OD_WPFILE'], encoding='utf-8').read().splitlines()[1:]:
+            _f = _ln.split('	')
+            if len(_f) >= 12:
+                _ap.mission.append((int(_f[3]), int(_f[2]), float(_f[8]), float(_f[9]), float(_f[10]), float(_f[4]), float(_f[6]), float(_f[5])))
+        print('  mission from', os.environ['OD_WPFILE'], len(_ap.mission), 'items')
+    _ap.mstamp += 1000
+    widget.apMission, widget.page, widget.sumAuto = 1, 2, 0
+    for _ in range(30): step(0.2)
+    render('map_apmission_%s.png' % tag, 2)
+    if os.environ.get('OD_PROFILE'):
+        # where the instructions go with the mission downloaded: main page, then map page,
+        # flying the circle, 30 s each (sampled every 25 instructions)
+        import statistics
+        PAINT[0] = True
+        st['armed'] = True
+        for _pg in (1, 2):
+            widget.page = _pg
+            for _ in range(10): step(0.2)
+            CNT.clear(); DIST.clear(); WORST.clear()
+            L.execute('PROF = {} PROF_ON = true')
+            _calls = {'paint': [], 'wakeup': []}
+            _old_counted = {}
+            _nsteps = int(os.environ.get('OD_PROFILE_STEPS', '60'))
+            _win = []
+            for _k in range(_nsteps):
+                _before = {k: len(v) for k, v in DIST.items()}
+                step(0.2)
+                if _k % 25 == 24:   # every 5 s of flight: the worst call in that window
+                    _win.append({k: max(v[-100:]) for k, v in DIST.items()})
+            print('   per 5 s window (worst call):'); [print('     t=%3ds %s' % ((i + 1) * 5, w)) for i, w in enumerate(_win)]
+            L.execute('PROF_ON = false')
+            prof = L.eval('PROF')
+            items = sorted(((str(k), int(v)) for k, v in prof.items()), key=lambda kv: -kv[1])
+            tot = sum(v for _, v in items)
+            print('==== page %d: worst per call %s, sampled total %d' % (_pg, {k: v for k, v in CNT.items()}, tot))
+            for k, v in DIST.items():
+                v2 = sorted(v); print('   %s: calls %d median %d p95 %d max %d' % (k, len(v2), v2[len(v2)//2], v2[int(len(v2)*0.95)], v2[-1]))
+            for k, (n, lines) in WORST.items():
+                print('   -- worst %s (%d):' % (k, n)); [print('        %6d %s' % (c, l)) for l, c in lines[:18]]
+            DIST.clear(); WORST.clear()
+            for k, v in items[:30]: print('   %6d %5.1f%%  %s' % (v, 100.0 * v / tot, k))
+        raise SystemExit(0)
+    TE = consts['EVT_TOUCH']
+    def _tap(x, y):
+        wt['event'](widget, TE, consts['TOUCH_START'], int(x), int(y))
+        wt['event'](widget, TE, consts['TOUCH_END'], int(x), int(y))
+    eb = widget.editBtn
+    if W <= 480:
+        assert not eb, 'X18: no EDIT button (mission editor is X20 / TX16S only)'
+        assert not os.path.exists(os.path.join(SRC, 'x18', 'medit.lua')), 'X18 copy carries no editor'
+        print('X18: mission download yes, editor none OK')
+    else:
+        assert eb, 'X20: EDIT button on the map page'
+        _tap(eb.x + eb.w / 2, eb.y + eb.h / 2)
+        _getE = L.execute('''return function(W) for i = 1, 300 do local n, v = debug.getupvalue(W.event0 or W.event, i)
+            if n == nil then break end if n == 'ED' then return v end end end''')
+        ED = _getE(wt)
+        assert ED and ED.active, 'X20: EDIT opens the editor'
+        cv = Canvas(); wt['paint'](widget)
+        d0 = ED._draft()[0]; n0 = len(d0)
+        _tap(W * 0.72, H * 0.40)
+        d1, s1 = ED._draft()[0], ED._draft()[1]
+        assert len(d1) == n0 + 1 and d1[s1].alt == 60, ('X20: tap adds a waypoint at 60 m', len(d1), d1[s1].alt)
+        cv = Canvas(); wt['paint'](widget)
+        bl = ED._boxes(); bx = {str(bl[i].k): bl[i] for i in range(1, len(bl) + 1)}
+        def _btn(k): b = bx[k]; _tap(b.x + b.w / 2, b.y + b.h / 2)
+        _btn('+'); assert ED._draft()[0][s1].alt == 61, ('X20: + = altitude +1 m', ED._draft()[0][s1].alt)
+        _btn('-'); assert ED._draft()[0][s1].alt == 60, ('X20: - = altitude -1 m', ED._draft()[0][s1].alt)
+        _btn('Type')
+        assert ED._draft()[0][ED._draft()[1]].cmd == 17, 'X20: Type -> LOITER UNLIM'
+        _btn('Type'); _btn('Type'); _btn('Type'); _btn('+')
+        d2, s2 = ED._draft()[0], ED._draft()[1]
+        assert d2[s2].cmd == 21, ('X20: Type x4 -> Land', d2[s2].cmd)
+        # a point far above the map: its legs must stop at the map edge, not cross the top bar
+        # (X20S 2026-11-15: route lines over DISARMED / the info line)
+        _bar = int(H * 0.09)
+        cv = Canvas(); wt['paint'](widget); _top0 = cv.img.crop((0, 0, W, _bar)).tobytes()
+        _lat0 = d2[s2].lat; d2[s2].lat = _lat0 + 0.02
+        cv = Canvas(); wt['paint'](widget); _top1 = cv.img.crop((0, 0, W, _bar)).tobytes()
+        render('medit_offmap_%s.png' % tag, 2)
+        d2[s2].lat = _lat0
+        assert _top0 == _top1, 'X20 editor: a leg to a point off the map is drawn over the top bar'
+        print('X20 mission editor: route clipped to the map (point 2 km off the top) OK')
+        render('medit_%s.png' % tag, 2)
+        _btn('Send')
+        for _ in range(40): step(0.2)
+        assert len(_ap.mission) == len(d2) + 1 and _ap.mission[s2][0] == 21, ('X20: the aircraft holds the edited mission', len(_ap.mission))
+        render('medit_sent_%s.png' % tag, 2)
+        cv = Canvas(); wt['paint'](widget)
+        bl = ED._boxes(); bx = {str(bl[i].k): bl[i] for i in range(1, len(bl) + 1)}
+        _btn('Done')
+        assert not ED.active and widget.page == 2, 'X20: Done leaves the editor'
+        print('X20 mission editor: EDIT, add, +1 m / -1 m, Type, Send (written + verified), Done OK')
+    widget.apMission = 0
+    step(0.2)
+widget.paramsPage, widget.page = 0, 1
+G._SPORTPUSH, G._POPMSPSPORT = _old

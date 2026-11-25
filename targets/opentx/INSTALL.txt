@@ -1,0 +1,63 @@
+OmniDeck 0.2.0-otx-test2 - TEST BUILD FOR OpenTX 2.3 colour radios (480 x 272: RadioMaster TX16S, FrSky X10 / X12)
+One telemetry display for ArduPilot, INAV and Betaflight.
+
+THIS IS A TEST BUILD. It has only run in the OmniDeck simulator so far, not on a radio. Please do
+not rely on it in flight: keep the radio's own telemetry alarms and the flight controller's
+failsafes as usual.
+
+
+WHAT'S NEW IN OpenTX TEST 2 (since 0.2.0-otx1)
+- Main page: a panel at the top right, above the data blocks. Pick it in SYS > Tools >
+  OmniDeck Setup > "Top-right panel":
+    OmniDeck logo  (default)
+    Stratos logo
+    Radar          home and the aircraft, as in iNav LuaTelemetry's radar: the scale follows
+                   the distance flown, the aircraft is an arrow at its heading, the distance
+                   is at the bottom left, W and E show when the map orientation is north up
+- Lighter on OpenTX's Lua limit (OpenTX stops a widget that goes over it with "CPU limit"):
+  the main page and the map page draw most lines, the ground and the data blocks with
+  OpenTX's own calls, and only ArduPilot's telemetry frames are kept from the S.Port queue.
+  In the simulator, with telemetry arriving three times faster than normal, the heaviest
+  screen update now stays at about 90 % of the limit or less (the map page over S.Port
+  was at 100 %).
+- Map tiles are searched for only while the map page shows.
+- If the Lua limit is reached, OmniDeck no longer tries to carry on drawing; and nothing is
+  written to the SD card while drawing: error.log is gone (an error stays on the screen in
+  red), and the last GPS position is saved once per landing instead of every minute.
+- Changed since otx1: audio.lua, cfg.lua, etx.lua, hud.lua, map.lua, telem.lua, tiles.lua and
+  ui.lua in WIDGETS/OmniDeck, new folder logos/.
+
+
+INSTALL
+1. Copy the WIDGETS and SCRIPTS folders from this zip to the root of the radio's SD card
+   (WIDGETS/OmniDeck/ and SCRIPTS/TOOLS/OmniDeck Check.lua, OmniDeck Setup.lua).
+   If an older WIDGETS/OmniDeck folder is there, delete it first (keep a copy of your
+   own voice pack if you added one).
+2. Restart the radio.
+3. SYS > Tools (or the radio's tools list) > OmniDeck Check: run it and take a photo of the screen.
+   It loads every file the way the widget does and says what fails, if anything.
+4. On a telemetry screen use a one-zone layout and add the widget OmniDeck, then make it full screen.
+5. SYS > Tools > OmniDeck Setup: voice, units, link and the top-right panel.
+
+
+WHAT IS DIFFERENT ON OpenTX
+OpenTX gives a widget half of EdgeTX's Lua budget per screen update and lacks several drawing
+functions, so the OpenTX version is lighter:
+- the main page has the logo or radar panel instead of a minimap (the Map page is there)
+- no missions: no route on the map and no INAV mission download (the next waypoint from
+  ArduPilot is still shown)
+- no vertical-speed bar beside the altitude tape
+- six data blocks: MAX AS and MAX GS are left out (both are in the flight summary after landing)
+- the horizon ladder has no numbers, and arrows are drawn as outlines
+
+
+PLEASE REPORT
+- the radio model and its OpenTX version
+- the OmniDeck Check photo
+- the flight controller, its version and the radio link (CRSF / ELRS / S.Port / F.Port)
+- a photo of page 5 (Sensor check), after some time with telemetry
+- photos of the main page with the panel set to Logo and to Radar
+- any message such as "CPU limit", "Script syntax error" or "Script killed", and on which page it
+  appeared; a photo of the screen helps most
+- whether the main page and the map page draw correctly (text running into other text, lines
+  outside their box), and how smoothly the horizon moves

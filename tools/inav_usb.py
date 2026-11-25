@@ -4,7 +4,7 @@ Check OmniDeck's INAV mission decoding against a real INAV board over USB.
 Reads the FC variant/version, mission info and every waypoint with plain MSPv1
 over the USB serial port (read-only: nothing is written to the board). Each
 reply is then cut into telemetry chunks exactly as INAV sends them over S.Port
-and CRSF, fed through scripts/omnideck/mspclient.lua, and the Lua result is
+and CRSF, fed through targets/ethos/x20/mspclient.lua, and the Lua result is
 compared with the bytes decoded here.
 
   python tools/inav_usb.py [COMx]        (port auto-detected if omitted)
@@ -18,7 +18,7 @@ import serial, serial.tools.list_ports
 from lupa import lua54
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, '..', 'scripts', 'omnideck')
+SRC = os.path.join(HERE, '..', 'targets', 'ethos', os.environ.get('OD_ETHOS', 'x20'))   # OD_ETHOS=x18 for the X18 copy
 
 
 def pick_port():
