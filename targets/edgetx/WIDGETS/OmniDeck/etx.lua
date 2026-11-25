@@ -559,7 +559,7 @@ end
 -- newest PASS_MAX; older ones are dropped (and counted) if the screen falls behind.
 local PASS_MAX = 24
 local crsfPass, crsfMsp = {}, {}
-local crsfEnv = {}   -- mLRS cbridge frames (0xAA), newest 16 kept
+local crsfEnv = {}   -- mLRS cbridge frames (0x82 with 0x66 first, or 0xAA), newest 16 kept
 -- OpenTX keeps only the newest few passthrough frames (it has no catch-up after drawing, so a
 -- long queue would show values a second old), in a ring of 4 that is overwritten in place, so
 -- emptying a backlog after a pause costs a few steps per frame, not a table each. Status text
@@ -575,7 +575,7 @@ local function crsfFill(want)
     ST.raw = ST.raw + 1
     if cmd == 0x7B then
       if #crsfMsp < 8 then crsfMsp[#crsfMsp + 1] = { cmd, data } end
-    elseif cmd == 0xAA then
+    elseif cmd == 0xAA or (cmd == 0x82 and data and data[1] == 0x66) then   -- (0x82 0x66: not mLRS's own Lua replies)
       if #crsfEnv >= 16 then table.remove(crsfEnv, 1) end
       crsfEnv[#crsfEnv + 1] = { cmd, data }
     elseif cmd == 0x80 or cmd == 0x7F then
@@ -601,7 +601,7 @@ end
 local crsfSensor = {
   popFrame = function(self, lo, hi)
     crsfFill(lo)
-    if OTX and lo == 0x7F then   -- (0x7B MSP and 0xAA bridge: the queues below)
+    if OTX and lo == 0x7F then   -- (0x7B MSP and the 0x82 / 0xAA bridge: the queues below)
       if #otxText > 0 then return 0x80, table.remove(otxText, 1) end   -- texts first, in order
       if ringN == 0 then return nil end
       local c, d = ringC[ringHead], ringD[ringHead]

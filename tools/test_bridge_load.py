@@ -51,7 +51,7 @@ def pop(qi, lo, hi):
 def deliver(cmd, data):
     for q in sensors: q.append((cmd, list(data)))
 G.PYNEW, G.PYPOP = pynew, pop
-G.PYPUSH = lambda c, d: (ap.from_radio(c, [d[i] for i in range(1, len(d) + 1)]) if c == 0xAA else None, True)[1]
+G.PYPUSH = lambda c, d: (ap.from_radio(c, [d[i] for i in range(1, len(d) + 1)]) if c in (0x81, 0xAA) else None, True)[1]
 L.execute('''
 crsf = { getSensor = function()
   local qi = PYNEW()
@@ -100,9 +100,9 @@ def frames():
         return fr
     budget = ap.bytes_per_tick
     while ap.out and budget > 0:
-        n = min(len(ap.out), frnd.randint(50, 58))
+        n = min(len(ap.out), frnd.randint(50, 57))
         budget -= n
-        fr.append([0, n] + list(ap.out[:n])); ap.out = ap.out[n:]
+        fr.append(ap.envelope(ap.out[:n])); ap.out = ap.out[n:]   # (type, payload)
     return fr
 S = T.s
 def passthrough(t):
@@ -114,7 +114,7 @@ def step():
     state['t'] += DT
     passthrough(state['t'])
     stream()
-    for f in frames(): deliver(0xAA, f)
+    for c, f in frames(): deliver(c, f)
     if OLD: T.mavUsedAt = None
     if COUNT: COSTS.append(CNT(BOTH, T, P, S))
     elif MEM:

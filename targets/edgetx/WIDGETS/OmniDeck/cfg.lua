@@ -54,6 +54,8 @@ C.ITEMS = {
   { "beep", "Message beep", { { 1, "Every message" }, { 2, "Warnings and errors" }, { 0, "Off" } } },
   { "batCap", "Battery mAh (INAV/BF only)", { 0, 30000, 100, "mAh", 1 } },
   { "cells", "Battery cells (0 = auto)", { 0, 14, 1, "", 1 } },
+  -- the battery block's big figure; the other one is its small label (cells from the line above)
+  { "battMain", "Battery block shows", { { 0, "Battery voltage" }, { 1, "Average cell" } } },
   { "lowVolt", "Low voltage alarm (per cell)", { 0, 450, 5, "V", 100 } },
   { "critVolt", "Critical voltage alarm (per cell)", { 0, 450, 5, "V", 100 } },
   { "lowAlt", "Low altitude alarm (0 = off)", { 0, 3000, 10, "", 1 } },
@@ -62,7 +64,7 @@ C.ITEMS = {
 C.DEFAULTS = { linkMode = 0, voice = "", beep = 1, spdUnit = 0, altUnit = 0, effUnit = 0, orient = 0,
                zoomMode = 0, zoomSrc = "", tileSet = "*", trail = 1, startPage = 1, pageSwitch = "", pageSwMode = 0, sumAuto = 1, batCap = 0, lowVolt = 0, critVolt = 0,
                cells = 0, lowAlt = 0, inavWp = 0, panel = -1, topPanel = -1, msgPage = 0, statsPage = 0,
-               checkPage = 0, paramsPage = 0, flightEdit = 0, apMission = 0 }
+               checkPage = 0, paramsPage = 0, flightEdit = 0, apMission = 0, battMain = 0 }
 
 -- EdgeTX: io.read(f, n) / io.write(f, s); standard Lua (simulator): f:read / f:write
 local function fread(f)

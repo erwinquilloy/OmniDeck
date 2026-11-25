@@ -6,6 +6,10 @@ _SETTING_INFO 0x1007, MSP2_INAV_STATUS 0x2000), packed as msp_shared.c sends the
   chunk = status (0x40 v2 | 0x10 first | 0x80 error | seq) + bytes
   CRSF:   request type 0x7A [0xC8, 0xEA, chunk...], reply type 0x7B [0xEA, 0xC8, chunk...]
   S.Port: request primId 0x30 (appId = bytes 1-2, value = bytes 3-6), reply primId 0x32
+  bridge=True: mLRS (mspX) with Tx Ser Port = cbridge and the MSP-over-cbridge Tx firmware: CRSF MSP
+          (0x7A) is dropped; raw MSPv2 frames ($X< / $X> / $X!) go in bridge frames: mLRS "mb" envelopes
+          0x81 / 0x82 (0x66, seq, size, up to 57) or 0xAA, answered in the type last received
+          [chunk byte, size, up to 58 bytes]
 """
 import struct
 
@@ -49,7 +53,9 @@ _FMT = {0: '<B', 1: '<b', 2: '<H', 3: '<h', 4: '<I', 5: '<f'}
 
 
 class FakeInav:
-    def __init__(self, ver=(9, 1, 0)):
+    def __init__(self, ver=(9, 1, 0), bridge=False):
+        self.bridge, self._raw = bridge, []
+        self.bridge_mb, self.bridge_types = True, set()   # mLRS: mb (0x82) before the radio speaks
         self.ver = list(ver)
         self.set = settings()
         self.prof = {'ctl': 0, 'mix': 0}
@@ -124,7 +130,46 @@ class FakeInav:
             else:
                 self.down.append(('crsf', [0xEA, 0xC8] + ch))
 
+    @staticmethod
+    def _crc8x(c, b):
+        c ^= b
+        for _ in range(8): c = ((c << 1) ^ 0xD5) & 0xFF if c & 0x80 else (c << 1) & 0xFF
+        return c
+
+    def _bridge_in(self, raw):
+        b = self._raw
+        b += raw
+        while True:
+            while b and b[0] != 0x24: b.pop(0)
+            if len(b) < 8: return
+            if b[1] != 0x58 or b[2] != 0x3C: b.pop(0); continue
+            size = b[6] | (b[7] << 8)
+            if len(b) < 9 + size: return
+            frame, crc = b[3:8 + size], b[8 + size]
+            del b[:9 + size]
+            c = 0
+            for x in frame: c = self._crc8x(c, x)
+            if c != crc: continue
+            cmd = frame[1] | (frame[2] << 8)
+            self.req.append(cmd)
+            out, err = self.reply(cmd, frame[5:])
+            if out is None: continue
+            body = [0, cmd & 0xFF, cmd >> 8, len(out) & 0xFF, len(out) >> 8] + out
+            c = 0
+            for x in body: c = self._crc8x(c, x)
+            f = [0x24, 0x58, 0x21 if err else 0x3E] + body + [c]
+            k = 57 if self.bridge_mb else 58
+            for i in range(0, len(f), k):
+                ch = f[i:i + k]
+                self.down.append(('bridge', (0x82, [0x66, 0, len(ch)] + ch) if self.bridge_mb else (0xAA, [0, len(ch)] + ch)))
+
     def crsf_push(self, cmd, data):
+        if self.bridge:
+            if cmd == 0x81 and len(data) >= 3 and data[0] == 0x66:
+                self.bridge_mb = True; self.bridge_types.add(cmd); self._bridge_in(list(data[3:3 + data[2]]))
+            elif cmd == 0xAA and len(data) >= 2:
+                self.bridge_mb = False; self.bridge_types.add(cmd); self._bridge_in(list(data[2:2 + data[1]]))
+            return True
         if cmd == 0x7A and len(data) >= 3: self.chunk(list(data[2:]), 'crsf')
         return True
 

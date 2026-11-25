@@ -52,10 +52,16 @@ def sd_path(p): return os.path.join(SD, *[x for x in str(p).split('/') if x])
 if os.environ.get('OD_PANEL') is not None:
     with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('panel=%s\nvoice=Aria\n' % os.environ['OD_PANEL'])   # with the voice, as a real settings file (none = voice off)
 
+# OD_BATTMAIN=1: the battery block shows the average cell (OmniDeck Setup "Battery block shows")
+if os.environ.get('OD_BATTMAIN') is not None:
+    with open(sd_path('/WIDGETS/OmniDeck/Sim_Plane.cfg'), 'w') as _f: _f.write('battMain=%s\nvoice=Aria\n' % os.environ['OD_BATTMAIN'])
+
 # ------------------------------------------------------------------ drawing
 # approximate EdgeTX colour-screen font heights at 480x272 (pixels)
 FONT_PX = {0: 15, 0x200: 12, 0x300: 20, 0x400: 28, 0x500: 48, 0x600: 9}
-if W >= 800: FONT_PX = {0: 20, 0x200: 15, 0x300: 26, 0x400: 36, 0x500: 64, 0x600: 12}
+# 800x480 (TX16S MK3): EdgeTX's 'lrg' font set is 1.375x the 480x272 one (radio/src/fonts/lvgl/
+# make_fonts.sh: STD 22 vs 16, XS 18 vs 13, L 33 vs 24, XL 44 vs 32, XXL 88 vs 64, XXS 12 vs 9)
+if W >= 800: FONT_PX = {0: 21, 0x200: 17, 0x300: 28, 0x400: 39, 0x500: 66, 0x600: 12}
 fonts = {k: ImageFont.truetype('C:/Windows/Fonts/arialbd.ttf' if k != 0x600 else 'C:/Windows/Fonts/arial.ttf', v)
          for k, v in FONT_PX.items()}
 def font_of(flags): return fonts.get(int(flags or 0) & 0xF00, fonts[0])
@@ -83,9 +89,15 @@ def rgb(r, g=None, b=None):
     return (int(r) << 16) | (int(g) << 8) | int(b)
 def col(): c = colors.get(CUSTOM, 0); return ((c >> 16) & 255, (c >> 8) & 255, c & 255)
 def set_color(i, c): DRAWS['setcolor'] += 1; colors[int(i)] = int(c)
+# EdgeTX's lcd.sizeText height is the LVGL font's line_height, and drawText puts the top of that
+# line box at y (baseline = y + line_height - base_line). Taken from EdgeTX radio/src/fonts/lvgl/
+# std (480x272, 480x320) and lrg (800x480) lv_font_en_*.c: { line_height, base_line } per size flag.
+LINE_M = {0: (21, 5), 0x200: (17, 4), 0x300: (29, 6), 0x400: (40, 9), 0x500: (69, 15), 0x600: (12, 3)}
+if W >= 800: LINE_M = {0: (27, 6), 0x200: (23, 5), 0x300: (42, 9), 0x400: (55, 12), 0x500: (93, 20), 0x600: (17, 4)}
+def line_m(flags): return LINE_M.get(int(flags or 0) & 0xF00, LINE_M[0])
 def size_text(t, flags=0):
     f = font_of(flags); b = f.getbbox(str(t))
-    return b[2] - b[0], f.size + 2
+    return b[2] - b[0], line_m(flags)[0]
 # OpenTX: text as the radio draws it, Roboto at OpenTX's sizes (radio/src/fonts/480x272/
 # CMakeLists.txt) with each glyph advanced by OpenTX's own widths, read from the W_* tables in
 # etx.lua so the simulator and the widget measure alike. The fonts are OpenTX's copies of
@@ -122,7 +134,9 @@ def draw_text(x, y, t, flags=0):
     if flags & 0x10000: x = x - w / 2          # CENTER
     elif flags & 0x20000: x = x - w            # RIGHT
     cv.check('text ' + str(t), x, y, x + w, y + h)
-    cv.d.text((x, y), str(t), fill=col(), font=font_of(flags))
+    lh, base = line_m(flags)
+    fnt = font_of(flags)
+    cv.d.text((x, y + lh - base - fnt.getmetrics()[0]), str(t), fill=col(), font=fnt)
 def frect(x, y, w, h, flags=0):
     DRAWS['frect'] += 1
     if w <= 0 or h <= 0: return
@@ -846,7 +860,9 @@ frame(G.EVT_VIRTUAL_ENTER)
 if NATIVE:
     # ---- INAV PARAMS page (EdgeTX since 1.0.0c, INAV 9.1+ over MSPv2; tools/fake_inav_settings.py)
     from fake_inav_settings import FakeInav
-    _fi = FakeInav()
+    # OD_MLRS_BRIDGE=1: mLRS cbridge with the MSP-over-cbridge Tx firmware (raw MSP in 0x81 / 0x82 frames)
+    _MLRS = os.environ.get('OD_MLRS_BRIDGE') == '1' and not SPORT
+    _fi = FakeInav(bridge=_MLRS)
     _lst = lambda t: [int(t[k]) for k in range(1, len(t) + 1)] if not isinstance(t, (list, tuple)) else list(t)
     G.crossfireTelemetryPush = lambda cmd, data: _fi.crsf_push(int(cmd), _lst(data))
     G.sportTelemetryPush = lambda *a: _fi.sport_push(*[int(x) for x in a[:4]]) if len(a) >= 4 else True
@@ -855,6 +871,7 @@ if NATIVE:
             while _fi.down:
                 d = _fi.down.pop(0)
                 if d[0] == 'crsf': crsf_q.append((0x7B, d[1]))
+                elif d[0] == 'bridge': crsf_q.append(d[1])   # (0x82 or 0xAA, payload)
                 else: sport_q.append((0x1B, 0x32, d[1], d[2]))
             step(dt)
     _IPL = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'targets', 'edgetx', 'WIDGETS', 'OmniDeck', 'iplist.lua')
@@ -893,6 +910,9 @@ if NATIVE:
     PRi = _findPR(UIm) or _findPR(widget_def)
     assert PRi is not None and PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi and PRi.inav.state)
     _v = lambda n: PRi.valueOf(n)
+    if not SPORT:
+        assert ('MSP bridge' if _MLRS else 'MSP native') in PRi.debugCore(), ('MSP path picked', PRi.debugCore())
+        print('INAV MSP path (EdgeTX): %s OK' % ('mLRS bridge' if _MLRS else 'native CRSF'))
     def _iwait(name, n=600):
         for _ in range(n):
             if _v(name) is not None: return
@@ -1046,8 +1066,8 @@ if SPORT and not NATIVE:
     frame()
     tx, ty = W * 0.75, H * 0.40
     la_want, lo_want = UIm.MAP.toLatLon(tx, ty)     # the view the tap lands on
+    la_want, lo_want = UIm.MAP.toLatLon(int(tx), int(ty))   # the editor acts on the press, on the view shown
     frame(G.EVT_TOUCH_FIRST, {'x': int(tx), 'y': int(ty)})
-    la_want, lo_want = UIm.MAP.toLatLon(int(tx), int(ty))
     frame(G.EVT_TOUCH_BREAK, {'x': int(tx), 'y': int(ty)})
     d1, s1, _f1 = ED._draft()
     assert len(d1) == n0 + 1 and s1 == s0 + 1, ('tap on the map adds a waypoint after the selected one', len(d1), s1)
@@ -1527,6 +1547,7 @@ if os.path.isfile(sd_path('/SCRIPTS/TOOLS/OmniDeck Setup.lua')):
     st_t.init()
     G_ = L.globals()
     st_t.run(0)
+    cv.img.save(os.path.join(OUT, 'etx_setup_%s.png' % tag))   # the tool draws the whole screen
     # row 1 = Telemetry link: ENTER, NEXT (Auto -> CRSF), ENTER
     for e in ('EVT_VIRTUAL_ENTER', 'EVT_VIRTUAL_NEXT', 'EVT_VIRTUAL_ENTER'): st_t.run(G_[e])
     # down to Speed units (its row in cfg.lua's list, which is grouped and may move), ENTER,

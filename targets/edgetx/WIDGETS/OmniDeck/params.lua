@@ -73,8 +73,10 @@ local function ck(c, b) c = c + b c = c + floor(c / 256) return c % 256 end
 
 -- ---------------------------------------------------------------- MAVLink (mLRS cbridge)
 --[[
-  mLRS with Tx Ser Port = cbridge passes the aircraft's MAVLink stream to the radio in CRSF frames
-  0xAA (chunk byte, size, up to 58 bytes) and takes MAVLink back the same way (telem.lua reads them,
+  mLRS with Tx Ser Port = cbridge passes the aircraft's MAVLink stream to the radio in mLRS "mb"
+  envelope frames 0x82 (0x66, seq, size, up to 57 bytes) and takes MAVLink from it in 0x81 (same
+  layout). 0xAA (the CRSF MAVLink envelope) is read too, never sent: mLRS answers in the type it
+  last got, and 1.5.00 sends broken 0xAA frames (telem.lua reads them,
   T.bridgeAt / T.onMavEnv). Then this page speaks real MAVLink v2 and works with any ArduPilot:
   the MAVlite requests below are translated on the way out and the answers on the way in, so the
   page, the mission download and the editor's Send are the same code for every link.
@@ -138,15 +140,15 @@ local function mavPacket(msgid, pl)
   p[#p + 1] = floor(crc / 256)
   return p
 end
--- queue one MAVLink message as mLRS bridge frames (58 bytes each)
+-- queue one MAVLink message as mLRS bridge frames (57 bytes each)
 local function mavSend(msgid, pl)
   local p = mavPacket(msgid, pl)
   local i = 1
   while i <= #p do
-    local n = math.min(58, #p - i + 1)
-    local e = { 0, n }
-    for k = 0, n - 1 do e[k + 3] = p[i + k] end
-    out[#out + 1] = { crsf = e, cmd = 0xAA }
+    local n = math.min(57, #p - i + 1)
+    local e = { 0x66, 0, n }   -- mLRS "mb" envelope 0x81 (see T.envFrame in telem.lua)
+    for k = 0, n - 1 do e[k + 4] = p[i + k] end
+    out[#out + 1] = { crsf = e, cmd = 0x81 }
     i = i + n
   end
 end
@@ -200,6 +202,8 @@ local function nameBytes(name, t)
 end
 
 local mspViaNow = nil   -- set by service(): the radio link the MSP chunks go over
+-- INAV MSP over the mLRS bridge: path ("native" / "bridge" / nil), raw-frame parser state (see mspSend)
+local BR = { path = nil, st = 0, v2 = true, err = false, hdr = {}, need = 0, buf = {}, crc_ = 0 }
 local function openSensors()
   tx, rx = nil, nil
   if link == "MSP" and mspViaNow == "CRSF" then
@@ -678,6 +682,7 @@ end
 
 -- an mLRS bridge frame (telem.lua): chunk byte, size, MAVLink bytes. Packets run across frames.
 function P.onMavEnv(data)
+  if link == "MSP" and data and mspViaNow == "CRSF" then BR.input(data) return end
   if link ~= "MAVLINK" or not data then return end
   -- read only while the page, the mission download or a send uses it (service() ran lately);
   -- otherwise the stream is let go and picked up again at the next packet start
@@ -765,6 +770,10 @@ local IN = { state = "off", variant = nil, ver = nil, meta = {}, profile = nil, 
              dirty = false, storeReq = false, stored = nil, armed = nil, armedAt = nil, statusAt = -10 }
 P.inav = IN
 local mSeq, mLast = 0, nil  -- request sequence; the last request (repeated on a timeout)
+-- over CRSF the MSP goes one of two ways: "native" (CRSF MSP frames 0x7A / 0x7B: ELRS, Crossfire) or
+-- "bridge" (raw MSP frames inside mLRS bridge frames 0x81 / 0x82: mLRS with Tx Ser Port = cbridge and the
+-- MSP-over-cbridge Tx firmware). nil = not known yet: each request goes both ways, the first
+-- answer decides. ELRS / Crossfire ignore 0x81; mLRS drops 0x7A.
 local mOn, mSize, mCmd, mErr, mBuf, mRxSeq, mPrev = false, 0, 0, false, {}, 0, nil
 local APLIST, ILIST = nil, nil
 
@@ -774,11 +783,38 @@ local function zname(name)
   t[#t + 1] = 0
   return t
 end
+-- MSPv2 checksum (crc8 dvb-s2) over flag .. payload
+-- (EdgeTX: the band / bxor / shl helpers above, Lua 5.2 has no bitwise operators)
+function BR.crc(c, b)
+  c = bxor(c, b)
+  for _ = 1, 8 do
+    c = band(c, 0x80) ~= 0 and band(bxor(shl(c, 1), 0xD5), 0xFF) or band(shl(c, 1), 0xFF)
+  end
+  return c
+end
+-- one request as a raw MSPv2 frame ($X<) in mLRS bridge frames (0x66, seq, size, up to 57 bytes)
+function BR.send(body)
+  local f, c = { 36, 88, 60 }, 0
+  for i = 1, #body do f[#f + 1] = body[i] c = BR.crc(c, body[i]) end
+  f[#f + 1] = c
+  local i = 1
+  while i <= #f do
+    local n = math.min(57, #f - i + 1)
+    local e = { 0x66, 0, n }   -- mLRS "mb" envelope 0x81 (see T.envFrame in telem.lua)
+    for k = 0, n - 1 do e[k + 4] = f[i + k] end
+    out[#out + 1] = { crsf = e, cmd = 0x81 }
+    i = i + n
+  end
+end
 local function mspSend(cmd, payload)
   payload = payload or {}
   mLast = { cmd, payload }
   local body = { 0, cmd % 256, floor(cmd / 256), #payload % 256, floor(#payload / 256) }
   for i = 1, #payload do body[#body + 1] = payload[i] end
+  if mspViaNow == "CRSF" and BR.path ~= "native" then
+    BR.send(body)
+    if BR.path == "bridge" then mOn = false return end
+  end
   local per = mspViaNow == "S.Port" and 5 or 57
   local i, first = 1, true
   repeat
@@ -991,7 +1027,55 @@ local function mspChunk(c)
   end
   mRxSeq = sq
   while i <= #c and #mBuf < mSize do mBuf[#mBuf + 1] = c[i] i = i + 1 end
-  if #mBuf >= mSize then mOn = false mspReply(mCmd, mBuf, mErr) end
+  if #mBuf >= mSize then
+    mOn = false
+    if BR.path == nil and mspViaNow == "CRSF" then BR.path = "native" end
+    if BR.path ~= "bridge" then mspReply(mCmd, mBuf, mErr) end
+  end
+end
+
+-- raw MSP from the mLRS bridge ($X> / $X! version 2, $M> / $M! version 1), byte by byte
+-- EdgeTX: no checksum test on the way in (bit by bit it overran the script's CPU budget in the
+-- simulator); mLRS checks every link frame, and the frame length must match. The payload is
+-- copied in one loop, not a call per byte.
+function BR.byte(x)
+  if BR.st == 0 then if x == 36 then BR.st = 1 end return end
+  if BR.st == 1 then
+    if x == 88 or x == 77 then BR.v2, BR.st = x == 88, 2 else BR.st = 0 end
+    return
+  end
+  if BR.st == 2 then
+    if x == 62 or x == 33 then BR.err, BR.st, BR.hdr = x == 33, 3, {} else BR.st = 0 end
+    return
+  end
+  if BR.st == 3 then   -- header: v2 flag, cmd lo, cmd hi, size lo, size hi; v1 size, cmd
+    BR.hdr[#BR.hdr + 1] = x
+    if #BR.hdr == (BR.v2 and 5 or 2) then
+      BR.need = BR.v2 and (BR.hdr[4] + BR.hdr[5] * 256) or BR.hdr[1]
+      BR.buf, BR.st = {}, BR.need > 0 and 4 or 5
+      if BR.need > 1024 then BR.st = 0 end
+    end
+    return
+  end
+  BR.st = 0   -- 5: the checksum byte ends the frame
+  if BR.path == nil then BR.path = "bridge" end
+  if BR.path ~= "bridge" then return end
+  mspReply(BR.v2 and (BR.hdr[2] + BR.hdr[3] * 256) or BR.hdr[2], BR.buf, BR.err)
+end
+function BR.input(data)
+  local e = 2 + (data[2] or 0)
+  if e > #data then e = #data end
+  local i = 3
+  while i <= e do
+    if BR.st == 4 then
+      local b, n = BR.buf, BR.need
+      while i <= e and #b < n do b[#b + 1] = data[i] i = i + 1 end
+      if #b >= n then BR.st = 5 end
+    else
+      BR.byte(data[i])
+      i = i + 1
+    end
+  end
 end
 P._mspChunk = mspChunk   -- test harness
 
@@ -1100,7 +1184,7 @@ function P.reset()
   focus, tabCur, lastSel = "tabs", nil, nil
   mvSt, mvSkip = 0, 0
   IN.state, IN.variant, IN.ver, IN.meta, IN.profile, IN.plat = "off", nil, nil, {}, nil, nil
-  IN.dirty, IN.storeReq, IN.stored, mspViaNow, mLast = false, false, nil, nil, nil
+  IN.dirty, IN.storeReq, IN.stored, mspViaNow, mLast, BR.path = false, false, nil, nil, nil, nil
   IN.armed, IN.armedAt, IN.statusAt = nil, nil, -10
   if APLIST then LIST = APLIST end
   if LIST then rebuild() end
@@ -1123,7 +1207,7 @@ local function blocked(s)
       return "Parameters need INAV 9.1 or later", (IN.ver and ("This one is INAV " .. IN.ver) or "This INAV answers MSP version 1 only over the radio link") .. ". Update INAV, or use INAV Configurator."
     end
     if quietAt then
-      return "The flight controller doesn't answer", "INAV 9.0+ over ELRS / Crossfire 150 Hz or S.Port / F.Port. Not over mLRS (it drops the MSP frames)."
+      return "The flight controller doesn't answer", "INAV 9.1+ over ELRS / Crossfire 150 Hz or S.Port / F.Port.\nmLRS: Tx Ser Port = cbridge with the MSP-over-cbridge Tx firmware."
     end
     return nil
   end
@@ -1181,7 +1265,7 @@ local shown = {}   -- rows on screen at the last paint
 
 -- seconds added to the timeouts: ELRS / Crossfire wait for an uplink slot and a telemetry slot
 local function slowness()
-  if link == "MAVLINK" then return 2 end
+  if link == "MAVLINK" or (link == "MSP" and BR.path == "bridge") then return 2 end
   if link == "CRSF" or (link == "MSP" and mspViaNow == "CRSF") then return 1 end
   return 0
 end
@@ -1256,9 +1340,9 @@ local function service(s, pageOpen)
   if not inav and s.link == "CRSF" and T.crsfPush and os.clock() - (MV.hbAt or -10) >= 2 then
     MV.hbAt = os.clock()
     local p = mavPacket(0, { 0, 0, 0, 0, 6, 8, 0, 0, 3 })   -- type GCS, autopilot invalid, MAVLink 3
-    local e = { 0, #p }
-    for k = 1, #p do e[k + 2] = p[k] end
-    pcall(T.crsfPush, 0xAA, e)
+    local e = { 0x66, 0, #p }
+    for k = 1, #p do e[k + 3] = p[k] end
+    pcall(T.crsfPush, 0x81, e)
   end
   local want = s.link
   if want == "CRSF" and T.bridgeAt and os.clock() - T.bridgeAt < 3 then want = "MAVLINK" end
@@ -1272,7 +1356,7 @@ local function service(s, pageOpen)
       rebuild()
     end
     if want == "MSP" then
-      mspViaNow, mOn, mPrev = s.link, false, nil
+      mspViaNow, mOn, mPrev, BR.path, BR.st = s.link, false, nil, nil, 0
       IN.state, IN.meta, IN.profile, IN.plat = "variant", {}, nil, nil
     end
     link = want
@@ -1640,7 +1724,19 @@ function P.paint(w, W, H, s, u, ctx)
     lcd.drawText(W / 2, floor(H * 0.42), why, CENTERED)
     lcd.font(fSmall)
     lcd.color(C.dim)
-    lcd.drawText(W / 2, floor(H * 0.56), more, CENTERED)
+    -- the explanation in lines that fit the screen ("\n" starts a new one, long ones wrap at a
+    -- space), as on the X18 (2026-11-25: the INAV / mLRS text ran off the sides)
+    local lines, maxW = {}, W - 12
+    for part in string.gmatch((more or "") .. "\n", "(.-)\n") do
+      local cur = ""
+      for word in string.gmatch(part, "%S+") do
+        local try = cur == "" and word or (cur .. " " .. word)
+        if cur ~= "" and lcd.getTextSize(try) > maxW then lines[#lines + 1] = cur cur = word else cur = try end
+      end
+      if cur ~= "" then lines[#lines + 1] = cur end
+    end
+    local _, lh = lcd.getTextSize("A")
+    for i, t in ipairs(lines) do lcd.drawText(W / 2, floor(H * 0.56) + (i - 1) * (lh + 2), t, CENTERED) end
     return
   end
   lcd.font(fMid)
@@ -1933,13 +2029,13 @@ end
 function P.debugCore()
   local X = P.extra
   if X.file then
-    return string.format("Params: %s%s tx %d rx %d bad %d  %s%s  params.txt +%d skipped %d%s", tostring(link or "-"),
+    return string.format("Params: %s%s tx %d rx %d bad %d  %s%s  params.txt +%d skipped %d%s", (link == "MSP" and BR.path) and ("MSP " .. BR.path) or tostring(link or "-"),
       (T and ((T.bridgeN or 0) > 0 or T.bridgeInfo)) and (" bridge " .. (T.bridgeN or 0) .. (T.bridgeInfo and (" (" .. T.bridgeInfo .. ")") or "")) or "",
       P.stats.tx, P.stats.rx, P.stats.bad, pendName(), quietAt and "  NO ANSWER" or "",
       X.added, X.skipped,
       X.badLine and (" (line " .. X.badLine .. ")") or "")
   end
-  return string.format("Params: %s%s tx %d rx %d bad %d  %s%s", tostring(link or "-"),
+  return string.format("Params: %s%s tx %d rx %d bad %d  %s%s", (link == "MSP" and BR.path) and ("MSP " .. BR.path) or tostring(link or "-"),
     (T and ((T.bridgeN or 0) > 0 or T.bridgeInfo)) and (" bridge " .. (T.bridgeN or 0) .. (T.bridgeInfo and (" (" .. T.bridgeInfo .. ")") or "")) or "", P.stats.tx, P.stats.rx,
     P.stats.bad, pendName(), quietAt and "  NO ANSWER" or "")
 end

@@ -396,11 +396,25 @@ function T.crsfPush(cmd, data)
   return sn:pushFrame(cmd, data)
 end
 
--- mLRS "cbridge" (mLRS setting Tx Ser Port = cbridge): the aircraft's MAVLink stream in CRSF frames
--- 0xAA (chunk byte, size, up to 58 MAVLink bytes). Passed to params.lua (T.onMavEnv), which speaks
--- MAVLink through it for the PARAMS page and the ArduPilot mission; nothing else reads it.
+-- mLRS "cbridge" (mLRS setting Tx Ser Port = cbridge): the aircraft's MAVLink stream in mLRS "mb"
+-- envelope frames 0x82 (0x66, seq, size, up to 57 bytes), or in CRSF MAVLink envelopes 0xAA (chunk,
+-- size, up to 58). OmniDeck sends 0x81 (params.lua), and mLRS answers in the type it last got:
+-- mLRS 1.5.00 builds its 0xAA frames wrong (size taken from a byte no longer written, the data one
+-- byte off), so 0xAA is never sent; 0x81 / 0x82 work on 1.4.04 and 1.5.00 alike.
+-- Passed to params.lua (T.onMavEnv) as (chunk, size, data...), which speaks MAVLink through it for
+-- the PARAMS page and the ArduPilot mission; nothing else reads it.
 -- T.bridgeAt: when the last one came (os.clock), so params.lua knows the bridge is on.
 T.bridgeAt, T.bridgeN = nil, 0
+function T.envFrame(cmd, data)
+  if cmd == 0x82 then
+    if data[1] ~= 0x66 then return end   -- mLRS's own Lua replies, not the bridge
+    local d = {}
+    for i = 2, #data do d[i - 1] = data[i] end
+    data = d
+  elseif cmd ~= 0xAA then return end
+  T.bridgeAt, T.bridgeN = now(), T.bridgeN + 1
+  if T.onMavEnv then T.onMavEnv(data) end
+end
 -- Ethos: a reader of its own, as mspclient.lua has. Each crsf.getSensor() object gets every frame,
 -- and a pop with a type range drops the frames outside it on the way: the passthrough reader above
 -- (0x7F-0x80) would eat these 0xAA frames first (mLRS + X20S 2026-11-14: the PARAMS page got none)
@@ -427,13 +441,13 @@ local function bridgePop()
     for key, n in pairs(T.bridgeSeen) do parts[#parts + 1] = key .. ":" .. n end
     table.sort(parts)
     T.bridgeInfo = "peek " .. table.concat(parts, " ")
-    if ok and cmd == 0xAA and data then T.bridgeAt, T.bridgeN = t, T.bridgeN + 1 if T.onMavEnv then T.onMavEnv(data) end end
+    if ok and cmd and data then T.envFrame(cmd, data) end
   end
   for _ = 1, 4 do   -- ~1.3 kB/s on mLRS = about 1 frame per update
-    local ok, cmd, data = pcall(bridgeSensor.popFrame, bridgeSensor, 0xAA, 0xAA)
-    if not ok or cmd ~= 0xAA or data == nil then return end
-    T.bridgeAt, T.bridgeN = now(), T.bridgeN + 1
-    if T.onMavEnv then T.onMavEnv(data) end
+    -- 0x82-0xAA: this reader is the bridge's own, so nothing else is lost by the wider range
+    local ok, cmd, data = pcall(bridgeSensor.popFrame, bridgeSensor, 0x82, 0xAA)
+    if not ok or cmd == nil or data == nil then return end
+    T.envFrame(cmd, data)
   end
 end
 

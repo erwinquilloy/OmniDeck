@@ -150,6 +150,10 @@ local function configure(w)
   form.addNumberField(line, nil, 0, 50000, function() return w.batCap end, function(v) w.batCap = v end)
   line = form.addLine("Battery cells (0 = auto)")
   form.addNumberField(line, nil, 0, 14, function() return w.cells end, function(v) w.cells = v end)
+  -- the battery block's big figure; the other one is its small label (cells from the line above)
+  line = form.addLine("Battery block shows")
+  form.addChoiceField(line, nil, { { "Battery voltage", 0 }, { "Average cell", 1 } },
+    function() return w.battMain end, function(v) w.battMain = v end)
   line = form.addLine("Low voltage alarm (V per cell, 0 = off)")
   local fv = form.addNumberField(line, nil, 0, 450, function() return w.lowVolt end, function(v) w.lowVolt = v end)
   pcall(function() fv:decimals(2) end)
@@ -187,6 +191,8 @@ local SETTINGS = {
   { "paramsPage", "n", 0 }, { "flightEdit", "n", 0 },
   -- added for the ArduPilot mission download, at the end for the same reason
   { "apMission", "n", 0 },
+  -- added for the battery block's average cell (1.0.0d), at the end for the same reason
+  { "battMain", "n", 0 },
 }
 
 local function isSource(v) return type(v) == "userdata" end

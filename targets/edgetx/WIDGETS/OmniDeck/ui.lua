@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0c"
+local VERSION = "1.0.0d"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -225,7 +225,7 @@ local function create()
     spdUnit = 0, altUnit = 0, startPage = 1, trail = 1,
     tileSet = "", tz = nil, missionFile = "", inavWp = 0, sumAuto = 1, voice = "off", batCap = 0, effUnit = 0, beep = 1,
     logoFile = "omnideck.png",   -- main page logo on X18-size screens (test41)
-    lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
+    lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0, battMain = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
   }
@@ -261,6 +261,9 @@ local barTxt = {}                          -- top bar right side: texts kept unt
 local barParts = { {}, {}, {}, {} }        -- and the (text, colour) slots, reused each update
 local function topBar(w, x, y, W, h, s, u, H)
   local fBig, fMid, fSmall = fontFor(H)
+  -- 800x480 (TX16S MK3): EdgeTX's L font (33 px) filled the bar and pushed the TX battery out;
+  -- STD / XS keep the 480x272 bar's proportions
+  if H >= 400 then fBig, fMid = FONT_STD, FONT_XS end
   lcd.color(COL.bar)
   lcd.drawFilledRectangle(x, y, W, h)
   lcd.font(fBig)
@@ -310,13 +313,13 @@ local function topBar(w, x, y, W, h, s, u, H)
   end
 
   -- middle: the model name, then the transmitter battery. Centred and shifted to fit between
-  -- both sides; short of room the TX battery goes first, then the name is shortened. Measured
+  -- both sides; short of room the name is shortened, then left out: the TX battery stays. Measured
   -- and placed only when its inputs change: EdgeTX's mission page has no Lua budget to spare.
   local tv = txVolts()
   local val = tv and string.format("TX %.1fV", tv) or nil
   local m = mid
-  if m.val ~= val or m.left ~= leftEnd or m.rx ~= rx then   -- a new size or font moves rx too
-    m.val, m.left, m.rx = val, leftEnd, rx
+  if m.val ~= val or m.left ~= leftEnd or m.rx ~= rx or m.name ~= w.modelName then   -- a new size or font moves rx too
+    m.val, m.left, m.rx, m.name = val, leftEnd, rx, w.modelName
     local room = (rx - 2) - (leftEnd + 12)   -- rx sits 12 px left of the GPS figure
     local n = w.modelName
     if n == "" then n = nil end
@@ -324,12 +327,18 @@ local function topBar(w, x, y, W, h, s, u, H)
     if n then lcd.font(fMid) nw, nh = lcd.getTextSize(n) end
     local v, tw = val, 0
     if v then lcd.font(fBig) tw = lcd.getTextSize(v) end
+    if v and tw > room then v, tw = nil, 0 end   -- not even the TX battery fits
     local gap = (n and v) and 14 or 0
-    if v and nw + gap + tw > room then v, tw, gap = nil, 0, 0 end
-    if n and nw > room then
-      local keep = math.floor(#n * room / nw) - 2
-      if keep < 3 then n, nw = nil, 0
-      else n = string.sub(n, 1, keep) .. ".." lcd.font(fMid) nw, nh = lcd.getTextSize(n) end
+    local nroom = room - tw - gap                -- the name gets what the TX battery leaves
+    if n and nw > nroom then
+      local full, keep = n, math.floor(#n * nroom / nw) - 1
+      lcd.font(fMid)
+      repeat   -- a proportional font: shortened until it really fits (measured only on a change)
+        keep = keep - 1
+        n = keep >= 3 and (string.sub(full, 1, keep) .. "..") or nil
+        if n then nw, nh = lcd.getTextSize(n) end
+      until n == nil or nw <= nroom
+      if n == nil then nw, gap = 0, 0 end
     end
     local gw = nw + gap + tw
     m.n, m.v = nil, nil
@@ -352,6 +361,16 @@ end
 -- bar: optional 0..1, drawn as a thin gauge along the bottom of the tile
 -- note: optional small text on the label line, at the right
 -- inset: optional width kept clear at the left (the HOME arrow); the value centres in what is left
+-- a block's value under its label. EdgeTX's text height is the font's whole line box (800x480,
+-- TX16S MK3: L 42 px + XS 23 px in a 52 px row), so where label + value don't fit the value moves
+-- up into the empty top of its line box instead of running out of the block.
+local BIG_LCD = (LCD_H or 0) >= 400
+local function valueY(y, h, lh, vh)
+  local vy = y + lh + math.max(0, (h - lh - vh) / 2) - 1
+  local maxY = y + h - math.floor(vh * 0.8) - 3   -- the baseline ~80 % down the line box, 3 px clear
+  if BIG_LCD and vy > maxY then vy = math.max(y + math.floor(lh * 0.5), maxY) end   -- 480x272 as it was
+  return vy
+end
 local function tile(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inset)
   lcd.color(COL.tile)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
@@ -374,7 +393,7 @@ local function tile(x, y, w, h, label, value, color, fVal, fLbl, bar, note, inse
   local _, vh = lcd.getTextSize("0")
   lcd.color(color or COL.txt)
   inset = inset or 0
-  lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
+  lcd.drawText(I(x + inset + (w - inset) / 2), I(valueY(y, h, lh, vh)), value, CENTERED)
 end
 
 local exportShapes = false   -- exportPanel: the blocks' shapes only, for the panel bitmap
@@ -414,7 +433,7 @@ do
       local _, vh = rsize("0", fv)
       rcolor(color or COL.txt)
       inset = inset or 0
-      rtext(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CU + fv + ALIGN[1])
+      rtext(I(x + inset + (w - inset) / 2), I(valueY(y, h, lh, vh)), value, CU + fv + ALIGN[1])
     end
   end
 end
@@ -449,7 +468,7 @@ local function tileLive(x, y, w, h, label, value, color, fVal, fLbl, bar, note, 
   lcd.font(fVal)
   lcd.color(color or COL.txt)
   inset = inset or 0
-  lcd.drawText(I(x + inset + (w - inset) / 2), I(y + lh + math.max(0, (h - lh - vh) / 2) - 1), value, CENTERED)
+  lcd.drawText(I(x + inset + (w - inset) / 2), I(valueY(y, h, lh, vh)), value, CENTERED)
 end
 
 -- share of the pack left, 0..1. nil without a capacity, or when nothing shows a current sensor is
@@ -464,9 +483,20 @@ end
 local BATT_FILL = { ok = lcd.RGB(35, 140, 60), warn = lcd.RGB(190, 130, 10), bad = lcd.RGB(190, 40, 40) }
 
 -- live: OpenTX over the bitmap (no background or outline); outline: the export (only those)
-local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline)
+-- EdgeTX: a label line on top as on the other blocks (fLbl): with the cell count known (setting,
+-- else auto) the other voltage - "AVE CELL 3.95V" under a pack voltage, "BATT 15.8V" under an
+-- average cell (OmniDeck Setup "Battery block shows"); plain "BATT" until then.
+local battTxt = { v = false, c = nil, main = nil, m = "--", n = "BATT" }   -- remade on a change only
+local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline, fLbl, u)
   local pad, nubW = 6, math.max(4, I(w * 0.03))
   local bx, by, bw, bh = x + pad, y + pad, w - 2 * pad - nubW, h - 2 * pad
+  local lh = 0
+  if fLbl and not OTX then
+    lcd.font(fLbl)
+    local _
+    _, lh = lcd.getTextSize("A")
+    by, bh = y + lh + 1, h - lh - 1 - math.min(pad, 3)
+  end
   if not live then   -- background and battery outline; OpenTX (live) has them in the bitmap
     lcd.color(COL.tile)
     lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
@@ -480,9 +510,28 @@ local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline)
     lcd.color((s.battFs or left < 0.15) and BATT_FILL.bad or (left < 0.3 and BATT_FILL.warn or BATT_FILL.ok))
     lcd.drawFilledRectangle(I(bx + 2), I(by + 2), I((bw - 4) * left), I(bh - 4))
   end
+  local main = s.volt and string.format("%.1fV", s.volt) or "--"
+  if fLbl and not OTX then
+    local t = battTxt
+    local cells, cm = u and u.cells or 0, u and u.battMain == 1
+    if t.v ~= s.volt or t.c ~= cells or t.main ~= cm then
+      t.v, t.c, t.main = s.volt, cells, cm
+      local v = s.volt
+      if v and cells > 0 then
+        local cv = string.format("%.2fV", v / cells)
+        if cm then t.m, t.n = cv, "BATT " .. main else t.m, t.n = main, "AVE CELL " .. cv end
+      else
+        t.m, t.n = main, "BATT"
+      end
+    end
+    main = t.m
+    lcd.font(fLbl)
+    lcd.color(COL.dim)
+    lcd.drawText(I(x + 4), I(y + 2), t.n)
+  end
   lcd.font(fVal)
   local _, th = lcd.getTextSize("0")
-  HUD.outlined(bx + bw / 2, by + (bh - th) / 2, s.volt and string.format("%.1fV", s.volt) or "--", CENTERED,
+  HUD.outlined(bx + bw / 2, by + (bh - th) / 2, main, CENTERED,
     (alarmV == 2 and COL.bad) or (alarmV == 1 and COL.warn) or COL.txt)
 end
 
@@ -569,9 +618,9 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
     local c, r = (i - 1) % cols, math.floor((i - 1) / cols)
     local tx, ty = x + c * (tw + gap), y + r * (th + gap)
     if it.gauge then
-      if not layer then battGauge(tx, ty, tw, th, s, fVal, u.alarmV)
-      elseif layer == "live" or layer == "nobg" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true)
-      else battGauge(tx, ty, tw, th, s, fVal, nil, false, true) end   -- export: outline only
+      if not layer then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, false, false, fLbl, u)
+      elseif layer == "live" or layer == "nobg" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true, false, fLbl, u)
+      else battGauge(tx, ty, tw, th, s, fVal, nil, false, true, fLbl) end   -- export: outline only
     else
       local inset = 0
       if not layer then tile(tx, ty, tw, th, it[1], it[2], it[3], fVal, fLbl, it[4], it[5], inset)
@@ -817,7 +866,8 @@ local function pageMain(w, W, H, s, u)
   safe("bar", topBar, w, 0, 0, W, barH, s, u, H)
   safe("hud", HUD.draw, 0, bodyY, hudW, bodyH, s, u)
   if s.armed == false and T.alive() then safe("arm", HUD.armStatus, 0, bodyY, hudW, bodyH, s) end
-  safe("tiles", tiles, rx, bodyY + mapH + 3, rw, bodyH - mapH - 3, s, u, fBig, fSmall)
+  -- 800x480 (TX16S MK3): the XXS labels, as at 480x272 (EdgeTX's XS line there is 23 px of a 52 px block)
+  safe("tiles", tiles, rx, bodyY + mapH + 3, rw, bodyH - mapH - 3, s, u, fBig, H >= 400 and FONT_XXS or fSmall)
   safe("msg", msgLine, 0, H - msgH, W, msgH, s, fMid)
 end
 
@@ -830,7 +880,7 @@ local function exportPanel(w, W, H)
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(x, y, pw, ph)
   exportShapes = not OTX            -- EdgeTX: shapes only, the labels stay live
-  tiles(x, y, pw, ph, T.s, units(w), fBig, fSmall, "fixed")
+  tiles(x, y, pw, ph, T.s, units(w), fBig, H >= 400 and FONT_XXS or fSmall, "fixed")
   exportShapes = false
   return x, y, pw, ph
 end
@@ -1348,6 +1398,8 @@ local function paint(w)
   local W, H = lcd.getWindowSize()
   local s, u = T.s, units(w)
   u.alarmV, u.alarmA = w.alarmV, w.alarmA
+  u.cells = (w.cells or 0) > 0 and w.cells or alarm.cells   -- battery block: the average cell
+  u.battMain = w.battMain
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(0, 0, W, H)
   w.btns = nil
@@ -1394,7 +1446,9 @@ local function wakeup(w)
   -- Ethos: another model is noticed within a second, as Yaapu does. create() alone was not
   -- enough: Ethos builds the new model's widget before model.name() changes (the old name stayed
   -- 2 s on an X18), so the old model's state was kept. A switch is a fresh start, welcome included.
-  if not OD_LITE and os.clock() - (w.modelAt or -10) >= 1 then
+  -- EdgeTX too, every 2 s (one model.getInfo): it doesn't always re-create the widget when another
+  -- model is picked, and the top bar kept the old name (TX16S MK3 2026-11-25)
+  if os.clock() - (w.modelAt or -10) >= (OD_LITE and 2 or 1) then
     w.modelAt = os.clock()
     if T.checkModel() then freshStart(w) AU.greetAgain() end
     local n = T.modelName()
@@ -1606,7 +1660,9 @@ local function chkScrollBy(w, d)
   lcd.invalidate()
 end
 
-local TAP_PX = 12   -- a touch that moves less than this is a tap, more is a drag
+-- a touch that moves less than this is a tap, more is a drag: 12 px at 480 wide, scaled with the
+-- screen (TX16S MK3 800x480: 12 px is 1.4 mm there, a finger's wobble, and taps were lost)
+local TAP_PX = math.floor(12 * math.max(1, (LCD_W or 480) / 480))
 
 -- Map +/-: which button a point belongs to (-1 zoom in, 1 zoom out, nil none). The squares are
 -- drawn about 8.5 mm wide (X18 49 px, X20 73 px), less than a fingertip, and a near miss counted
@@ -1623,11 +1679,18 @@ local function zoomBtnAt(b, x, y)
   return nil
 end
 
+local tapAt, keyEvent   -- below: what a tap and a key do
+-- pages that act on the press itself, not the lift: nothing on them is dragged, and EdgeTX hands
+-- a widget one event per update, so on these heavy pages (mission editor, PARAMS) the lift was
+-- sometimes never seen and a button needed a second press (TX16S MK3 2026-11-25)
+local function onPress(w) return (w.page == 2 and ED and ED.active) or w.page == PAGE_PARAMS end
 local function event(w, category, value, x, y)
   if category == EVT_TOUCH then
     if value == TOUCH_START then
       w.touchX, w.touchY, w.touchScroll, w.dragged = x, y, w.msgScroll or 0, false
       w.touchChk = w.chkScroll or 0
+      w.touchUsed = false
+      if onPress(w) then w.touchUsed = true tapAt(w, x, y, x, y) end
       return true
     end
     if value == TOUCH_MOVE then
@@ -1648,41 +1711,50 @@ local function event(w, category, value, x, y)
     end
     if value ~= TOUCH_END then return true end
     local dragged = w.dragged or (w.touchY and math.abs(y - w.touchY) > TAP_PX)
-    local sx, sy = w.touchX, w.touchY
-    w.touchX, w.touchY, w.dragged = nil, nil, false
-    if dragged then return true end
-    if w.page == 2 and ED and ED.active and ED.onButton(x, y) then
-      ED.tap(T.s, x, y, (lcd.getWindowSize()))   -- the editor's buttons first (Done sits near zoom -)
-      lcd.invalidate()
-      return true
-    end
-    if w.page == 2 and w.btns then
-      -- where the finger pressed counts first, then where it lifted
-      local d = zoomBtnAt(w.btns, sx, sy) or zoomBtnAt(w.btns, x, y)
-      if d then zoomStep(w, d) lcd.invalidate() return true end
-    end
-    if w.page == 2 and ED and ED.active then
-      ED.tap(T.s, x, y, (lcd.getWindowSize()))
-      lcd.invalidate()
-      return true   -- while editing a tap never turns the page (Done leaves the editor)
-    end
-    if w.page == 2 and inBox(w.editBtn, x, y) then
-      local ok, why = editor().start(T.s)
-      if not ok then w.editMsg, w.editMsgAt = why, os.clock() end
-      lcd.invalidate()
-      return true
-    end
-    if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
-      w.msgScroll = 0 lcd.invalidate() return true
-    end
-    if w.page == PAGE_PARAMS then
-      local r = paramsFor(w).tap(T.s, x, y)
-      lcd.invalidate()
-      if r ~= "next" then return true end
-    end
-    nextPage(w)
+    local sx, sy, used = w.touchX, w.touchY, w.touchUsed
+    w.touchX, w.touchY, w.dragged, w.touchUsed = nil, nil, false, false
+    if dragged or used then return true end
+    tapAt(w, sx, sy, x, y)
     return true
   end
+  return keyEvent(w, category, value)
+end
+
+tapAt = function(w, sx, sy, x, y)
+  if w.page == 2 and ED and ED.active and ED.onButton(x, y) then
+    ED.tap(T.s, x, y, (lcd.getWindowSize()))   -- the editor's buttons first (Done sits near zoom -)
+    lcd.invalidate()
+    return true
+  end
+  if w.page == 2 and w.btns then
+    -- where the finger pressed counts first, then where it lifted
+    local d = zoomBtnAt(w.btns, sx, sy) or zoomBtnAt(w.btns, x, y)
+    if d then zoomStep(w, d) lcd.invalidate() return true end
+  end
+  if w.page == 2 and ED and ED.active then
+    ED.tap(T.s, x, y, (lcd.getWindowSize()))
+    lcd.invalidate()
+    return true   -- while editing a tap never turns the page (Done leaves the editor)
+  end
+  if w.page == 2 and inBox(w.editBtn, x, y) then
+    local ok, why = editor().start(T.s)
+    if not ok then w.editMsg, w.editMsgAt = why, os.clock() end
+    lcd.invalidate()
+    return true
+  end
+  if w.page == 3 and inBox(w.msgLatestBtn, x, y) then
+    w.msgScroll = 0 lcd.invalidate() return true
+  end
+  if w.page == PAGE_PARAMS then
+    local r = paramsFor(w).tap(T.s, x, y)
+    lcd.invalidate()
+    if r ~= "next" then return true end
+  end
+  nextPage(w)
+  return true
+end
+
+keyEvent = function(w, category, value)
   if category == EVT_KEY and w.page == 2 and ED and ED.active then
     local k = (value == KEY_ENTER_BREAK and "enter") or (value == KEY_ROTARY_LEFT and "left")
       or (value == KEY_ROTARY_RIGHT and "right") or (KEY_RTN_BREAK and value == KEY_RTN_BREAK and "back") or nil

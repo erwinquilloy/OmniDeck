@@ -1,4 +1,4 @@
-OmniDeck 1.0.0c for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 1.0.0d for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
@@ -6,12 +6,36 @@ Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
+WHAT'S NEW IN 1.0.0d (after 1.0.0c)
+- mLRS 1.5.00: the PARAMS page, the ArduPilot mission download and the editor's Send work again
+  over the mLRS bridge (Tx Ser Port = cbridge). OmniDeck now uses mLRS's own bridge frames
+  (0x81 / 0x82); the CRSF MAVLink frames (0xAA) it used before are sent wrong by mLRS 1.5.00
+  (fixed in mLRS 1.5.01). Works with mLRS 1.4.04, 1.5.00 and later.
+- TX16S MK3 (800x480): the main page's bottom blocks no longer run under the message line, the
+  top bar uses smaller text so the TX battery shows, and OmniDeck Setup rows no longer overlap
+  (taller, finger-sized rows there). The MK2 (480x272) layout is unchanged except the battery block.
+- Top bar: short of room the model name is shortened first, then left out; the TX battery stays.
+  The name now changes when another model is picked (it kept the old one).
+- Touch on the MK3: a tap that moved a little was taken for a drag and ignored (the limit is now
+  scaled to the screen). The mission editor and the PARAMS page act on the press, so a button no
+  longer needs a second tap.
+- Battery block: a small line above the gauge shows the average cell ("AVE CELL 3.95V"); with
+  OmniDeck Setup > "Battery block shows" = Average cell the gauge shows the cell voltage and the
+  line the pack ("BATT 15.8V"). Cells: the "Battery cells" setting, or auto from the voltage.
+- PARAMS page: the "doesn't answer" explanation wraps to the screen (the mLRS part on its own line).
+- INAV PARAMS over mLRS (mspX): needs the mLRS Tx firmware with "MSP over cbridge" (a test
+  build for the RadioMaster Nomad, based on mLRS v1.4.04) and Tx Ser Port = cbridge. OmniDeck
+  finds the way by itself: it asks both ways, the CRSF MSP frames (ELRS, Crossfire) and the mLRS
+  bridge, and keeps the one INAV answers on (Sensor check page: "Params: MSP native" or "MSP
+  bridge"). Stock mLRS drops the radio's MSP, and with cbridge stock mLRS also stops the
+  telemetry.
+
 WHAT'S NEW IN 1.0.0c (after 1.0.0b)
 - PARAMS page for INAV (as on Ethos). Needs INAV 9.1.0 or later: INAV 7 and 8 can't carry the
   setting commands over the radio link, and INAV 9.0.x answers them without the values (an INAV
   bug, fixed in 9.1.0); the page says "Parameters need INAV 9.1 or later" there. Over ELRS / TBS
-  Crossfire (150 Hz) and S.Port / F.Port; not over mLRS (its module doesn't pass the radio's MSP
-  requests on). Betaflight: not supported.
+  Crossfire (150 Hz) and S.Port / F.Port, and over mLRS with a test Tx firmware (see 1.0.0d).
+  Betaflight: not supported.
 - 62 INAV settings in 8 groups: FLIGHT, LAUNCH, NAV THR, RTH, LANDING, MISSION, FW PID, MC PID,
   by their CLI names, in plain units (degrees, m, m/s; INAV keeps decidegrees, cm, cm/s).
   Ranges and choice names (e.g. RTH alt mode AT_LEAST / MAX) come from the flight controller.

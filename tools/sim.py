@@ -354,10 +354,58 @@ def fc_receive(chunk, transport):
             if i == 0: msp_reply_q.append((sim_time[0] + MSP_DELAY, item))      # receivers can repeat a frame
         else:
             msp_reply_q.append((sim_time[0] + MSP_DELAY, [0xEA, 0xC8] + c))
+# OD_MLRS_BRIDGE=1: mLRS (mspX) with Tx Ser Port = cbridge and the MSP-over-cbridge Tx firmware:
+# the module drops CRSF MSP (0x7A) and passes raw MSP ($X< / $X>) in bridge frames: mLRS "mb"
+# envelopes 0x81 / 0x82 (0x66, seq, size, up to 57 bytes) or 0xAA (chunk, size, up to 58), answered
+# in the type the radio last sent (mb before any), as mLRS CommonTx/crsf_interface_tx.h does.
+MLRS_BRIDGE = os.environ.get('OD_MLRS_BRIDGE') == '1'
+INAV_SILENT = os.environ.get('OD_INAV_SILENT') == '1'   # stock mLRS: the radio's MSP never reaches INAV
+bridge_q, bridge_rx = [], {'buf': [], 'mb': True, 'types': set()}
+def _crc8x(c, b):
+    c ^= b
+    for _ in range(8): c = ((c << 1) ^ 0xD5) & 0xFF if c & 0x80 else (c << 1) & 0xFF
+    return c
+def bridge_receive(raw_bytes):
+    b = bridge_rx['buf']
+    b += raw_bytes
+    while True:
+        while b and b[0] != 0x24: b.pop(0)
+        if len(b) < 8: return
+        if b[1] != 0x58 or b[2] != 0x3C: b.pop(0); continue
+        size = b[6] | (b[7] << 8)
+        if len(b) < 9 + size: return
+        frame = b[3:8 + size]; crc = b[8 + size]
+        del b[:9 + size]
+        c = 0
+        for x in frame: c = _crc8x(c, x)
+        if c != crc: msp_log['crc_bad'] += 1; continue
+        cmd = frame[1] | (frame[2] << 8)
+        msp_log['req'].append(cmd)
+        out, err = inav_reply2(cmd, frame[5:])
+        if out is None: continue
+        body = [0, cmd & 0xFF, cmd >> 8, len(out) & 0xFF, len(out) >> 8] + out
+        c = 0
+        for x in body: c = _crc8x(c, x)
+        f = [0x24, 0x58, 0x21 if err else 0x3E] + body + [c]
+        mb = bridge_rx['mb']
+        for i in range(0, len(f), 57 if mb else 58):
+            ch = f[i:i + (57 if mb else 58)]
+            bridge_q.append((sim_time[0] + MSP_DELAY, (0x82, [0x66, 0, len(ch)] + ch) if mb else (0xAA, [0, len(ch)] + ch)))
 def crsf_push(cmd, data):
     data = [data[i] for i in range(1, len(data) + 1)]
+    if INAV_SILENT: return True
+    if MLRS_BRIDGE:
+        if cmd == 0x81 and len(data) >= 3 and data[0] == 0x66:
+            bridge_rx['mb'] = True; bridge_rx['types'].add(cmd); bridge_receive(data[3:3 + data[2]])
+        elif cmd == 0xAA and len(data) >= 2:
+            bridge_rx['mb'] = False; bridge_rx['types'].add(cmd); bridge_receive(data[2:2 + data[1]])
+        return True
     if cmd == 0x7A and data[:2] == [0xC8, 0xEA]: fc_receive(data[2:], 'crsf')
     return True
+def pop_bridge():
+    if not bridge_q or bridge_q[0][0] > sim_time[0]: return None
+    c, d = bridge_q.pop(0)[1]
+    return c, L.table_from(d)
 def sport_push(t):
     a, v = int(t['appId']), int(t['value'])
     fc_receive([a & 0xFF, a >> 8, v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >> 24) & 0xFF], 'sport')
@@ -369,12 +417,17 @@ def pop_msp_sport():
     if not SPORT or not msp_reply_q or msp_reply_q[0][0] > sim_time[0]: return None
     return L.table_from(list(msp_reply_q.pop(0)[1]))
 G._CRSFPUSH, G._SPORTPUSH, G._POPMSPCRSF, G._POPMSPSPORT = crsf_push, sport_push, pop_msp_crsf, pop_msp_sport
+G._POPBRIDGE = pop_bridge
 L.execute('''
 function _mkcrsf(q)
   return { getSensor = function() return {
       pushFrame = function(self, cmd, data) return _CRSFPUSH(cmd, data) end,
       popFrame = function(self, lo, hi)
-        if lo == 0xAA then return nil end   -- no mLRS bridge in this simulator
+        if lo == 0x82 or lo == 0xAA then   -- mLRS bridge (OD_MLRS_BRIDGE=1), else none
+          local c, f = _POPBRIDGE(); if c == nil then return nil end
+          local t = {} for i = 1, #f do t[i] = f[i] end
+          return c, t
+        end
         if lo == 0x7B then
           local f = _POPMSPCRSF(); if f == nil then return nil end
           local t = {} for i = 1, #f do t[i] = f[i] end
@@ -1154,8 +1207,11 @@ for mah, left, col in ((0, 1, OK_COL), (500, 0.9, OK_COL), (2500, 0.5, OK_COL), 
     ops = main_drawn()
     if full is None: full = fill(col)
     assert abs(fill(col) - full * left) <= 1, '%d mAh: fill %s of %s' % (mah, fill(col), full)
-    volts = [(t, x) for t, c, x in ops if t.endswith('V') and t not in ('TX %.1fV' % TX_VOLTS[0], SIM_MODEL)]
+    volts = [(t, x) for t, c, x in ops if t.endswith('V') and t not in ('TX %.1fV' % TX_VOLTS[0], SIM_MODEL)
+             and not t.startswith(('AVE CELL ', 'BATT'))]
     assert volts and all(t == '15.8V' and x > W * 0.56 for t, x in volts), 'voltage on the gauge only %s' % volts
+    # the block's label line: the average cell (4 cells auto from 15.8 V)
+    assert any(t == 'AVE CELL 3.95V' for t, c, x in ops), 'battery block label %s' % [t for t, c, x in ops if 'CELL' in t or t.startswith('BATT')]
 st['mah'], st['curr'] = 0, 0              # no current sensor: never a full-looking gauge
 step(0.2); step(0.2)
 ops = main_drawn()
@@ -2068,7 +2124,11 @@ if NATIVE:
     end''')
     for _ in range(60): step(0.2)
     PRi = _PRg(wt)
-    if INAV_VER[0] < 9:
+    if INAV_SILENT:
+        for _ in range(200): step(0.2)
+        render('iparams_silent_%s.png' % tag, 6)
+        print('INAV silent (stock mLRS): no-answer screen rendered')
+    elif INAV_VER[0] < 9:
         assert PRi.inav.state == 'old', ('INAV 8: page says it needs 9.1', PRi.inav.state)
         render('iparams_old_%s.png' % tag, 6)
         print('INAV %d: "Parameters need INAV 9.1 or later" OK' % INAV_VER[0])
@@ -2086,6 +2146,10 @@ if NATIVE:
         print('INAV short setting replies: n/a (bad %d), no made-up 0 OK' % PRi.stats.bad)
     else:
         assert PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi.inav.state, PRi.inav.ver)
+        _path = PRi.debugCore()
+        if not SPORT:
+            assert ('MSP bridge' if MLRS_BRIDGE else 'MSP native') in _path, ('MSP path picked', _path)
+            print('INAV MSP path: %s OK' % ('mLRS bridge' if MLRS_BRIDGE else 'native CRSF'))
         assert PRi.inav.plat == 'AIRPLANE', ('platform read first', PRi.inav.plat)
         _v = lambda n: PRi.valueOf(n)
         assert abs(_v('max_angle_inclination_rll') - 45) < 1e-6 and abs(_v('fw_level_pitch_trim') - 1.5) < 1e-5, 'FLIGHT read and scaled'
@@ -2108,7 +2172,9 @@ if NATIVE:
             for _ in range(ti): KEY('KEY_ROTARY_RIGHT')
             KEY('KEY_ENTER_BREAK')
             for _ in range(ri): KEY('KEY_ROTARY_RIGHT')
-        # NAV THR: cruise throttle 1400 -> 1420 (2 wheel steps of 10), saved, read back, stored
+        # NAV THR: cruise throttle 1400 + 2 wheel steps, saved, read back, stored. Steps: 10 us on
+        # the X20, 1 us on the X18 (its "+10" button is 10 steps = 10 us, 2026-11-25)
+        _want = 1402 if W <= 480 else 1420
         _igoto('nav_fw_cruise_thr')
         for _ in range(60): step(0.2)
         assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))
@@ -2118,7 +2184,7 @@ if NATIVE:
         _st0 = INAV_STORES[0]
         KEY('KEY_ENTER_BREAK')
         for _ in range(40): step(0.2)
-        assert INAV_SET['nav_fw_cruise_thr']['v'] == 1420, ('INAV got 1420', INAV_SET['nav_fw_cruise_thr']['v'])
+        assert INAV_SET['nav_fw_cruise_thr']['v'] == _want, ('INAV got %d' % _want, INAV_SET['nav_fw_cruise_thr']['v'])
         assert INAV_STORES[0] == _st0 + 1, ('EEPROM written once after the save', INAV_STORES[0] - _st0)
         assert PRi.phase() == 'Saved, verified and stored', PRi.phase()
         render('iparams_saved_%s.png' % tag, 6)

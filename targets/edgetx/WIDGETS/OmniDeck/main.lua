@@ -92,14 +92,18 @@ end
 local function event(w, evt, touch)
   if evt == nil or evt == 0 then return end
   if touch and EVT_TOUCH_FIRST and evt == EVT_TOUCH_FIRST then
+    w.touchOpen = true
     UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y)
   elseif touch and EVT_TOUCH_SLIDE and evt == EVT_TOUCH_SLIDE then
     UI.event(w, E.EVT_TOUCH, E.TOUCH_MOVE, touch.x, touch.y)
   elseif touch and EVT_TOUCH_BREAK and evt == EVT_TOUCH_BREAK then
+    w.touchOpen = false
     UI.event(w, E.EVT_TOUCH, E.TOUCH_END, touch.x, touch.y)
   elseif touch and EVT_TOUCH_TAP and evt == EVT_TOUCH_TAP then
-    -- a quick tap ends with TAP, not BREAK, on the radio (TX16S MK2 tester: pages did not change)
-    UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y)
+    -- a quick tap ends with TAP, not BREAK, on the radio (TX16S MK2 tester: pages did not change).
+    -- After a FIRST already seen it is only the lift (pages that act on the press would act twice).
+    if not w.touchOpen then UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y) end
+    w.touchOpen = false
     UI.event(w, E.EVT_TOUCH, E.TOUCH_END, touch.x, touch.y)
   elseif evt == EVT_VIRTUAL_ENTER then
     UI.event(w, E.EVT_KEY, E.KEY_ENTER_BREAK)

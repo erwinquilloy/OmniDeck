@@ -6,7 +6,17 @@
 
 local CFG = nil
 local vals, items, sel, editing, top, msg = nil, {}, 1, false, 1, ""
-local ROW_H, TOP_Y = 22, 30
+-- row height, list top and footer height: 22 / 30 / 20 at 480x272, else from the fonts' own line
+-- height (800x480, TX16S MK3: the standard line is 27 px and the rows ran into each other)
+local ROW_H, TOP_Y, FOOT_H, TXT_DY = 22, 30, 20, 2
+local function measure()
+  if not lcd.sizeText then return end
+  local function lh(f) local ok, _, h = pcall(lcd.sizeText, "Ag", f) return ok and h or 0 end
+  ROW_H = math.max(22, lh(0) + 1, math.floor(LCD_H / 14))   -- 34 px on 800x480: a finger-sized row
+  if ROW_H > 22 then TXT_DY = math.floor((ROW_H - 1 - lh(0)) / 2) end   -- the text in the row's middle
+  TOP_Y = math.max(30, lh(MIDSIZE) + 1)
+  FOOT_H = math.max(20, lh(SMLSIZE) + 1)
+end
 
 -- the tile sets on the card, found by the widget's own scanner (tiles.lua, via etx.lua), once
 local tileLabels = nil
@@ -80,6 +90,7 @@ local function init()
   CFG = chunk()
   items = CFG.ITEMS
   vals = CFG.read()
+  measure()
 end
 
 local function run(event, touch)
@@ -89,7 +100,7 @@ local function run(event, touch)
     lcd.drawText(6, 40, msg, SMLSIZE)
     return (event == EVT_VIRTUAL_EXIT) and 1 or 0
   end
-  local rows = math.floor((LCD_H - TOP_Y - 20) / ROW_H)
+  local rows = math.floor((LCD_H - TOP_Y - FOOT_H) / ROW_H)
   if event == EVT_VIRTUAL_EXIT then
     if editing then editing = false else return 1 end
   elseif event == EVT_VIRTUAL_ENTER then
@@ -114,7 +125,7 @@ local function run(event, touch)
   col(240, 240, 240)
   lcd.drawText(6, 4, "OmniDeck Setup", MIDSIZE + CUSTOM_COLOR)
   col(150, 150, 150)
-  lcd.drawText(LCD_W - 6, 10, "model: " .. tostring((okI and info and info.name) or "?"), SMLSIZE + RIGHT + CUSTOM_COLOR)
+  lcd.drawText(LCD_W - 6, math.max(4, TOP_Y - FOOT_H - 2), "model: " .. tostring((okI and info and info.name) or "?"), SMLSIZE + RIGHT + CUSTOM_COLOR)
   for r = 0, rows - 1 do
     local i = top + r
     local it = items[i]
@@ -125,12 +136,12 @@ local function run(event, touch)
       lcd.drawFilledRectangle(0, y - 1, LCD_W, ROW_H, CUSTOM_COLOR)
     end
     col(240, 240, 240)
-    lcd.drawText(8, y + 2, it[2], CUSTOM_COLOR)
+    lcd.drawText(8, y + TXT_DY, it[2], CUSTOM_COLOR)
     if i ~= sel then col(120, 220, 120) end
-    lcd.drawText(LCD_W - 8, y + 2, valueText(it), RIGHT + CUSTOM_COLOR)
+    lcd.drawText(LCD_W - 8, y + TXT_DY, valueText(it), RIGHT + CUSTOM_COLOR)
   end
   col(150, 150, 150)
-  lcd.drawText(6, LCD_H - 18, (editing and "wheel: change  ENTER: keep" or "ENTER: change  tap: next value  RTN: exit") ..
+  lcd.drawText(6, LCD_H - FOOT_H + 2, (editing and "wheel: change  ENTER: keep" or "ENTER: change  tap: next value  RTN: exit") ..
     (msg ~= "" and ("   " .. msg) or ""), SMLSIZE + CUSTOM_COLOR)
   return 0
 end

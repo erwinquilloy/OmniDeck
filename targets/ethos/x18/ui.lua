@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0c"
+local VERSION = "1.0.0d"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -225,7 +225,7 @@ local function create()
     logoFile = "omnideck.png",   -- the logo file for top-right panel 4 (test41)
     topPanel = 3,                -- main page top-right panel: see panelMode() (test42)
     msgPage = 0, statsPage = 0, checkPage = 0, paramsPage = 0, flightEdit = 0, apMission = 0,   -- page cycle (test42): see pageOn()
-    lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
+    lowVolt = 0, critVolt = 0, cells = 0, lowAlt = 0, battMain = 0,   -- alarms: V per cell x 100, cells (0 auto), altitude unit; 0 = off
     -- runtime
     btns = nil, lastPaint = 0, lastZoomSrc = nil, msgScroll = 0,
   }
@@ -327,8 +327,9 @@ local function topBar(w, x, y, W, h, s, u, H)
   local tv = txVolts()
   local val = tv and string.format("TX %.1fV", tv) or nil
   local m = mid
-  if m.val ~= val or m.left ~= leftEnd or m.rx ~= rx then   -- a new size or font moves rx too
-    m.val, m.left, m.rx = val, leftEnd, rx
+  -- the model name is one of the inputs: another model picked showed the old name (2026-11-25)
+  if m.val ~= val or m.left ~= leftEnd or m.rx ~= rx or m.name ~= w.modelName then   -- a new size or font moves rx too
+    m.val, m.left, m.rx, m.name = val, leftEnd, rx, w.modelName
     local room = (rx - 2) - (leftEnd + 12)   -- rx sits 12 px left of the GPS figure
     local n = w.modelName
     if n == "" then n = nil end
@@ -434,9 +435,18 @@ end
 local BATT_FILL = { ok = lcd.RGB(35, 140, 60), warn = lcd.RGB(190, 130, 10), bad = lcd.RGB(190, 40, 40) }
 
 -- live: OpenTX over the bitmap (no background or outline); outline: the export (only those)
-local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline)
+-- A label line on top as on the other blocks (fLbl): with the cell count known (setting, else
+-- auto) the other voltage - "AVE CELL 3.95V" under a pack voltage, "BATT 15.8V" under an average
+-- cell (setting "Battery block shows"); plain "BATT" until then.
+local battTxt = { v = false, c = nil, main = nil, m = "--", n = "BATT" }   -- remade on a change only
+local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline, fLbl, u)
   local pad, nubW = 6, math.max(4, I(w * 0.03))
   local bx, by, bw, bh = x + pad, y + pad, w - 2 * pad - nubW, h - 2 * pad
+  if fLbl and not OTX then
+    lcd.font(fLbl)
+    local _, lh = lcd.getTextSize("A")
+    by, bh = y + lh + 1, h - lh - 1 - math.min(pad, 3)
+  end
   if not live then   -- background and battery outline; OpenTX (live) has them in the bitmap
     lcd.color(COL.tile)
     lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
@@ -450,9 +460,28 @@ local function battGauge(x, y, w, h, s, fVal, alarmV, live, outline)
     lcd.color((s.battFs or left < 0.15) and BATT_FILL.bad or (left < 0.3 and BATT_FILL.warn or BATT_FILL.ok))
     lcd.drawFilledRectangle(I(bx + 2), I(by + 2), I((bw - 4) * left), I(bh - 4))
   end
+  local main = s.volt and string.format("%.1fV", s.volt) or "--"
+  if fLbl and not OTX then
+    local t = battTxt
+    local cells, cm = u and u.cells or 0, u and u.battMain == 1
+    if t.v ~= s.volt or t.c ~= cells or t.main ~= cm then
+      t.v, t.c, t.main = s.volt, cells, cm
+      local v = s.volt
+      if v and cells > 0 then
+        local cv = string.format("%.2fV", v / cells)
+        if cm then t.m, t.n = cv, "BATT " .. main else t.m, t.n = main, "AVE CELL " .. cv end
+      else
+        t.m, t.n = main, "BATT"
+      end
+    end
+    main = t.m
+    lcd.font(fLbl)
+    lcd.color(COL.dim)
+    lcd.drawText(I(x + 4), I(y + 2), t.n)
+  end
   lcd.font(fVal)
   local _, th = lcd.getTextSize("0")
-  HUD.outlined(bx + bw / 2, by + (bh - th) / 2, s.volt and string.format("%.1fV", s.volt) or "--", CENTERED,
+  HUD.outlined(bx + bw / 2, by + (bh - th) / 2, main, CENTERED,
     (alarmV == 2 and COL.bad) or (alarmV == 1 and COL.warn) or COL.txt)
 end
 
@@ -536,7 +565,7 @@ local function tiles(x, y, w, h, s, u, fVal, fLbl, layer)
     local c, r = (i - 1) % cols, math.floor((i - 1) / cols)
     local tx, ty = x + c * (tw + gap), y + r * (th + gap)
     if it.gauge then
-      if not layer then battGauge(tx, ty, tw, th, s, fVal, u.alarmV)
+      if not layer then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, false, false, fLbl, u)
       elseif layer == "live" then battGauge(tx, ty, tw, th, s, fVal, u.alarmV, true)
       else battGauge(tx, ty, tw, th, s, fVal, nil, false, true) end   -- export: outline only
     else
@@ -1275,6 +1304,8 @@ local function paint(w)
   local W, H = lcd.getWindowSize()
   local s, u = T.s, units(w)
   u.alarmV, u.alarmA = w.alarmV, w.alarmA
+  u.cells = (w.cells or 0) > 0 and w.cells or alarm.cells   -- battery block: the average cell
+  u.battMain = w.battMain
   lcd.color(COL.panel)
   lcd.drawFilledRectangle(0, 0, W, H)
   w.btns = nil
