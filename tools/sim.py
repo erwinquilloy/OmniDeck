@@ -286,6 +286,12 @@ def inav_reply2(cmd, p):
         for nm in (s['look'] or []): out += list(nm.encode()) + [0]
         return out + _enc(s['t'], _sval(s)), False
     return None, False
+# OD_FC=BF45 / BF2025 / BFOLD: a Betaflight (tools/fake_bf.py) answers the MSP instead of the INAV fake
+_BF = os.environ.get('OD_FC', '') if os.environ.get('OD_FC', '').startswith('BF') else ''
+if _BF:
+    from fake_bf import FakeBF
+    _FBF = FakeBF(api={'BF45': 46, 'BF2025': 47, 'BFOLD': 45}[_BF])
+    inav_reply2 = lambda cmd, p: _FBF.reply(cmd, p)
 def fc_receive2(b, transport):
     """a complete MSPv2 request: flags, cmd lo, cmd hi, size lo, size hi, payload"""
     cmd, size = b[1] | (b[2] << 8), b[3] | (b[4] << 8)
@@ -2130,7 +2136,95 @@ if NATIVE:
         _pr0 = _pr0 or _PRg(wt)
         if _pr0 is not None: _pr0.debug()
     PRi = _PRg(wt)
-    if INAV_SILENT:
+    if _BF:
+        # ---- Betaflight PARAMS (bfplist.lua; tools/fake_bf.py). OD_FC=BF45 / BF2025 / BFOLD
+        if _BF == 'BFOLD':
+            assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'bfold', ('old Betaflight refused', PRi.inav.state)
+            render('bfparams_old_%s.png' % tag, 6)
+            assert not _FBF.sets, 'nothing written to an unsupported Betaflight'
+            print('Betaflight PARAMS (Ethos): API 1.45 gets the "needs 4.5 or 2025.12" screen OK')
+        else:
+            _api = 47 if _BF == 'BF2025' else 46
+            assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'ready', ('Betaflight detected', PRi.inav.state)
+            assert PRi.inav.ver == ('2025.12.5' if _api == 47 else '4.5.5'), PRi.inav.ver
+            _w = 'max' if _api == 47 else 'min'
+            BF_TABS = [('PID', ['p_roll', 'i_roll', 'd_roll', 'p_pitch', 'i_pitch', 'd_pitch', 'p_yaw', 'i_yaw', 'd_yaw']),
+                       ('FF D', ['f_roll', 'f_pitch', 'f_yaw'] + ['d_%s_%s' % (_w, a) for a in ('roll', 'pitch', 'yaw')] + ['d_max_gain']),
+                       ('RATES', ['roll_rc_rate', 'roll_srate', 'roll_expo', 'pitch_rc_rate', 'pitch_srate', 'pitch_expo',
+                                  'yaw_rc_rate', 'yaw_srate', 'yaw_expo', 'thr_mid', 'thr_expo']),
+                       ('FILTERS', ['gyro_lpf1_dyn_min_hz', 'gyro_lpf1_dyn_max_hz', 'gyro_lpf2_static_hz', 'dterm_lpf1_dyn_min_hz',
+                                    'dterm_lpf1_dyn_max_hz', 'dterm_lpf2_static_hz', 'dyn_notch_count', 'dyn_notch_q',
+                                    'dyn_notch_min_hz', 'dyn_notch_max_hz', 'rpm_filter_harmonics', 'rpm_filter_min_hz'])]
+            def _pr(): return _PRg(wt)
+            def _bv(n): p = _pr(); return p.valueOf(n) if p else None
+            def _bwait(n, k=150):
+                for _ in range(k):
+                    if _bv(n) is not None: return
+                    step(0.2)
+            def _bgoto(name):
+                t = [i for i, (g, rs) in enumerate(BF_TABS) if name in rs][0]
+                r = BF_TABS[t][1].index(name)
+                KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+                widget.page = 6
+                for _ in range(20): KEY('KEY_ROTARY_LEFT')
+                for _ in range(t): KEY('KEY_ROTARY_RIGHT')
+                KEY('KEY_ENTER_BREAK')
+                for _ in range(r): KEY('KEY_ROTARY_RIGHT')
+                _bwait(name)
+                for _ in range(5): step(0.2)
+            def _bsave(name, steps):
+                _bgoto(name)
+                KEY('KEY_ENTER_BREAK')
+                for _ in range(5): step(0.2)
+                for _ in range(abs(steps)): KEY('KEY_ROTARY_RIGHT' if steps > 0 else 'KEY_ROTARY_LEFT')
+                n0, s0 = len(_FBF.sets), _FBF.stores
+                KEY('KEY_ENTER_BREAK')
+                for _ in range(60): step(0.2)
+                assert _pr().phase() == 'Saved, verified and stored', (name, _pr().phase())
+                assert _FBF.stores == s0 + 1, (name, 'EEPROM once', _FBF.stores - s0)
+                return _FBF.sets[n0:]
+            from fake_bf import PID, ADV, RC, FIL, get as _get
+            _bwait('p_roll')
+            assert [_bv(n) for n in ('p_roll', 'i_roll', 'd_roll', 'd_yaw')] == [45, 80, 40, 0], [_bv(n) for n in ('p_roll', 'i_roll', 'd_roll')]
+            render('bfparams_pid_%s.png' % tag, 6)
+            s = _bsave('p_roll', 2)
+            assert _FBF.value(PID, 0) == 47 and s == [(202, 15)], ('PID', _FBF.value(PID, 0), s)
+            adv0 = list(_FBF.block(ADV))
+            s = _bsave('f_pitch', 3)
+            a = _FBF.block(ADV)
+            assert _FBF.value(ADV, 34, 2) == 128 and s == [(95, 39)] and a[:34] == adv0[:34] and a[36:] == adv0[36:], ('FF', s)
+            _bwait('d_%s_roll' % _w)
+            assert _bv('d_%s_roll' % _w) == 30, ('D %s roll' % _w, _bv('d_%s_roll' % _w))
+            s = _bsave('roll_rc_rate', 1)
+            assert _bv('roll_srate') == 670 and _FBF.value(RC, 0) == 8 and _FBF.value(RC, 12) == 7 and s == [(204, 14)], ('rates', _FBF.block(RC), s)
+            render('bfparams_rates_%s.png' % tag, 6)
+            fil0 = list(_FBF.block(FIL))
+            s = _bsave('dyn_notch_max_hz', 1)
+            f = _FBF.block(FIL)
+            assert _get(f, 45, 2) == 610 and s == [(93, 47)] and _get(f, 20, 2) == 250 and f[:45] == fil0[:45] and f[47:] == fil0[47:], ('filters', s)
+            render('bfparams_filters_%s.png' % tag, 6)
+            _FBF.armed = True; st['armed'] = False
+            _bgoto('i_pitch')
+            for _ in range(20): step(0.2)
+            assert _pr().inav.armed is True, _pr().inav.armed
+            KEY('KEY_ENTER_BREAK')
+            for _ in range(5): step(0.2)
+            KEY('KEY_ROTARY_RIGHT')
+            assert _pr().phase() == 'Armed: view only', _pr().phase()
+            n0 = len(_FBF.sets)
+            KEY('KEY_ENTER_BREAK')
+            for _ in range(20): step(0.2)
+            assert len(_FBF.sets) == n0, 'nothing set while armed'
+            KEY('KEY_RTN_BREAK')
+            _FBF.armed = False
+            _FBF.pid_prof = 2
+            for _ in range(40): step(0.2)
+            _bgoto('p_roll')
+            assert _pr().inav.profile == 2 and _bv('p_roll') == 47, ('profile 3', _pr().inav.profile, _bv('p_roll'))
+            assert 'PID profile 3' in _pr().inavLine(), _pr().inavLine()
+            print('Betaflight %s PARAMS (Ethos): detect, PID / FF / D %s / rates / filters saved + verified + stored with only their '
+                  'group sent, armed lock, profile switch re-read OK' % (_pr().inav.ver, _w))
+    elif INAV_SILENT:
         for _ in range(200): step(0.2)
         render('iparams_silent_%s.png' % tag, 6)
         print('INAV silent (stock mLRS): no-answer screen rendered')

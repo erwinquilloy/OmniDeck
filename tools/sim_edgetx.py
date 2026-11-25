@@ -860,9 +860,12 @@ frame(G.EVT_VIRTUAL_ENTER)
 if NATIVE:
     # ---- INAV PARAMS page (EdgeTX since 1.0.0c, INAV 9.1+ over MSPv2; tools/fake_inav_settings.py)
     from fake_inav_settings import FakeInav
+    from fake_bf import FakeBF
+    _BF = os.environ.get('OD_FC', '') if os.environ.get('OD_FC', '').startswith('BF') else ''
     # OD_MLRS_BRIDGE=1: mLRS cbridge with the MSP-over-cbridge Tx firmware (raw MSP in 0x81 / 0x82 frames)
     _MLRS = os.environ.get('OD_MLRS_BRIDGE') == '1' and not SPORT
-    _fi = FakeInav(bridge=_MLRS)
+    _NOFEAT = os.environ.get('OD_BF_NOFEAT') == '1'   # Betaflight built without dyn notch / RPM filter
+    _fi = FakeBF(api={'BF45': 46, 'BF2025': 47, 'BFOLD': 45}[_BF], bridge=_MLRS, nofeat=_NOFEAT) if _BF else FakeInav(bridge=_MLRS)
     _lst = lambda t: [int(t[k]) for k in range(1, len(t) + 1)] if not isinstance(t, (list, tuple)) else list(t)
     G.crossfireTelemetryPush = lambda cmd, data: _fi.crsf_push(int(cmd), _lst(data))
     G.sportTelemetryPush = lambda *a: _fi.sport_push(*[int(x) for x in a[:4]]) if len(a) >= 4 else True
@@ -905,73 +908,200 @@ if NATIVE:
       end
       for _, f in pairs(fs) do local r = find(f, 0) if r then return r end end
     end''')
-    assert wd.page == 6, ('params page in the cycle for INAV', wd.page)
-    # the Sensor check line (P.debug) at every step of INAV's start-up too: 1.0.0d stopped on the
-    # variant / version / status steps, which carry no name (TX16S MK3 2026-11-25)
-    _pr0, _dbg = None, set()
-    for _ in range(300):
-        _ipump(1)
-        _pr0 = _pr0 or _findPR(UIm) or _findPR(widget_def)
-        if _pr0 is not None: _dbg.add(str(_pr0.debug()).split('  ')[0][:40])
-    assert any('waiting variant' in d or 'waiting version' in d for d in _dbg) or _pr0 is not None, _dbg
-    PRi = _findPR(UIm) or _findPR(widget_def)
-    assert PRi is not None and PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi and PRi.inav.state)
-    _v = lambda n: PRi.valueOf(n)
-    if not SPORT:
-        assert ('MSP bridge' if _MLRS else 'MSP native') in PRi.debugCore(), ('MSP path picked', PRi.debugCore())
-        print('INAV MSP path (EdgeTX): %s OK' % ('mLRS bridge' if _MLRS else 'native CRSF'))
-    def _iwait(name, n=600):
-        for _ in range(n):
-            if _v(name) is not None: return
+    if _BF:
+        # ---- Betaflight PARAMS (bfplist.lua; tools/fake_bf.py). OD_FC=BF45 / BF2025 / BFOLD
+        assert wd.page == 6, ('params page in the cycle for Betaflight', wd.page)
+        _pr0 = None
+        for _ in range(300):
             _ipump(1)
-    _iwait('max_angle_inclination_rll')
-    assert abs(_v('max_angle_inclination_rll') - 45) < 1e-6, ('FLIGHT read and scaled', _v('max_angle_inclination_rll'))
-    render('etx_iparams_%s.png' % tag, 6)
-    # save: cruise throttle 1400 -> 1420, read back, EEPROM
-    _igoto('nav_fw_cruise_thr'); _iwait('nav_fw_cruise_thr'); _ipump(10)
-    assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
-    frame(G.EVT_VIRTUAL_NEXT); frame(G.EVT_VIRTUAL_NEXT)
-    _st0 = _fi.stores
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
-    assert _fi.set['nav_fw_cruise_thr']['v'] == 1420, ('INAV got 1420', _fi.set['nav_fw_cruise_thr']['v'])
-    assert _fi.stores == _st0 + 1, ('EEPROM written once', _fi.stores - _st0)
-    assert PRi.phase() == 'Saved, verified and stored', PRi.phase()
-    render('etx_iparams_saved_%s.png' % tag, 6)
-    # lookup names from the flight controller
-    _igoto('nav_rth_alt_mode'); _iwait('nav_rth_alt_mode'); _ipump(10)
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
-    render('etx_iparams_lookup_%s.png' % tag, 6)
-    # INAV armed while the radio's flight mode reads disarmed: "Edit in flight" Off = view only
-    _fi.armed = True; st['armed'] = False
-    _igoto('fw_p_roll'); _iwait('fw_p_roll'); _ipump(60)
-    _before = _fi.set['fw_p_roll']['v'][0]
-    assert PRi.inav.armed is True, ('INAV status read as armed', PRi.inav.armed)
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
-    frame(G.EVT_VIRTUAL_NEXT)
-    assert PRi.phase() == 'Armed: view only', ('locked from INAV status', PRi.phase())
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(20)
-    assert _fi.set['fw_p_roll']['v'][0] == _before, 'nothing set while INAV is armed'
-    render('etx_iparams_inavarmed_%s.png' % tag, 6)
-    # "Gains and trim": set now, the refused EEPROM write waits for INAV's disarm, on any page
-    wd.flightEdit = 1
-    _st0 = _fi.stores
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
-    frame(G.EVT_VIRTUAL_NEXT)
-    frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
-    assert _fi.set['fw_p_roll']['v'][0] == _before + 1, ('in-flight set', _fi.set['fw_p_roll']['v'])
-    assert _fi.stores == _st0 and PRi.inav.dirty, ('not stored while INAV is armed', _fi.stores - _st0, PRi.inav.dirty)
-    render('etx_iparams_inflight_%s.png' % tag, 6)
-    frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
-    wd.page = 1
-    _fi.armed = False
-    _ipump(300)
-    assert _fi.stores == _st0 + 1 and not PRi.inav.dirty, ('stored once INAV says disarmed', _fi.stores - _st0, PRi.inav.dirty)
-    wd.flightEdit = 0                                 # left disarmed: the voice test below arms
-    G.crossfireTelemetryPush = lambda cmd, data: True
-    G.sportTelemetryPush = _push
-    _ipump(250)                                       # params module unloaded off the page
-    print('INAV params (EdgeTX): read/scale, save+verify+EEPROM, lookup names, INAV-status arming lock, in-flight set stored at disarm OK')
+            _pr0 = _pr0 or _findPR(UIm) or _findPR(widget_def)
+            if _pr0 is not None: _pr0.debug()     # the Sensor check line through the start-up steps
+        PRi = _findPR(UIm) or _findPR(widget_def)
+        if _BF == 'BFOLD':
+            assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'bfold', ('old Betaflight refused', PRi.inav.state)
+            render('etx_bfparams_old_%s.png' % tag, 6)
+            assert not _fi.sets, 'nothing written to an unsupported Betaflight'
+            print('Betaflight PARAMS (EdgeTX): API 1.45 gets the "needs 4.5 or 2025.12" screen, nothing read or set OK')
+        else:
+            _api = 47 if _BF == 'BF2025' else 46
+            assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'ready', ('Betaflight detected', PRi.inav.state)
+            assert PRi.inav.ver == ('2025.12.5' if _api == 47 else '4.5.5'), ('version', PRi.inav.ver)
+            _v = lambda n: PRi.valueOf(n)
+            def _bwait(name, n=600):
+                for _ in range(n):
+                    if _v(name) is not None: return
+                    _ipump(1)
+            BF_TABS = [('PID', ['p_roll', 'i_roll', 'd_roll', 'p_pitch', 'i_pitch', 'd_pitch', 'p_yaw', 'i_yaw', 'd_yaw']),
+                       ('FF D', ['f_roll', 'f_pitch', 'f_yaw'] + ['d_%s_%s' % ('max' if _api == 47 else 'min', a) for a in ('roll', 'pitch', 'yaw')] + ['d_max_gain']),
+                       ('RATES', ['roll_rc_rate', 'roll_srate', 'roll_expo', 'pitch_rc_rate', 'pitch_srate', 'pitch_expo',
+                                  'yaw_rc_rate', 'yaw_srate', 'yaw_expo', 'thr_mid', 'thr_expo']),
+                       ('FILTERS', ['gyro_lpf1_dyn_min_hz', 'gyro_lpf1_dyn_max_hz', 'gyro_lpf2_static_hz', 'dterm_lpf1_dyn_min_hz',
+                                    'dterm_lpf1_dyn_max_hz', 'dterm_lpf2_static_hz', 'dyn_notch_count', 'dyn_notch_q',
+                                    'dyn_notch_min_hz', 'dyn_notch_max_hz', 'rpm_filter_harmonics', 'rpm_filter_min_hz'])]
+            def _bgoto(name):
+                t = [i for i, (g, rs) in enumerate(BF_TABS) if name in rs][0]
+                r = BF_TABS[t][1].index(name)
+                frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+                wd.page = 6; frame()
+                for _ in range(20): frame(G.EVT_VIRTUAL_PREV)
+                for _ in range(t): frame(G.EVT_VIRTUAL_NEXT)
+                frame(G.EVT_VIRTUAL_ENTER)
+                for _ in range(r): frame(G.EVT_VIRTUAL_NEXT)
+                _bwait(name); _ipump(10)
+            def _bsave(name, steps):
+                _bgoto(name)
+                frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+                for _ in range(abs(steps)): frame(G.EVT_VIRTUAL_NEXT if steps > 0 else G.EVT_VIRTUAL_PREV)
+                n0, s0 = len(_fi.sets), _fi.stores
+                frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+                assert PRi.phase() == 'Saved, verified and stored', (name, PRi.phase())
+                assert _fi.stores == s0 + 1, (name, 'EEPROM written once', _fi.stores - s0)
+                return _fi.sets[n0:]
+            from fake_bf import PID, ADV, RC, FIL, get as _get
+            # reads, scaled
+            _bwait('p_roll')
+            assert [_v(n) for n in ('p_roll', 'i_roll', 'd_roll', 'd_yaw')] == [45, 80, 40, 0], [_v(n) for n in ('p_roll', 'i_roll', 'd_roll')]
+            render('etx_bfparams_pid_%s.png' % tag, 6)
+            # 1 PID: the whole 15-byte block goes back, P roll +2
+            adv0 = list(_fi.block(ADV))
+            s = _bsave('p_roll', 2)
+            assert _fi.value(PID, 0) == 47 and s == [(202, 15)], ('PID set', _fi.value(PID, 0), s)
+            assert _fi.block(PID)[1:] == [80, 40, 47, 84, 46, 45, 80, 0, 0, 0, 0, 0, 0, 0], _fi.block(PID)
+            render('etx_bfparams_saved_%s.png' % tag, 6)
+            # 2 feedforward: PID_ADVANCED cut after its group (39 bytes); everything after untouched
+            s = _bsave('f_pitch', 3)
+            a = _fi.block(ADV)
+            assert _fi.value(ADV, 34, 2) == 128 and s == [(95, 39)], ('FF set', _fi.value(ADV, 34, 2), s)
+            assert a[:34] == adv0[:34] and a[36:] == adv0[36:], 'only F pitch changed'
+            # D max / D min label by version
+            _dn = 'd_max_roll' if _api == 47 else 'd_min_roll'     # Betaflight's CLI name per version
+            _bgoto(_dn)
+            lab = L.eval('function(P, n) for _, r in ipairs(P._list()) do if r[2] == n then return r[3] end end end')(PRi, _dn)
+            assert lab == ('Roll D max' if _api == 47 else 'Roll D min') and _v(_dn) == 30, ('D min / D max row', lab, _v(_dn))
+            render('etx_bfparams_ff_%s.png' % tag, 6)
+            # 3 rates (profile 1 = ACTUAL: centre / max rate in deg/s); roll RC rate +1 must not drag pitch
+            _bwait('roll_rc_rate')
+            _bgoto('roll_rc_rate')
+            assert _v('roll_rc_rate') == 70 and _v('roll_srate') == 670, ('ACTUAL rates in deg/s', _v('roll_rc_rate'), _v('roll_srate'))
+            lab = L.eval('function(P, n) for _, r in ipairs(P._list()) do if r[2] == n then return r[3] .. "|" .. r[4] end end end')(PRi, 'roll_rc_rate')
+            assert lab == 'Roll center|deg/s', lab
+            s = _bsave('roll_rc_rate', 1)
+            assert _fi.value(RC, 0) == 8 and _fi.value(RC, 12) == 7 and s == [(204, 14)], ('roll rate only', _fi.block(RC), s)
+            render('etx_bfparams_rates_%s.png' % tag, 6)
+            if _NOFEAT:
+                # dyn notch / RPM filter not compiled in: zeros from the FC, shown n/a, never a made-up 0
+                _bgoto('dyn_notch_q')
+                for _ in range(60): _ipump(1)
+                assert all(_v(n) is False for n in ('dyn_notch_count', 'dyn_notch_q', 'dyn_notch_min_hz', 'dyn_notch_max_hz',
+                                                    'rpm_filter_harmonics', 'rpm_filter_min_hz')), [_v(n) for n in ('dyn_notch_q', 'rpm_filter_min_hz')]
+                assert _v('gyro_lpf2_static_hz') == 500, ('the other filter rows still read', _v('gyro_lpf2_static_hz'))
+                render('etx_bfparams_nofeat_%s.png' % tag, 6)
+                print('Betaflight without dyn notch / RPM filter: those 6 rows n/a, the rest read OK')
+                raise SystemExit(0)
+            # 4 filters: dyn notch max +1 step (10 Hz), 47 bytes; gyro LPF1 (bytes 20-21) survives the first byte
+            fil0 = list(_fi.block(FIL))
+            s = _bsave('dyn_notch_max_hz', 1)
+            f = _fi.block(FIL)
+            assert _get(f, 45, 2) == 610 and s == [(93, 47)], ('notch max', _get(f, 45, 2), s)
+            assert _get(f, 20, 2) == 250 and f[:45] == fil0[:45] and f[47:] == fil0[47:], 'only the notch max changed'
+            render('etx_bfparams_filters_%s.png' % tag, 6)
+            # armed (Betaflight's own flag), "Edit in flight" Off: view only
+            _fi.armed = True; st['armed'] = False
+            _bgoto('i_pitch'); _ipump(60)
+            assert PRi.inav.armed is True, ('armed from MSP_STATUS_EX', PRi.inav.armed)
+            frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+            frame(G.EVT_VIRTUAL_NEXT)
+            assert PRi.phase() == 'Armed: view only', PRi.phase()
+            n0 = len(_fi.sets)
+            frame(G.EVT_VIRTUAL_ENTER); _ipump(30)
+            assert len(_fi.sets) == n0, 'nothing set while armed'
+            frame(G.EVT_VIRTUAL_EXIT)
+            _fi.armed = False; _ipump(60)
+            # another PID profile made active on the FC: the page reads its values
+            _fi.pid_prof = 2
+            for _ in range(400):
+                _ipump(1)
+                if PRi.inav.profile == 2 and _v('p_roll') is not None: break
+            _bgoto('p_roll'); _bwait('p_roll')
+            assert PRi.inav.profile == 2 and _v('p_roll') == 47, ('profile 3 read', PRi.inav.profile, _v('p_roll'))
+            line = PRi.inavLine()
+            assert 'PID profile 3' in line and ('2025.12.5' if _api == 47 else '4.5.5') in line, line
+            render('etx_bfparams_profile3_%s.png' % tag, 6)
+            print('Betaflight %s PARAMS (EdgeTX): detect + version, PID / FF / rates (ACTUAL, roll without pitch) / filters saved, verified, stored; '
+                  'only the edited bytes and their group sent; armed lock; profile switch on the FC re-read OK' % PRi.inav.ver)
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+        wd.page = 1
+        G.crossfireTelemetryPush = lambda cmd, data: True
+        G.sportTelemetryPush = _push
+        _ipump(250)
+    if not _BF:
+        assert wd.page == 6, ('params page in the cycle for INAV', wd.page)
+        # the Sensor check line (P.debug) at every step of INAV's start-up too: 1.0.0d stopped on the
+        # variant / version / status steps, which carry no name (TX16S MK3 2026-11-25)
+        _pr0, _dbg = None, set()
+        for _ in range(300):
+            _ipump(1)
+            _pr0 = _pr0 or _findPR(UIm) or _findPR(widget_def)
+            if _pr0 is not None: _dbg.add(str(_pr0.debug()).split('  ')[0][:40])
+        assert any('waiting variant' in d or 'waiting version' in d for d in _dbg) or _pr0 is not None, _dbg
+        PRi = _findPR(UIm) or _findPR(widget_def)
+        assert PRi is not None and PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi and PRi.inav.state)
+        _v = lambda n: PRi.valueOf(n)
+        if not SPORT:
+            assert ('MSP bridge' if _MLRS else 'MSP native') in PRi.debugCore(), ('MSP path picked', PRi.debugCore())
+            print('INAV MSP path (EdgeTX): %s OK' % ('mLRS bridge' if _MLRS else 'native CRSF'))
+        def _iwait(name, n=600):
+            for _ in range(n):
+                if _v(name) is not None: return
+                _ipump(1)
+        _iwait('max_angle_inclination_rll')
+        assert abs(_v('max_angle_inclination_rll') - 45) < 1e-6, ('FLIGHT read and scaled', _v('max_angle_inclination_rll'))
+        render('etx_iparams_%s.png' % tag, 6)
+        # save: cruise throttle 1400 -> 1420, read back, EEPROM
+        _igoto('nav_fw_cruise_thr'); _iwait('nav_fw_cruise_thr'); _ipump(10)
+        assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+        frame(G.EVT_VIRTUAL_NEXT); frame(G.EVT_VIRTUAL_NEXT)
+        _st0 = _fi.stores
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+        assert _fi.set['nav_fw_cruise_thr']['v'] == 1420, ('INAV got 1420', _fi.set['nav_fw_cruise_thr']['v'])
+        assert _fi.stores == _st0 + 1, ('EEPROM written once', _fi.stores - _st0)
+        assert PRi.phase() == 'Saved, verified and stored', PRi.phase()
+        render('etx_iparams_saved_%s.png' % tag, 6)
+        # lookup names from the flight controller
+        _igoto('nav_rth_alt_mode'); _iwait('nav_rth_alt_mode'); _ipump(10)
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+        render('etx_iparams_lookup_%s.png' % tag, 6)
+        # INAV armed while the radio's flight mode reads disarmed: "Edit in flight" Off = view only
+        _fi.armed = True; st['armed'] = False
+        _igoto('fw_p_roll'); _iwait('fw_p_roll'); _ipump(60)
+        _before = _fi.set['fw_p_roll']['v'][0]
+        assert PRi.inav.armed is True, ('INAV status read as armed', PRi.inav.armed)
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+        frame(G.EVT_VIRTUAL_NEXT)
+        assert PRi.phase() == 'Armed: view only', ('locked from INAV status', PRi.phase())
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(20)
+        assert _fi.set['fw_p_roll']['v'][0] == _before, 'nothing set while INAV is armed'
+        render('etx_iparams_inavarmed_%s.png' % tag, 6)
+        # "Gains and trim": set now, the refused EEPROM write waits for INAV's disarm, on any page
+        wd.flightEdit = 1
+        _st0 = _fi.stores
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(10)
+        frame(G.EVT_VIRTUAL_NEXT)
+        frame(G.EVT_VIRTUAL_ENTER); _ipump(300)
+        assert _fi.set['fw_p_roll']['v'][0] == _before + 1, ('in-flight set', _fi.set['fw_p_roll']['v'])
+        assert _fi.stores == _st0 and PRi.inav.dirty, ('not stored while INAV is armed', _fi.stores - _st0, PRi.inav.dirty)
+        render('etx_iparams_inflight_%s.png' % tag, 6)
+        frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+        wd.page = 1
+        _fi.armed = False
+        _ipump(300)
+        assert _fi.stores == _st0 + 1 and not PRi.inav.dirty, ('stored once INAV says disarmed', _fi.stores - _st0, PRi.inav.dirty)
+        wd.flightEdit = 0                                 # left disarmed: the voice test below arms
+        G.crossfireTelemetryPush = lambda cmd, data: True
+        G.sportTelemetryPush = _push
+        _ipump(250)                                       # params module unloaded off the page
+        print('INAV params (EdgeTX): read/scale, save+verify+EEPROM, lookup names, INAV-status arming lock, in-flight set stored at disarm OK')
 else:
     assert wd.page == 6, 'params page in the cycle for ArduPilot, page %s' % wd.page
     for _ in range(25):

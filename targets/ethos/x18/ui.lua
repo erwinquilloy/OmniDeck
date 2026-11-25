@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0d"
+local VERSION = "1.0.0e"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -58,7 +58,9 @@ local function params()
     if paramsErr and os.clock() < paramsRetryAt then error(paramsErr, 0) end
     local ok, p = pcall(function()
       local m = need("params.lua")
-      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt", need("iplist.lua"))
+      -- bfplist.lua: loaded by params.lua only when the flight controller is Betaflight
+      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt", need("iplist.lua"),
+        function() return need("bfplist.lua") end)
       m.onMission = MI.setAp   -- ArduPilot mission download (Stratos firmware) -> the map
       return m
     end)
