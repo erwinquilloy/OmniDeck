@@ -906,7 +906,14 @@ if NATIVE:
       for _, f in pairs(fs) do local r = find(f, 0) if r then return r end end
     end''')
     assert wd.page == 6, ('params page in the cycle for INAV', wd.page)
-    _ipump(300)
+    # the Sensor check line (P.debug) at every step of INAV's start-up too: 1.0.0d stopped on the
+    # variant / version / status steps, which carry no name (TX16S MK3 2026-11-25)
+    _pr0, _dbg = None, set()
+    for _ in range(300):
+        _ipump(1)
+        _pr0 = _pr0 or _findPR(UIm) or _findPR(widget_def)
+        if _pr0 is not None: _dbg.add(str(_pr0.debug()).split('  ')[0][:40])
+    assert any('waiting variant' in d or 'waiting version' in d for d in _dbg) or _pr0 is not None, _dbg
     PRi = _findPR(UIm) or _findPR(widget_def)
     assert PRi is not None and PRi.inav.state == 'ready' and PRi.inav.ver == '9.1.0', ('INAV detected', PRi and PRi.inav.state)
     _v = lambda n: PRi.valueOf(n)

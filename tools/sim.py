@@ -2122,7 +2122,13 @@ if NATIVE:
       end
       for _, k in ipairs({ "wakeup", "paint", "event" }) do local r = find(wt[k], 0) if r then return r end end
     end''')
-    for _ in range(60): step(0.2)
+    # the Sensor check line (P.debug) at every step of INAV's start-up too: 1.0.0d stopped on the
+    # variant / version / status steps, which carry no name (TX16S MK3 2026-11-25)
+    _pr0 = None
+    for _ in range(60):
+        step(0.2)
+        _pr0 = _pr0 or _PRg(wt)
+        if _pr0 is not None: _pr0.debug()
     PRi = _PRg(wt)
     if INAV_SILENT:
         for _ in range(200): step(0.2)

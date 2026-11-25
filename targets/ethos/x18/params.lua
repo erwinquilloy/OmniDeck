@@ -2068,7 +2068,9 @@ local function pendName()
   if pend.m == "item" then return "waiting mission item " .. pend.seq end
   if pend.m == "clear" then return "waiting mission clear" end
   if pend.m == "write" then return "waiting mission write " .. pend.seq end
-  return "waiting " .. pend.name
+  -- INAV steps (variant, version, status, store) and the mission upload carry no name, only
+  -- their step (TX16S MK3 + INAV 2026-11-25: the Sensor check page stopped on a nil name)
+  return "waiting " .. tostring(pend.name or pend.m or "?")
 end
 function P.missionDebug()
   if not P.missionOn then return nil end
