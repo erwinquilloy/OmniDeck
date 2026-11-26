@@ -469,6 +469,11 @@ WP_RADIUS | WP radius | 5
 
 ### INAV settings
 
+| | |
+|---|---|
+| ![INAV PARAMS page, FLIGHT group](docs/screens/params_inav.png) | ![INAV choice setting in the editor](docs/screens/params_inav_choice.png) |
+| INAV 9.1, FLIGHT group: CLI names, plain units. | A choice setting (`nav_rth_alt_mode`) by name, with the value before. |
+
 With INAV 9.1 or later the page reads and changes INAV settings by their CLI names, shown in plain units (degrees, m, m/s) where INAV stores decidegrees, cm and cm/s. Ranges and choice names (for example RTH alt mode AT_LEAST / MAX) come from the flight controller; a setting it doesn't have shows n/a.
 
 | Group | Settings |
@@ -488,6 +493,10 @@ With INAV 9.1 or later the page reads and changes INAV settings by their CLI nam
 - The INAV mission download pauses while the page talks to INAV.
 
 ### Betaflight settings
+
+![Betaflight PARAMS page, TUNE group](docs/screens/params_betaflight.png)
+
+Betaflight 2026.6, the TUNE group; the hint line shows the version, the PID and rate profile and the rates type.
 
 With Betaflight 4.5, 2025.12 or 2026.6 the page reads and changes 58 settings of the **active** PID and rate profile, named as in the Betaflight CLI. Choice settings show by name (TPA mode PD / D, throttle limit OFF / SCALE / CLIP).
 
