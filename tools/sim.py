@@ -2213,6 +2213,9 @@ if NATIVE:
             _bwait('tpa_breakpoint')
             got = [_bv(n) for n in ('anti_gravity_gain', 'tpa_rate', 'tpa_breakpoint', 'dyn_idle_min_rpm', 'angle_limit')]
             assert got == [80, 65, 1350, 3000, 60], ('TUNE reads', got)
+            _bgoto('anti_gravity_gain')
+            for _ in range(10): step(0.2)
+            render('bfparams_tunelist_%s.png' % tag, 6)   # the TUNE group, all read (README screen)
             s = _bsave('anti_gravity_gain', 1)
             assert _FBF.value(ADV, 21, 2) == 85 and s == [(95, 23)], ('anti gravity', _FBF.value(ADV, 21, 2), s)
             s = _bsave('tpa_breakpoint', 2)
