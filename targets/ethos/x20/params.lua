@@ -525,8 +525,14 @@ end
 
 -- a value that arrived (ArduPilot PARAM_VALUE, or INAV's answer through the MSP link). same: the
 -- MSP link compares the raw values itself (nil = compare the float32 bytes)
-local function gotValue(name, v, bytes, same)
-  for _, r in ipairs(LIST) do if r[2] == name then if r.free then autoStep(r, v) end break end end
+-- row: the caller's row when it has it (a Betaflight block hands over up to 24 values at once;
+-- looking each one up in LIST again made that one wakeup cost ~2k instructions more)
+local function gotValue(name, v, bytes, same, row)
+  if row then
+    if row.free then autoStep(row, v) end
+  else
+    for _, r in ipairs(LIST) do if r[2] == name then if r.free then autoStep(r, v) end break end end
+  end
   vals[name], vbytes[name] = v, bytes
   if name == "Q_ENABLE" then qOn = v >= 1 rebuild() end
   if pend and pend.name == name then
@@ -776,7 +782,7 @@ local mSeq, mLast = 0, nil  -- request sequence; the last request (repeated on a
 -- answer decides. ELRS / Crossfire ignore 0x81; mLRS drops 0x7A.
 local mOn, mSize, mCmd, mErr, mBuf, mRxSeq, mPrev = false, 0, 0, false, {}, 0, nil
 local APLIST, ILIST = nil, nil
--- Betaflight (MSP_FC_VARIANT "BTFL", 4.5 / 2025.12): bfplist.lua, loaded only when one answers;
+-- Betaflight (MSP_FC_VARIANT "BTFL", 4.5 / 2025.12 / 2026.6): bfplist.lua, loaded only when one answers;
 -- BLK = the last reply of each block (MSP_PID, _PID_ADVANCED, _RC_TUNING, _FILTER_CONFIG)
 -- (one table: the main chunk is at Lua's limit of 200 locals)
 local BFX = { mod = nil, load = nil, blk = {}, API = 1, STATUS_EX = 150 }
@@ -902,7 +908,7 @@ function BFX.reply(cmd, b, err)
     if x.bf and x.bf[1] == get and x[2] ~= name then
       if BFX.mod.present(x, b) then
         local v = BFX.mod.raw(x, b) * x.k
-        gotValue(x[2], v, f2b(v))
+        gotValue(x[2], v, f2b(v), nil, x)
       else
         vals[x[2]], naAt[x[2]] = false, os.clock()   -- not in this build (no dyn notch / RPM filter)
       end
@@ -937,12 +943,14 @@ local function mspReply(cmd, b, err)
     return
   end
   if m == "bfapi" then
-    -- MSP_API_VERSION -> protocol, major, minor: 1.46 = Betaflight 4.5, 1.47 = 2025.12
+    -- MSP_API_VERSION -> protocol, major, minor: 1.46 = Betaflight 4.5, 1.47 = 2025.12, 1.48 = 2026.6
+    -- (2026.6 only appends to the blocks read here: RPM filter fields after byte 49 of
+    -- MSP_FILTER_CONFIG, battery profile after MSP_STATUS_EX; checked against msp.c 2026.6.2)
     if cmd ~= BFX.API and not (err and cmd == 0) then return end
     pend = nil
     local maj, mnr = b[2] or 0, b[3] or 0
     IN.bfapi = string.format("%d.%d", maj, mnr)
-    if err or maj ~= 1 or (mnr ~= 46 and mnr ~= 47) then IN.state = "bfold" return end
+    if err or maj ~= 1 or mnr < 46 or mnr > 48 then IN.state = "bfold" return end
     if not BFX.mod then
       local ok, mod = pcall(BFX.load)
       if not ok or type(mod) ~= "table" then IN.state, IN.bfErr = "bfold", tostring(mod) return end
@@ -959,9 +967,9 @@ local function mspReply(cmd, b, err)
   if m == "version" and IN.variant == "BTFL" then
     if cmd ~= MSP_FC_VERSION and not (err and cmd == 0) then return end
     pend = nil
-    -- 4.5 sends 4.5.5; 2025.12 sends the year since 2000 (25.12.5, build/version.h FC_CALVER_BASE_YEAR)
+    -- 4.5 sends 4.5.5; 2025.12 and later send the year since 2000 (25.12.5, build/version.h FC_CALVER_BASE_YEAR)
     local y = b[1] or 0
-    if IN.bfapi == "1.47" then y = y + 2000 end
+    if IN.bfapi ~= "1.46" then y = y + 2000 end
     IN.ver = err and "?" or string.format("%d.%d.%d", y, b[2] or 0, b[3] or 0)
     IN.state = "ready"
     return
@@ -1307,7 +1315,7 @@ function P.reset()
   mvSt, mvSkip = 0, 0
   IN.state, IN.variant, IN.ver, IN.meta, IN.profile, IN.plat = "off", nil, nil, {}, nil, nil
   IN.dirty, IN.storeReq, IN.stored, mspViaNow, mLast, BR.path = false, false, nil, nil, nil, nil
-  IN.bfapi, IN.rprof, IN.rtype, BFX.blk = nil, nil, nil, {}
+  IN.bfapi, IN.rprof, IN.rtype, BFX.blk, IN.bfErr = nil, nil, nil, {}, nil
   IN.armed, IN.armedAt, IN.statusAt = nil, nil, -10
   if APLIST then LIST = APLIST end
   if LIST then rebuild() end
@@ -1321,7 +1329,10 @@ local function blocked(s)
     end
     if T.alive() == false then return "No telemetry", "" end
     if IN.state == "bfold" then
-      return "Parameters need Betaflight 4.5 or 2025.12", "This one answers MSP API " .. tostring(IN.bfapi or "?") .. " (4.5 = 1.46, 2025.12 = 1.47).\nOther versions: Betaflight Configurator."
+      if IN.bfErr then   -- the version is fine, bfplist.lua did not load (missing file, memory)
+        return "Betaflight parameter list did not load", "bfplist.lua: " .. IN.bfErr
+      end
+      return "Parameters need Betaflight 4.5, 2025.12 or 2026.6", "This one answers MSP API " .. tostring(IN.bfapi or "?") .. " (4.5 = 1.46, 2025.12 = 1.47, 2026.6 = 1.48).\nOther versions: Betaflight Configurator."
     end
     if IN.state == "notinav" then
       return "Parameters need ArduPilot, INAV or Betaflight", "This flight controller is " .. tostring(IN.variant) .. "."
@@ -2123,6 +2134,41 @@ function P.tap(s, x, y)
     return true
   end
   return true
+end
+
+-- holding - / + (user 2026-11-26): after HOLD_DELAY s the step repeats until the finger lifts,
+-- faster after HOLD_FAST s. Only the draft changes: nothing goes to the flight controller before Save.
+-- The UI calls P.holdStart at the touch, P.holdEnd at the lift or a drag; the steps run in P.wakeup.
+local HOLD = { delay = 0.5, fast = 2.5, slowS = 0.1, fastS = 0.05, cur = nil, wake = P.wakeup,
+  btn = { ["-"] = -1, ["+"] = 1, ["-10"] = -10, ["+10"] = 10 } }   -- cur: { d, row, at, nextAt, fired }
+function P.holdStart(s, x, y)
+  HOLD.cur = nil
+  if not edit or blocked(s) or locked(s, edit) then return end
+  local b = hit(x, y)
+  local d = b and b.k == "btn" and HOLD.btn[b.i]
+  if d then
+    local t = os.clock()
+    HOLD.cur = { d = d, row = edit, at = t, nextAt = t + HOLD.delay }
+  end
+end
+-- true when the hold has repeated: the lift then adds no step of its own
+function P.holdEnd()
+  local h = HOLD.cur
+  HOLD.cur = nil
+  return h ~= nil and h.fired == true
+end
+function P.wakeup(s)
+  HOLD.wake(s)
+  local h = HOLD.cur
+  if not h then return end
+  if edit ~= h.row or blocked(s) or locked(s, edit) then HOLD.cur = nil return end
+  local t = os.clock()
+  if t - h.at > 60 then HOLD.cur = nil return end   -- a lift that never arrived
+  if t < h.nextAt then return end
+  nudge(h.d)
+  h.fired = true
+  h.nextAt = t + ((t - h.at >= HOLD.fast) and HOLD.fastS or HOLD.slowS)
+  if lcd and lcd.invalidate then pcall(lcd.invalidate) end
 end
 
 function P.editing() return edit ~= nil end

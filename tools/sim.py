@@ -286,11 +286,11 @@ def inav_reply2(cmd, p):
         for nm in (s['look'] or []): out += list(nm.encode()) + [0]
         return out + _enc(s['t'], _sval(s)), False
     return None, False
-# OD_FC=BF45 / BF2025 / BFOLD: a Betaflight (tools/fake_bf.py) answers the MSP instead of the INAV fake
+# OD_FC=BF45 / BF2025 / BF2026 / BFOLD: a Betaflight (tools/fake_bf.py) answers the MSP instead of the INAV fake
 _BF = os.environ.get('OD_FC', '') if os.environ.get('OD_FC', '').startswith('BF') else ''
 if _BF:
     from fake_bf import FakeBF
-    _FBF = FakeBF(api={'BF45': 46, 'BF2025': 47, 'BFOLD': 45}[_BF])
+    _FBF = FakeBF(api={'BF45': 46, 'BF2025': 47, 'BF2026': 48, 'BFOLD': 45}[_BF])
     inav_reply2 = lambda cmd, p: _FBF.reply(cmd, p)
 def fc_receive2(b, transport):
     """a complete MSPv2 request: flags, cmd lo, cmd hi, size lo, size hi, payload"""
@@ -687,7 +687,8 @@ CNT = {}
 DIST = {}
 WORST = {}
 if COUNT:
-    _cnt = L.execute('''PROF = {} PROF_ON = false
+    # OD_PROF_ALL=1: per-line profile of every call (sampled every 25), worst call per page printed at exit
+    _cnt = L.execute('''PROF = {} PROF_ON = os.getenv("OD_PROF_ALL") == "1"
     return function(f, ...)
         local n = 0
         CALL = {}
@@ -718,6 +719,8 @@ if COUNT:
         return g
     import atexit
     atexit.register(lambda: print('INSTRUCTIONS worst per call:', sorted(CNT.items(), key=lambda kv: -kv[1])))
+    if os.environ.get('OD_PROF_ALL') == '1':
+        atexit.register(lambda: [print('WORST', k, n, top[:8]) for k, (n, top) in sorted(WORST.items(), key=lambda kv: -kv[1][0])[:3]])
     _mem = L.eval('function() collectgarbage("collect") return collectgarbage("count") end')
     MEM = [0.0]
     atexit.register(lambda: print('LUA MEMORY KB now %.0f, peak seen %.0f' % (_mem(), MEM[0])))
@@ -2126,7 +2129,8 @@ if NATIVE:
           local r = find(v, d + 1) if r then return r end
         end
       end
-      for _, k in ipairs({ "wakeup", "paint", "event" }) do local r = find(wt[k], 0) if r then return r end end
+      -- OD_COUNT wraps wakeup / paint / event in Python: the Lua originals are kept as wakeup0 ...
+      for _, k in ipairs({ "wakeup0", "paint0", "event0", "wakeup", "paint", "event" }) do local r = find(wt[k], 0) if r then return r end end
     end''')
     # the Sensor check line (P.debug) at every step of INAV's start-up too: 1.0.0d stopped on the
     # variant / version / status steps, which carry no name (TX16S MK3 2026-11-25)
@@ -2137,21 +2141,26 @@ if NATIVE:
         if _pr0 is not None: _pr0.debug()
     PRi = _PRg(wt)
     if _BF:
-        # ---- Betaflight PARAMS (bfplist.lua; tools/fake_bf.py). OD_FC=BF45 / BF2025 / BFOLD
+        # ---- Betaflight PARAMS (bfplist.lua; tools/fake_bf.py). OD_FC=BF45 / BF2025 / BF2026 / BFOLD
         if _BF == 'BFOLD':
             assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'bfold', ('old Betaflight refused', PRi.inav.state)
             render('bfparams_old_%s.png' % tag, 6)
             assert not _FBF.sets, 'nothing written to an unsupported Betaflight'
             print('Betaflight PARAMS (Ethos): API 1.45 gets the "needs 4.5 or 2025.12" screen OK')
         else:
-            _api = 47 if _BF == 'BF2025' else 46
+            _api = {'BF2025': 47, 'BF2026': 48}.get(_BF, 46)
             assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'ready', ('Betaflight detected', PRi.inav.state)
-            assert PRi.inav.ver == ('2025.12.5' if _api == 47 else '4.5.5'), PRi.inav.ver
-            _w = 'max' if _api == 47 else 'min'
+            assert PRi.inav.ver == {46: '4.5.5', 47: '2025.12.5', 48: '2026.6.2'}[_api], PRi.inav.ver
+            _w = 'max' if _api >= 47 else 'min'
             BF_TABS = [('PID', ['p_roll', 'i_roll', 'd_roll', 'p_pitch', 'i_pitch', 'd_pitch', 'p_yaw', 'i_yaw', 'd_yaw']),
-                       ('FF D', ['f_roll', 'f_pitch', 'f_yaw'] + ['d_%s_%s' % (_w, a) for a in ('roll', 'pitch', 'yaw')] + ['d_max_gain']),
+                       ('FF D', ['f_roll', 'f_pitch', 'f_yaw'] + ['d_%s_%s' % (_w, a) for a in ('roll', 'pitch', 'yaw')] + ['d_max_gain', 'feedforward_transition', 'feedforward_averaging', 'feedforward_smooth_factor',
+                                'feedforward_jitter_factor', 'feedforward_boost', 'feedforward_max_rate_limit']),
+                       ('TUNE', ['anti_gravity_gain', 'iterm_relax_cutoff', 'tpa_mode', 'tpa_rate', 'tpa_breakpoint',
+                                 'throttle_boost', 'dyn_idle_min_rpm', 'motor_output_limit', 'vbat_sag_compensation',
+                                 'thrust_linear', 'angle_limit']),
                        ('RATES', ['roll_rc_rate', 'roll_srate', 'roll_expo', 'pitch_rc_rate', 'pitch_srate', 'pitch_expo',
-                                  'yaw_rc_rate', 'yaw_srate', 'yaw_expo', 'thr_mid', 'thr_expo']),
+                                  'yaw_rc_rate', 'yaw_srate', 'yaw_expo', 'thr_mid', 'thr_expo',
+                                  'throttle_limit_type', 'throttle_limit_percent']),
                        ('FILTERS', ['gyro_lpf1_dyn_min_hz', 'gyro_lpf1_dyn_max_hz', 'gyro_lpf2_static_hz', 'dterm_lpf1_dyn_min_hz',
                                     'dterm_lpf1_dyn_max_hz', 'dterm_lpf2_static_hz', 'dyn_notch_count', 'dyn_notch_q',
                                     'dyn_notch_min_hz', 'dyn_notch_max_hz', 'rpm_filter_harmonics', 'rpm_filter_min_hz'])]
@@ -2198,6 +2207,29 @@ if NATIVE:
             s = _bsave('roll_rc_rate', 1)
             assert _bv('roll_srate') == 670 and _FBF.value(RC, 0) == 8 and _FBF.value(RC, 12) == 7 and s == [(204, 14)], ('rates', _FBF.block(RC), s)
             render('bfparams_rates_%s.png' % tag, 6)
+            # 3b the rows added for 1.0.0f (TUNE tab, FF details, throttle limit): one field each, the
+            # SET cut at the end of that field's group, nothing else in the block changes
+            adv1, rc1 = list(_FBF.block(ADV)), list(_FBF.block(RC))
+            _bwait('tpa_breakpoint')
+            got = [_bv(n) for n in ('anti_gravity_gain', 'tpa_rate', 'tpa_breakpoint', 'dyn_idle_min_rpm', 'angle_limit')]
+            assert got == [80, 65, 1350, 3000, 60], ('TUNE reads', got)
+            s = _bsave('anti_gravity_gain', 1)
+            assert _FBF.value(ADV, 21, 2) == 85 and s == [(95, 23)], ('anti gravity', _FBF.value(ADV, 21, 2), s)
+            s = _bsave('tpa_breakpoint', 2)
+            assert _FBF.value(ADV, 59, 2) == 1370 and s == [(95, 61)], ('TPA breakpoint', _FBF.value(ADV, 59, 2), s)
+            s = _bsave('tpa_mode', 1)
+            assert _FBF.value(ADV, 57) == 1 and s == [(95, 61)], ('TPA mode PD -> D', _FBF.value(ADV, 57), s)
+            s = _bsave('dyn_idle_min_rpm', 1)
+            assert _FBF.value(ADV, 49) == 31 and s == [(95, 50)], ('dyn idle 3000 -> 3100 rpm', _FBF.value(ADV, 49), s)
+            s = _bsave('feedforward_smooth_factor', -1)
+            assert _FBF.value(ADV, 51) == 24 and s == [(95, 57)], ('FF smoothing', _FBF.value(ADV, 51), s)
+            a = _FBF.block(ADV)
+            assert [i for i in range(len(a)) if a[i] != adv1[i]] == [21, 49, 51, 57, 59], ('only those bytes', a, adv1)
+            s = _bsave('throttle_limit_type', 2)
+            r = _FBF.block(RC)
+            assert _FBF.value(RC, 14) == 2 and s == [(204, 16)], ('throttle limit CLIP', _FBF.value(RC, 14), s)
+            assert [i for i in range(len(r)) if r[i] != rc1[i]] == [14], ('only the limit type', r, rc1)
+            render('bfparams_tune_%s.png' % tag, 6)
             fil0 = list(_FBF.block(FIL))
             s = _bsave('dyn_notch_max_hz', 1)
             f = _FBF.block(FIL)

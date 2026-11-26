@@ -867,7 +867,7 @@ if NATIVE:
     # OD_MLRS_BRIDGE=1: mLRS cbridge with the MSP-over-cbridge Tx firmware (raw MSP in 0x81 / 0x82 frames)
     _MLRS = os.environ.get('OD_MLRS_BRIDGE') == '1' and not SPORT
     _NOFEAT = os.environ.get('OD_BF_NOFEAT') == '1'   # Betaflight built without dyn notch / RPM filter
-    _fi = FakeBF(api={'BF45': 46, 'BF2025': 47, 'BFOLD': 45}[_BF], bridge=_MLRS, nofeat=_NOFEAT) if _BF else FakeInav(bridge=_MLRS)
+    _fi = FakeBF(api={'BF45': 46, 'BF2025': 47, 'BF2026': 48, 'BFOLD': 45}[_BF], bridge=_MLRS, nofeat=_NOFEAT) if _BF else FakeInav(bridge=_MLRS)
     _lst = lambda t: [int(t[k]) for k in range(1, len(t) + 1)] if not isinstance(t, (list, tuple)) else list(t)
     G.crossfireTelemetryPush = lambda cmd, data: _fi.crsf_push(int(cmd), _lst(data))
     G.sportTelemetryPush = lambda *a: _fi.sport_push(*[int(x) for x in a[:4]]) if len(a) >= 4 else True
@@ -911,7 +911,7 @@ if NATIVE:
       for _, f in pairs(fs) do local r = find(f, 0) if r then return r end end
     end''')
     if _BF:
-        # ---- Betaflight PARAMS (bfplist.lua; tools/fake_bf.py). OD_FC=BF45 / BF2025 / BFOLD
+        # ---- Betaflight PARAMS (bfplist.lua; tools/fake_bf.py). OD_FC=BF45 / BF2025 / BF2026 / BFOLD
         assert wd.page == 6, ('params page in the cycle for Betaflight', wd.page)
         _pr0 = None
         for _ in range(300):
@@ -925,18 +925,23 @@ if NATIVE:
             assert not _fi.sets, 'nothing written to an unsupported Betaflight'
             print('Betaflight PARAMS (EdgeTX): API 1.45 gets the "needs 4.5 or 2025.12" screen, nothing read or set OK')
         else:
-            _api = 47 if _BF == 'BF2025' else 46
+            _api = {'BF2025': 47, 'BF2026': 48}.get(_BF, 46)
             assert PRi.inav.variant == 'BTFL' and PRi.inav.state == 'ready', ('Betaflight detected', PRi.inav.state)
-            assert PRi.inav.ver == ('2025.12.5' if _api == 47 else '4.5.5'), ('version', PRi.inav.ver)
+            assert PRi.inav.ver == {46: '4.5.5', 47: '2025.12.5', 48: '2026.6.2'}[_api], ('version', PRi.inav.ver)
             _v = lambda n: PRi.valueOf(n)
             def _bwait(name, n=600):
                 for _ in range(n):
                     if _v(name) is not None: return
                     _ipump(1)
             BF_TABS = [('PID', ['p_roll', 'i_roll', 'd_roll', 'p_pitch', 'i_pitch', 'd_pitch', 'p_yaw', 'i_yaw', 'd_yaw']),
-                       ('FF D', ['f_roll', 'f_pitch', 'f_yaw'] + ['d_%s_%s' % ('max' if _api == 47 else 'min', a) for a in ('roll', 'pitch', 'yaw')] + ['d_max_gain']),
+                       ('FF D', ['f_roll', 'f_pitch', 'f_yaw'] + ['d_%s_%s' % ('max' if _api >= 47 else 'min', a) for a in ('roll', 'pitch', 'yaw')] + ['d_max_gain', 'feedforward_transition', 'feedforward_averaging', 'feedforward_smooth_factor',
+                                'feedforward_jitter_factor', 'feedforward_boost', 'feedforward_max_rate_limit']),
+                       ('TUNE', ['anti_gravity_gain', 'iterm_relax_cutoff', 'tpa_mode', 'tpa_rate', 'tpa_breakpoint',
+                                 'throttle_boost', 'dyn_idle_min_rpm', 'motor_output_limit', 'vbat_sag_compensation',
+                                 'thrust_linear', 'angle_limit']),
                        ('RATES', ['roll_rc_rate', 'roll_srate', 'roll_expo', 'pitch_rc_rate', 'pitch_srate', 'pitch_expo',
-                                  'yaw_rc_rate', 'yaw_srate', 'yaw_expo', 'thr_mid', 'thr_expo']),
+                                  'yaw_rc_rate', 'yaw_srate', 'yaw_expo', 'thr_mid', 'thr_expo',
+                                  'throttle_limit_type', 'throttle_limit_percent']),
                        ('FILTERS', ['gyro_lpf1_dyn_min_hz', 'gyro_lpf1_dyn_max_hz', 'gyro_lpf2_static_hz', 'dterm_lpf1_dyn_min_hz',
                                     'dterm_lpf1_dyn_max_hz', 'dterm_lpf2_static_hz', 'dyn_notch_count', 'dyn_notch_q',
                                     'dyn_notch_min_hz', 'dyn_notch_max_hz', 'rpm_filter_harmonics', 'rpm_filter_min_hz'])]
@@ -976,10 +981,10 @@ if NATIVE:
             assert _fi.value(ADV, 34, 2) == 128 and s == [(95, 39)], ('FF set', _fi.value(ADV, 34, 2), s)
             assert a[:34] == adv0[:34] and a[36:] == adv0[36:], 'only F pitch changed'
             # D max / D min label by version
-            _dn = 'd_max_roll' if _api == 47 else 'd_min_roll'     # Betaflight's CLI name per version
+            _dn = 'd_max_roll' if _api >= 47 else 'd_min_roll'     # Betaflight's CLI name per version
             _bgoto(_dn)
             lab = L.eval('function(P, n) for _, r in ipairs(P._list()) do if r[2] == n then return r[3] end end end')(PRi, _dn)
-            assert lab == ('Roll D max' if _api == 47 else 'Roll D min') and _v(_dn) == 30, ('D min / D max row', lab, _v(_dn))
+            assert lab == ('Roll D max' if _api >= 47 else 'Roll D min') and _v(_dn) == 30, ('D min / D max row', lab, _v(_dn))
             render('etx_bfparams_ff_%s.png' % tag, 6)
             # 3 rates (profile 1 = ACTUAL: centre / max rate in deg/s); roll RC rate +1 must not drag pitch
             _bwait('roll_rc_rate')
@@ -990,6 +995,29 @@ if NATIVE:
             s = _bsave('roll_rc_rate', 1)
             assert _fi.value(RC, 0) == 8 and _fi.value(RC, 12) == 7 and s == [(204, 14)], ('roll rate only', _fi.block(RC), s)
             render('etx_bfparams_rates_%s.png' % tag, 6)
+            # 3b the rows added for 1.0.0f (TUNE tab, FF details, throttle limit): one field each, the
+            # SET cut at the end of that field's group, nothing else in the block changes
+            adv1, rc1 = list(_fi.block(ADV)), list(_fi.block(RC))
+            _bwait('tpa_breakpoint')
+            got = [_v(n) for n in ('anti_gravity_gain', 'tpa_rate', 'tpa_breakpoint', 'dyn_idle_min_rpm', 'angle_limit')]
+            assert got == [80, 65, 1350, 3000, 60], ('TUNE reads', got)
+            s = _bsave('anti_gravity_gain', 1)
+            assert _fi.value(ADV, 21, 2) == 85 and s == [(95, 23)], ('anti gravity', _fi.value(ADV, 21, 2), s)
+            s = _bsave('tpa_breakpoint', 2)
+            assert _fi.value(ADV, 59, 2) == 1370 and s == [(95, 61)], ('TPA breakpoint', _fi.value(ADV, 59, 2), s)
+            s = _bsave('tpa_mode', 1)
+            assert _fi.value(ADV, 57) == 1 and s == [(95, 61)], ('TPA mode PD -> D', _fi.value(ADV, 57), s)
+            s = _bsave('dyn_idle_min_rpm', 1)
+            assert _fi.value(ADV, 49) == 31 and s == [(95, 50)], ('dyn idle 3000 -> 3100 rpm', _fi.value(ADV, 49), s)
+            s = _bsave('feedforward_smooth_factor', -1)
+            assert _fi.value(ADV, 51) == 24 and s == [(95, 57)], ('FF smoothing', _fi.value(ADV, 51), s)
+            a = _fi.block(ADV)
+            assert [i for i in range(len(a)) if a[i] != adv1[i]] == [21, 49, 51, 57, 59], ('only those bytes', a, adv1)
+            s = _bsave('throttle_limit_type', 2)
+            r = _fi.block(RC)
+            assert _fi.value(RC, 14) == 2 and s == [(204, 16)], ('throttle limit CLIP', _fi.value(RC, 14), s)
+            assert [i for i in range(len(r)) if r[i] != rc1[i]] == [14], ('only the limit type', r, rc1)
+            render('etx_bfparams_tune_%s.png' % tag, 6)
             if _NOFEAT:
                 # dyn notch / RPM filter not compiled in: zeros from the FC, shown n/a, never a made-up 0
                 _bgoto('dyn_notch_q')
@@ -1027,7 +1055,7 @@ if NATIVE:
             _bgoto('p_roll'); _bwait('p_roll')
             assert PRi.inav.profile == 2 and _v('p_roll') == 47, ('profile 3 read', PRi.inav.profile, _v('p_roll'))
             line = PRi.inavLine()
-            assert 'PID profile 3' in line and ('2025.12.5' if _api == 47 else '4.5.5') in line, line
+            assert 'PID profile 3' in line and {46: '4.5.5', 47: '2025.12.5', 48: '2026.6.2'}[_api] in line, line
             render('etx_bfparams_profile3_%s.png' % tag, 6)
             print('Betaflight %s PARAMS (EdgeTX): detect + version, PID / FF / rates (ACTUAL, roll without pitch) / filters saved, verified, stored; '
                   'only the edited bytes and their group sent; armed lock; profile switch on the FC re-read OK' % PRi.inav.ver)

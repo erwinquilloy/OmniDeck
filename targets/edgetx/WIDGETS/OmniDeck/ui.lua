@@ -1685,6 +1685,15 @@ local function zoomBtnAt(b, x, y)
   return nil
 end
 
+-- PARAMS page: holding - / + repeats the step (params.lua P.holdStart / P.holdEnd)
+local function paramsHold(w, how, x, y)
+  if w.page ~= PAGE_PARAMS then return false end
+  local ok, pm = pcall(paramsFor, w)
+  if not ok or not pm or not pm.holdStart then return false end
+  if how == "start" then pm.holdStart(T.s, x, y) return false end
+  return pm.holdEnd()
+end
+
 local tapAt, keyEvent   -- below: what a tap and a key do
 -- pages that act on the press itself, not the lift: nothing on them is dragged, and EdgeTX hands
 -- a widget one event per update, so on these heavy pages (mission editor, PARAMS) the lift was
@@ -1696,11 +1705,13 @@ local function event(w, category, value, x, y)
       w.touchX, w.touchY, w.touchScroll, w.dragged = x, y, w.msgScroll or 0, false
       w.touchChk = w.chkScroll or 0
       w.touchUsed = false
+      paramsHold(w, "start", x, y)   -- before the press acts (a row press opens the editor)
       if onPress(w) then w.touchUsed = true tapAt(w, x, y, x, y) end
       return true
     end
     if value == TOUCH_MOVE then
       if w.touchY and math.abs(y - w.touchY) > TAP_PX then w.dragged = true end
+      if w.dragged then paramsHold(w, "end") end   -- slid off: the repeat stops
       -- messages: drag down to read older lines (like a phone)
       if w.dragged and w.page == 3 and w.msgRowH then
         local rows = math.floor((y - w.touchY) / w.msgRowH + 0.5)
@@ -1716,6 +1727,11 @@ local function event(w, category, value, x, y)
       return true
     end
     if value ~= TOUCH_END then return true end
+    if paramsHold(w, "end") then   -- the hold repeated: the lift adds no step
+      w.touchX, w.touchY, w.dragged, w.touchUsed = nil, nil, false, false
+      lcd.invalidate()
+      return true
+    end
     local dragged = w.dragged or (w.touchY and math.abs(y - w.touchY) > TAP_PX)
     local sx, sy, used = w.touchX, w.touchY, w.touchUsed
     w.touchX, w.touchY, w.dragged, w.touchUsed = nil, nil, false, false
