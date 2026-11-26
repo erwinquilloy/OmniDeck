@@ -1,10 +1,15 @@
-OmniDeck 1.0.0e for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 1.0.0f for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0f (after 1.0.0e)
+- Main page, top-right panel: the logo (OmniDeck, Stratos or your own PNG in logos/) now fills
+  the panel as far as it can and keeps its proportions, so it is never stretched. A small logo is
+  enlarged, a big one shrunk, a wide one sized by the panel's width.
 
 WHAT'S NEW IN 1.0.0e (after 1.0.0d)
 - PARAMS page for Betaflight 4.5 and 2025.12, over ELRS / TBS Crossfire (150 Hz) and S.Port /
