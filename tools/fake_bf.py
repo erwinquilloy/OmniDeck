@@ -19,7 +19,7 @@ SET = {202: PID, 95: ADV, 204: RC, 93: FIL}
 # SET groups after the unconditional part: (start offset, length), each applied only if the bytes
 # remaining are at least its length (msp.c "if (sbufBytesRemaining(src) >= N)")
 GROUPS = {
-    ADV: (17, [(17, 2), (19, 4), (23, 2), (25, 14), (39, 7), (46, 1), (47, 3)]),
+    ADV: (17, [(17, 2), (19, 4), (23, 2), (25, 14), (39, 7), (46, 1), (47, 3), (50, 7), (57, 4)]),
     RC: (10, [(10, 1), (11, 1), (12, 1), (13, 1), (14, 2), (16, 6), (22, 1), (23, 1)]),
     FIL: (5, [(5, 8), (13, 4), (17, 1), (18, 10), (28, 9), (37, 8), (45, 2), (47, 2)]),
 }
@@ -49,9 +49,13 @@ class FakeBF(FakeInav):
         p = [0] * 15
         for ax, (P, I, D) in enumerate(((45, 80, 40), (47, 84, 46), (45, 80, 0))):
             p[ax * 3:ax * 3 + 3] = [P + i, I, D]
-        a = [0] * 70
+        a = [0] * 61                                          # the same 61 bytes on 4.5 / 2025.12 / 2026.6
         for o, v in ((32, 120), (34, 125), (36, 120)): put(a, o, v, 2)
         a[39:43] = [30, 34, 0, 37]
+        a[17], a[30], a[46], a[47], a[49] = 60, 5, 15, 100, 30   # angle limit, throttle boost, relax cutoff, motor limit, dyn idle
+        put(a, 21, 80, 2)                                     # anti gravity
+        a[51:55] = [25, 15, 100, 7]                           # FF smoothing, boost, max rate limit, jitter
+        a[57], a[58] = 0, 65; put(a, 59, 1350, 2)             # TPA mode PD, rate 65 %, breakpoint 1350
         return {PID: p, ADV: a}
 
     def _rates(self, i):
@@ -69,6 +73,8 @@ class FakeBF(FakeInav):
         put(f, 26, 150, 2)                                   # D-term LPF2
         for o, v in ((29, 250), (31, 500), (33, 75), (35, 150), (39, 300), (41, 100), (45, 600)): put(f, o, v, 2)
         f[43], f[44], f[48] = 3, 100, 3
+        if self.api >= 48:   # 2026.6 (API 1.48): RPM fade range u16, RPM Q u16, 3 harmonic weights
+            f += [50, 0, 0xF4, 0x01, 100, 100, 100]
         if self.nofeat:
             for o in (37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48): f[o] = 0
         return f
@@ -84,10 +90,12 @@ class FakeBF(FakeInav):
         if cmd == 2: return [ord(c) for c in 'BTFL'], False
         if cmd == 1: return [0, 1, self.api], False
         if cmd == 3:
+            if self.api >= 48: return [26, 6, 2] + [8] + [ord(c) for c in '2026.6.2'], False
             return ([25, 12, 5] + [9] + [ord(c) for c in '2025.12.5']) if self.api >= 47 else [4, 5, 5], False
         if cmd == 150:
             out = [0, 0, 0, 0, 0, 0] + [1 if self.armed else 0, 0, 0, 0] + [self.pid_prof, 0, 0, 4, self.rate_prof]
-            return out + [0, 30, 0, 0, 0, 0, 0], False
+            out = out + [0, 30, 0, 0, 0, 0, 0]
+            return (out + [3, 0]) if self.api >= 48 else out, False   # 2026.6: battery profile count / index
         if cmd == 250:
             if self.armed: return [], True
             self.stores += 1

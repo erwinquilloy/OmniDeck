@@ -10,6 +10,18 @@ WHAT'S NEW IN 1.0.0f (after 1.0.0e)
 - Main page, top-right panel: the logo (OmniDeck, Stratos or your own PNG in logos/) now fills
   the panel as far as it can and keeps its proportions, so it is never stretched. A small logo is
   enlarged, a big one shrunk, a wide one sized by the panel's width.
+- PARAMS page for Betaflight 2026.6 too (MSP API 1.48), besides 4.5 and 2025.12. 2026.6 only
+  added fields after the ones OmniDeck reads and writes. Checked on a real quad over ELRS.
+- PARAMS editor: hold - or + and the value keeps stepping (after half a second, 10 steps a
+  second, faster after 2.5 s) until the finger lifts or slides off the button. A tap is still
+  one step. Nothing is sent before Save.
+- If the Betaflight parameter list can't be loaded on the radio, the page now says so and gives
+  the reason, instead of asking for another Betaflight version.
+- Betaflight PARAMS: 19 more settings, the ones pilots tune at the field. FF D adds FF
+  transition, averaging, smoothing, jitter reduction, boost and max rate limit. A new TUNE tab
+  has anti gravity, I-term relax cutoff, TPA mode / rate / breakpoint, throttle boost, dynamic
+  idle, motor output limit, vbat sag compensation, thrust linear and angle limit. RATES adds
+  throttle limit type and percent. Same byte layout on 4.5, 2025.12 and 2026.6.
 
 WHAT'S NEW IN 1.0.0e (after 1.0.0d)
 - PARAMS page for Betaflight 4.5 and 2025.12, over ELRS / TBS Crossfire (150 Hz) and S.Port /
