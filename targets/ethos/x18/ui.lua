@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0d"
+local VERSION = "1.0.0f"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -58,7 +58,9 @@ local function params()
     if paramsErr and os.clock() < paramsRetryAt then error(paramsErr, 0) end
     local ok, p = pcall(function()
       local m = need("params.lua")
-      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt", need("iplist.lua"))
+      -- bfplist.lua: loaded by params.lua only when the flight controller is Betaflight
+      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt", need("iplist.lua"),
+        function() return need("bfplist.lua") end)
       m.onMission = MI.setAp   -- ArduPilot mission download (Stratos firmware) -> the map
       return m
     end)
@@ -738,14 +740,17 @@ local function logoPanel(x, y, w, h)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
-  -- fitted to the whole panel (X18: 208 x 123), aspect kept, never enlarged. It was a square of
-  -- the short side minus 16 px (107 x 107), so wide logos came out small with wide margins
-  -- (Marcin, X18, 2026-11-08: 100 x 100 left a margin, 200 x 200 was scaled back down).
-  local k = math.min(1, (w - 4) / logo.w, (h - 4) / logo.h)
+  -- fitted to the whole panel (X18: 208 x 123, 2 px margin), proportions kept: one scale for
+  -- both sides, so the picture is never stretched. A smaller logo is enlarged to fill the panel
+  -- and a bigger one shrunk. (It was a square of the short side minus 16 px, then shrink-only:
+  -- Marcin, X18, 2026-11-08: 100 x 100 left a margin, 200 x 200 was scaled back down.)
+  local k = math.min((w - 4) / logo.w, (h - 4) / logo.h)
   local dw, dh = I(logo.w * k), I(logo.h * k)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
-  if k < 1 then
-    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh) then lcd.drawBitmap(bx, by, b) end
+  if dw ~= logo.w or dh ~= logo.h then
+    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh) then
+      lcd.drawBitmap(I(x + (w - logo.w) / 2), I(y + (h - logo.h) / 2), b)
+    end
   else
     lcd.drawBitmap(bx, by, b)
   end

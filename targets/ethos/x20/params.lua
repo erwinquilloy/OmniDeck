@@ -776,6 +776,11 @@ local mSeq, mLast = 0, nil  -- request sequence; the last request (repeated on a
 -- answer decides. ELRS / Crossfire ignore 0x81; mLRS drops 0x7A.
 local mOn, mSize, mCmd, mErr, mBuf, mRxSeq, mPrev = false, 0, 0, false, {}, 0, nil
 local APLIST, ILIST = nil, nil
+-- Betaflight (MSP_FC_VARIANT "BTFL", 4.5 / 2025.12): bfplist.lua, loaded only when one answers;
+-- BLK = the last reply of each block (MSP_PID, _PID_ADVANCED, _RC_TUNING, _FILTER_CONFIG)
+-- (one table: the main chunk is at Lua's limit of 200 locals)
+local BFX = { mod = nil, load = nil, blk = {}, API = 1, STATUS_EX = 150 }
+function BFX.fcName() return IN.variant == "BTFL" and "Betaflight" or "INAV" end
 
 local function zname(name)
   local t = {}
@@ -861,6 +866,60 @@ local function forgetPids()
   for _, r in ipairs(LIST) do if r.pid then vals[r[2]] = nil end end
 end
 
+-- a Betaflight reply for a row: the block read (all its rows get their values), the block read just
+-- before a save (the save goes out on fresh bytes), the SET's answer, the read-back after it
+function BFX.reply(cmd, b, err)
+  local name = pend and pend.name
+  local r = name and rowOf(name)
+  if not r or not r.bf then return end
+  local get = r.bf[1]
+  if pend.bfset then
+    if cmd ~= pend.bfset then return end
+    if err then phase, phaseCol = "Not saved: Betaflight refused the value", "bad" pend = nil return end
+    IN.dirty = true   -- set in RAM: stored by the EEPROM write (disarmed)
+    pend = { name = name, check = pend.set, checkRaw = pend.setRaw, tries = 0, bfget = get }
+    mspSend(get)
+    return
+  end
+  if cmd ~= get then return end
+  if err or #b < (BFX.mod.MINLEN[get] or 0) then
+    if not err then P.stats.bad = P.stats.bad + 1 end
+    if pend.check or pend.bfpre then phase, phaseCol = "No answer: check the value in Betaflight Configurator", "warn" end
+    pend = nil
+    vals[name], naAt[name] = false, os.clock()
+    return
+  end
+  BFX.blk[get] = b
+  if get == 111 then IN.rtype = b[23] or 0 BFX.mod.ratesType(IN.rtype) end
+  if pend.bfpre then
+    -- the save, on the bytes just read: only this row's field changes
+    local set = BFX.mod.SET[get]
+    pend.bfpre, pend.bfset = nil, set
+    mspSend(set, BFX.mod.patch(r, b, pend.setRaw))
+    return
+  end
+  for _, x in ipairs(LIST) do
+    if x.bf and x.bf[1] == get and x[2] ~= name then
+      if BFX.mod.present(x, b) then
+        local v = BFX.mod.raw(x, b) * x.k
+        gotValue(x[2], v, f2b(v))
+      else
+        vals[x[2]], naAt[x[2]] = false, os.clock()   -- not in this build (no dyn notch / RPM filter)
+      end
+    end
+  end
+  if not BFX.mod.present(r, b) then
+    if pend.check then phase, phaseCol = "Not in this Betaflight build", "warn" end
+    pend = nil
+    vals[name], naAt[name] = false, os.clock()
+    return
+  end
+  local raw = BFX.mod.raw(r, b)
+  local same = nil
+  if pend.check then same = raw == pend.checkRaw end
+  gotValue(name, raw * r.k, f2b(raw * r.k), same)
+end
+
 -- one complete INAV reply
 local function mspReply(cmd, b, err)
   P.stats.rx = P.stats.rx + 1
@@ -874,7 +933,37 @@ local function mspReply(cmd, b, err)
     pend = nil
     if err then IN.state = "old" return end   -- an INAV before 9.0 answers a v2 request with an error
     IN.variant = string.char(b[1] or 63, b[2] or 63, b[3] or 63, b[4] or 63)
-    IN.state = IN.variant == "INAV" and "version" or "notinav"
+    IN.state = (IN.variant == "INAV" and "version") or (IN.variant == "BTFL" and BFX.load and "bfapi") or "notinav"
+    return
+  end
+  if m == "bfapi" then
+    -- MSP_API_VERSION -> protocol, major, minor: 1.46 = Betaflight 4.5, 1.47 = 2025.12
+    if cmd ~= BFX.API and not (err and cmd == 0) then return end
+    pend = nil
+    local maj, mnr = b[2] or 0, b[3] or 0
+    IN.bfapi = string.format("%d.%d", maj, mnr)
+    if err or maj ~= 1 or (mnr ~= 46 and mnr ~= 47) then IN.state = "bfold" return end
+    if not BFX.mod then
+      local ok, mod = pcall(BFX.load)
+      if not ok or type(mod) ~= "table" then IN.state, IN.bfErr = "bfold", tostring(mod) return end
+      BFX.mod = mod
+    end
+    BFX.mod.forVersion(mnr)
+    LIST, BFX.blk = BFX.mod.rows, {}
+    vals, vbytes, edit = {}, {}, nil
+    sel, top, grp, focus, tabCur, lastSel = 0, 0, nil, "tabs", nil, nil
+    rebuild()
+    IN.state = "version"
+    return
+  end
+  if m == "version" and IN.variant == "BTFL" then
+    if cmd ~= MSP_FC_VERSION and not (err and cmd == 0) then return end
+    pend = nil
+    -- 4.5 sends 4.5.5; 2025.12 sends the year since 2000 (25.12.5, build/version.h FC_CALVER_BASE_YEAR)
+    local y = b[1] or 0
+    if IN.bfapi == "1.47" then y = y + 2000 end
+    IN.ver = err and "?" or string.format("%d.%d.%d", y, b[2] or 0, b[3] or 0)
+    IN.state = "ready"
     return
   end
   if m == "version" then
@@ -888,6 +977,22 @@ local function mspReply(cmd, b, err)
     -- X20S + ELRS + INAV 9.0.0, 2026-11-23: every value read as 0.
     local maj, mnr = b[1] or 0, b[2] or 0
     IN.state = (maj > 9 or (maj == 9 and mnr >= 1)) and "ready" or (maj == 9 and "buggy" or "old")
+    return
+  end
+  if m == "status" and IN.variant == "BTFL" then
+    -- MSP_STATUS_EX -> cycle u16, i2c u16, sensors u16, flight mode flags u32 (bit 0 = ARM, always
+    -- the first box), PID profile u8, load u16, profile count u8, rate profile u8
+    if cmd ~= BFX.STATUS_EX then return end
+    pend = nil
+    if not err and #b >= 15 then
+      IN.armed, IN.armedAt = (b[7] or 0) % 2 == 1, os.clock()
+      local pp, rp = b[11], b[15]
+      -- another profile became active (a radio switch, the OSD): its values are read again
+      if (IN.profile ~= nil and IN.profile ~= pp) or (IN.rprof ~= nil and IN.rprof ~= rp) then
+        vals, vbytes, BFX.blk = {}, {}, {}
+      end
+      IN.profile, IN.rprof = pp, rp
+    end
     return
   end
   if m == "status" then
@@ -908,13 +1013,14 @@ local function mspReply(cmd, b, err)
       -- INAV itself says it is disarmed (never given up)
       IN.armed, IN.armedAt, IN.storeHold = true, os.clock(), os.clock() + STATUS_EVERY
       IN.stored = "wait"
-      if edit then phase, phaseCol = "Set in INAV now, stored after the disarm", "warn" end
+      if edit then phase, phaseCol = "Set in " .. BFX.fcName() .. " now, stored after the disarm", "warn" end
       return
     end
     IN.dirty, IN.stored = false, "ok"
     if edit then phase, phaseCol = "Saved, verified and stored", "ok" end
     return
   end
+  if IN.variant == "BTFL" then BFX.reply(cmd, b, err) return end
   local name = pend.name
   if not name then return end
   if pend.set then
@@ -1096,10 +1202,28 @@ local function mspPoll()
 end
 
 local function mspRead(name)
+  if BFX.mod and IN.variant == "BTFL" then
+    local r = rowOf(name)
+    if not r or not r.bf then vals[name], naAt[name] = false, os.clock() return end
+    pend = { name = name, tries = 0 }
+    mspSend(r.bf[1])
+    return
+  end
   pend = { name = name, tries = 0 }
   mspSend(M_SETTING_INFO, zname(name))
 end
 local function mspSave(name, bytes)
+  if BFX.mod and IN.variant == "BTFL" then
+    -- the block is read again first and the field set on those fresh bytes (bfReply), so a
+    -- change made elsewhere since (Configurator, another profile) is never written back old
+    local r = rowOf(name)
+    if not r or not r.bf then return end
+    local raw = floor(b2f(bytes[1], bytes[2], bytes[3], bytes[4]) / r.k + 0.5)
+    raw = math.max(r.rmin, math.min(r.rmax, raw))
+    pend = { name = name, set = bytes, setRaw = raw, tries = 0, bfpre = true }
+    mspSend(r.bf[1])
+    return
+  end
   local mt, r = IN.meta[name], rowOf(name)
   if not mt then phase, phaseCol = "Read it first", "warn" return end
   local v = b2f(bytes[1], bytes[2], bytes[3], bytes[4])
@@ -1113,6 +1237,12 @@ end
 -- the profile line for the page: "INAV 9.1.0  profile 2 MULTIROTOR"
 function P.inavLine()
   if link ~= "MSP" then return nil end
+  if IN.variant == "BTFL" then
+    local rt = BFX.mod and IN.rtype and BFX.mod.RATES_TYPES[IN.rtype]   -- known once the rates are read
+    return string.format("Betaflight %s  PID profile %s  rate profile %s%s", IN.ver or "?",
+      IN.profile and tostring(IN.profile + 1) or "?", IN.rprof and tostring(IN.rprof + 1) or "?",
+      rt and ("  " .. rt .. " rates") or "")
+  end
   return string.format("INAV %s  profile %s %s", IN.ver or "?", IN.profile and tostring(IN.profile + 1) or "?", IN.plat or "?")
 end
 -- a PID row of the profile that isn't active: why it can't be edited (nil = it can)
@@ -1138,9 +1268,9 @@ local bitCur = 1
 local saveReq = nil
 local msgAt = 0
 
-function P.init(telem, list, extraPath, ilist)
+function P.init(telem, list, extraPath, ilist, bfLoad)
   T, LIST = telem, list
-  APLIST, ILIST = list, ilist
+  APLIST, ILIST, BFX.load = list, ilist, bfLoad
   T.onMavlite = P.onCrsf   -- telem.lua reads the CRSF queue and hands MAVlite replies here
   T.onMavEnv = P.onMavEnv  -- ... and the mLRS bridge frames (MAVLink)
   if extraPath then
@@ -1177,6 +1307,7 @@ function P.reset()
   mvSt, mvSkip = 0, 0
   IN.state, IN.variant, IN.ver, IN.meta, IN.profile, IN.plat = "off", nil, nil, {}, nil, nil
   IN.dirty, IN.storeReq, IN.stored, mspViaNow, mLast, BR.path = false, false, nil, nil, nil, nil
+  IN.bfapi, IN.rprof, IN.rtype, BFX.blk = nil, nil, nil, {}
   IN.armed, IN.armedAt, IN.statusAt = nil, nil, -10
   if APLIST then LIST = APLIST end
   if LIST then rebuild() end
@@ -1189,8 +1320,11 @@ local function blocked(s)
       return "Parameters need S.Port, F.Port, ELRS or Crossfire", "This link: " .. tostring(s.link or "none")
     end
     if T.alive() == false then return "No telemetry", "" end
+    if IN.state == "bfold" then
+      return "Parameters need Betaflight 4.5 or 2025.12", "This one answers MSP API " .. tostring(IN.bfapi or "?") .. " (4.5 = 1.46, 2025.12 = 1.47).\nOther versions: Betaflight Configurator."
+    end
     if IN.state == "notinav" then
-      return "Parameters need ArduPilot or INAV", "This flight controller is " .. tostring(IN.variant) .. ": Betaflight has no settings by name over the radio link."
+      return "Parameters need ArduPilot, INAV or Betaflight", "This flight controller is " .. tostring(IN.variant) .. "."
     end
     if IN.state == "buggy" then
       return "Parameters need INAV 9.1 or later", "This one is INAV " .. tostring(IN.ver) .. ": 9.0 sends setting values over the radio link empty (fixed in INAV 9.1.0)."
@@ -1203,7 +1337,7 @@ local function blocked(s)
     end
     return nil
   end
-  if s.fc ~= "ArduPilot" then return "Parameters need ArduPilot or INAV", "Betaflight is not supported" end
+  if s.fc ~= "ArduPilot" then return "Parameters need ArduPilot, INAV or Betaflight", "" end
   if s.link ~= "S.Port" and s.link ~= "CRSF" then
     return "Parameters need S.Port, F.Port, ELRS or Crossfire", "This link: " .. tostring(s.link or "none")
   end
@@ -1235,7 +1369,7 @@ local function curGroup() return vis[sel] and vis[sel][1] or grp or groups[1] en
 
 local function nextRead(rowsShown)
   if link == "MSP" then
-    if IN.plat == nil then return "platform_type" end
+    if IN.plat == nil and IN.variant ~= "BTFL" then return "platform_type" end   -- INAV VTOL only
   elseif qOn == nil then return "Q_ENABLE" end
   if edit then return nil end
   local g = curGroup()
@@ -1388,13 +1522,14 @@ local function service(s, pageOpen)
     end
     if not pend then
       if IN.state == "variant" then pend = { m = "variant", tries = 0 } mspSend(MSP_FC_VARIANT) return end
+      if IN.state == "bfapi" then pend = { m = "bfapi", tries = 0 } mspSend(BFX.API) return end
       if IN.state == "version" then pend = { m = "version", tries = 0 } mspSend(MSP_FC_VERSION) return end
       if IN.state ~= "ready" then return end
       -- INAV's own arming state, every 2 s (1 s while a change waits for its EEPROM write)
       if now - IN.statusAt >= (IN.dirty and 1 or STATUS_EVERY) then
         IN.statusAt = now
         pend = { m = "status", tries = 0 }
-        mspSend(MSP2_INAV_STATUS)
+        mspSend(IN.variant == "BTFL" and BFX.STATUS_EX or MSP2_INAV_STATUS)
         return
       end
       -- stored only when INAV said "disarmed" within the last 3 s (and the radio agrees)
@@ -1470,7 +1605,7 @@ local function service(s, pageOpen)
         return
       end
       -- never sent again by itself: the save may have happened
-      phase, phaseCol = link == "MSP" and "No answer: check the value in INAV Configurator" or "No answer: check the value in a GCS", "warn"
+      phase, phaseCol = link == "MSP" and ("No answer: check the value in " .. BFX.fcName() .. " Configurator") or "No answer: check the value in a GCS", "warn"
       vals[name], pend = nil, nil
       return
     end
@@ -1995,6 +2130,7 @@ function P.phase() return phase end
 function P.valueOf(name) return vals[name] end   -- test harness
 function P._draft() return draft, editBase, edit and edit[2] end
 function P._tab() return curGroup() end   -- test harness
+function P._list() return LIST end   -- test harness
 function P._focus() return focus end   -- test harness
 function P._hi() return focus == "tabs" and (tabCur or curGroup()) or nil end   -- test harness
 function P._row() return vis[sel] and vis[sel][2] or nil end   -- test harness

@@ -1,10 +1,38 @@
-OmniDeck 1.0.0d for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 1.0.0f for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0f (after 1.0.0e)
+- Main page, top-right panel: the logo (OmniDeck, Stratos or your own PNG in logos/) now fills
+  the panel as far as it can and keeps its proportions, so it is never stretched. A small logo is
+  enlarged, a big one shrunk, a wide one sized by the panel's width.
+
+WHAT'S NEW IN 1.0.0e (after 1.0.0d)
+- PARAMS page for Betaflight 4.5 and 2025.12, over ELRS / TBS Crossfire (150 Hz) and S.Port /
+  F.Port. Other Betaflight versions show "Parameters need Betaflight 4.5 or 2025.12" (their
+  settings are laid out differently; use Betaflight Configurator there).
+- 33 settings in 4 groups, by their Betaflight CLI names:
+  PID: P, I, D for roll, pitch and yaw.
+  FF D: feedforward per axis, D max per axis and D max gain (4.5 calls these D min).
+  RATES: RC rate, super rate and expo per axis, throttle mid and expo. The names follow the
+  rates type (Actual: center / max rate in deg/s, Quick, Betaflight, Raceflight, KISS).
+  FILTERS: gyro and D-term lowpass, dynamic notch (count, Q, min, max) and RPM filter
+  (harmonics, min). A Betaflight built without the dynamic notch or the RPM filter shows n/a.
+- The values are those of the ACTIVE PID profile and rate profile; the hint line shows e.g.
+  "Betaflight 4.5.5  PID profile 1  rate profile 1  ACTUAL rates". Change profiles in Betaflight
+  (OSD, stick command or Configurator); the page reads the new ones by itself.
+- Save: OmniDeck reads the setting's block fresh from Betaflight, changes that one value, sends
+  it back, reads it back, then stores it in EEPROM while disarmed ("Saved, verified and stored").
+  The other settings in the block are sent back as they were.
+- In flight: same rules as INAV. With "Params: edit in flight" = "Gains and trim" the PID and
+  FF D groups can be changed (stored after the disarm); rates and filters are view only armed.
+- Checked byte for byte against Betaflight 4.5.5 and 2025.12.5 (SITL builds) and in the radio
+  simulators; not yet on a real Betaflight quad.
+- "Parameters need ArduPilot, INAV or Betaflight" for any other flight controller.
 
 WHAT'S NEW IN 1.0.0d (after 1.0.0c)
 - mLRS 1.5.00: the PARAMS page, the ArduPilot mission download and the editor's Send work again

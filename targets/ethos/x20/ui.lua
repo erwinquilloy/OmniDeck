@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0d"
+local VERSION = "1.0.0f"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -59,7 +59,9 @@ local function params()
     if paramsErr and os.clock() < paramsRetryAt then error(paramsErr, 0) end
     local ok, p = pcall(function()
       local m = need("params.lua")
-      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt", need("iplist.lua"))
+      -- bfplist.lua: loaded by params.lua only when the flight controller is Betaflight
+      m.init(T, need("plist.lua"), (OD_ROOT or "/scripts/omnideck/") .. "params.txt", need("iplist.lua"),
+        function() return need("bfplist.lua") end)
       m.onMission = MI.setAp   -- ArduPilot mission download (Stratos firmware) -> the map
       return m
     end)
@@ -755,13 +757,16 @@ local function logoPanel(x, y, w, h)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
-  -- fitted to the panel's width and height (8 px margin), proportions kept: a wide logo such
-  -- as stratos_title.png (196 x 115) uses the width instead of being sized to the height
-  local k = math.min(1, (w - 16) / logo.w, (h - 16) / logo.h)
+  -- fitted to the panel's width and height (8 px margin), proportions kept: one scale for both
+  -- sides, so the picture is never stretched. A smaller logo is enlarged to fill the panel and a
+  -- bigger one shrunk; a wide one such as stratos_title.png (196 x 115) is sized by the width
+  local k = math.min((w - 16) / logo.w, (h - 16) / logo.h)
   local dw, dh = I(logo.w * k), I(logo.h * k)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
-  if k < 1 then
-    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh) then lcd.drawBitmap(bx, by, b) end
+  if dw ~= logo.w or dh ~= logo.h then
+    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh) then
+      lcd.drawBitmap(I(x + (w - logo.w) / 2), I(y + (h - logo.h) / 2), b)
+    end
   else
     lcd.drawBitmap(bx, by, b)
   end
