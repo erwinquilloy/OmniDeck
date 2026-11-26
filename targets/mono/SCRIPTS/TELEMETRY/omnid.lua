@@ -62,7 +62,7 @@ if rawget(_G, "table") == nil then
 end
 
 local ROOT = "/SCRIPTS/OMNID/"
-local VERSION = "0.1.0"
+local VERSION = "0.1.1"
 -- the page cycle; a page whose test fails is skipped
 local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "psum.lua", "plink.lua", "psens.lua" }
 local SHOW = {
@@ -76,16 +76,35 @@ local ctx = { version = VERSION, flightT = 0, trailE = {}, trailN = {} }
 local cfg
 local pageN, page, onSummary = 1, nil, false   -- onSummary: opened by the disarm, not the cycle
 
+-- why the last load failed (shown in place of a page that didn't load): loadScript's own message,
+-- e.g. "not enough memory", or the error the file raised when run
+local loadErr = nil
 local function load(name)
-  local chunk = loadScript(ROOT .. name, OD_DEBUGLOAD and "T" or "bt")
-  return chunk and chunk() or nil
+  loadErr = nil
+  local chunk, err = loadScript(ROOT .. name, OD_DEBUGLOAD and "T" or "bt")
+  if not chunk then loadErr = name .. ": " .. tostring(err) return nil end
+  local ok, r = pcall(chunk)
+  if not ok then loadErr = name .. ": " .. tostring(r) return nil end
+  if r == nil then loadErr = name .. ": returned nothing" end
+  return r
 end
 
+-- A page that didn't load is tried again only every 3 s (retryAt): a load that failed for lack of
+-- memory, tried again on every update, froze the TX12 MK2 (power switch dead, RC link still up;
+-- a page load test 2026-11-17). Its reason is shown in its place.
+local retryAt = -100
+-- the summary opened by the disarm goes back to the start page after SUM_SHOW_S, as on the colour
+-- builds (ui.lua SUM_SHOW_S); ENTER closes it sooner. Opened again for the log (writeLog) it
+-- keeps its time; the flight stats page (Setup STATS PAGE) is a page of the cycle and stays.
+local SUM_SHOW_S = 15
+local sumOpenedAt = nil
 local function loadPage(n, auto)
+  if auto ~= true then sumOpenedAt = nil end
   page = nil
   collectgarbage()
   page = load(PAGES[n])
   pageN, onSummary = n, auto == true
+  if not page and E then retryAt = E.os.clock() + 3 end
   collectgarbage()
 end
 
@@ -109,7 +128,9 @@ local function trail(s)
   if T.gen ~= trailGen then   -- another flight controller (telem.lua resetFc): its own flight
     trailGen = T.gen
     ctx.trailE, ctx.trailN, trailStep, trailLat, trailLon = {}, {}, TRAIL_STEP0, nil, nil
+    ctx.lastLat, ctx.lastLon = nil, nil
   end
+  if s.lat then ctx.lastLat, ctx.lastLon = s.lat, s.lon end   -- the map's LAST position with no fix
   if not (s.lat and s.homeLat) then return end
   local tE, tN = ctx.trailE, ctx.trailN
   if s.homeLat ~= trailLat or s.homeLon ~= trailLon then
@@ -157,6 +178,7 @@ local function freshStart()
   page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
   ctx.T, ctx.F, ctx.A = nil, nil, nil
   ctx.flightT, ctx.trailE, ctx.trailN = 0, {}, {}
+  ctx.map, ctx.lastLat, ctx.lastLon = nil, nil, nil   -- map zoom and last position belong to the model
   ctx.logName, ctx.wantSummary, ctx.wantStart, ctx.wantLog = nil, nil, nil, nil
   trailStep, trailLat, trailLon, trailGen = TRAIL_STEP0, nil, nil, 0
   collectgarbage()
@@ -211,64 +233,126 @@ local function writeLog()
   collectgarbage()
 end
 
-init = function()
+-- A start that fails (a module that doesn't load, most likely "not enough memory" when other
+-- scripts on the model hold part of the Lua heap) must not stop the script: EdgeTX would show
+-- only "Syntax error" (GX12 tester, TELE key, 2026-11-22). Everything is dropped, the reason is
+-- shown with the memory in use, and the start is tried again every START_RETRY_S. That retry
+-- runs on getTime() (EdgeTX's 10 ms ticks), as etx.lua and its clock may be what failed.
+local START_RETRY_S = 5
+local startErr, startAt = nil, 0
+-- a module the script cannot run without: its load failure stops the start, with its reason
+local function need(name)
+  local r = load(name)
+  if not r then error(loadErr, 0) end
+  return r
+end
+local function start()
   curModel, modelAt = modelName(), -100
-  E = load("etx.lua")
+  E = need("etx.lua")
   T = E.loadfile("telem.lua")()
-  F = load("sum.lua")
-  A = load("aud.lua")
-  local C = load("cfg.lua")
+  F = need("sum.lua")
+  A = need("aud.lua")
+  local C = need("cfg.lua")
   cfg = C.read()
   ctx.u = C.units(cfg)
+  ctx.mapView = cfg.mapView
   C = nil
   A.setVoice(cfg.voice)
   A.setBeep(cfg.beep)
   E.tick()
   A.greetNow(E.os.clock())
   A.cells, A.vLow, A.vCrit = cfg.cells, cfg.lowVolt / 100, cfg.critVolt / 100
+  A.altLim = cfg.lowAlt / (cfg.altUnit == 1 and 3.28084 or 1)   -- the setting is in the altitude unit
   ctx.T, ctx.F, ctx.A, ctx.clock = T, F, A, E.os.clock
   loadPage(startPage())
+end
+
+init = function()
+  local ok, err = pcall(start)
+  if ok then startErr = nil return end
+  startErr = (string.gsub(tostring(err), "^[^:]*:%d+: ", ""))   -- no "omnid.lua:247: " in front
+  page, T, F, A, E, cfg = nil, nil, nil, nil, nil, nil
+  ctx.T, ctx.F, ctx.A, ctx.clock = nil, nil, nil, nil
+  collectgarbage()
+  startAt = getTime()
+end
+
+-- after a failed start: try again every START_RETRY_S; true while still not started
+local function notStarted()
+  if not startErr then return false end
+  if getTime() - startAt >= START_RETRY_S * 100 then init() end
+  return startErr ~= nil
+end
+
+-- the reason something didn't load, 25 characters a line, and the memory in use
+local function drawErr(title, t)
+  lcd.drawText(1, 1, title, 0)
+  t = t or "?"
+  for i = 0, 4 do lcd.drawText(1, 11 + i * 8, string.sub(t, i * 25 + 1, i * 25 + 25), SMLSIZE) end
+  lcd.drawText(1, 56, "LUA MEM " .. math.floor(collectgarbage("count")) .. "K", SMLSIZE)
 end
 
 -- EdgeTX stops all Lua ("Lua disabled!") once the script heap passes ~127 KB on a TX12 MK2, and
 -- it counts garbage not yet collected: Lua's own collector lets that pile up well past the live
 -- data before it runs (TX12 MK2, INAV, killed at disarm 2026-11-13). A full collection whenever
 -- the heap passes GC_KB keeps the garbage from ever reaching the limit.
--- The trigger sits 12 KB above the live data (at least GC_KB, at most GC_MAX_KB), so a
--- collection runs every few seconds rather than on every call when the live data is large.
-local GC_KB, GC_MAX_KB = OD_GC_KB or 100, OD_GC_MAX_KB or 118
+-- The trigger sits GC_MARGIN KB above the live data (at least GC_KB, at most GC_MAX_KB), so a
+-- collection runs every second or two rather than on every call when the live data is large.
+-- 8 / 112 since 2026-11-20: over mLRS (bigger CRSF passthrough frames, a new table per frame)
+-- the TX12 MK2 showed 107/127K and froze with the old 12 / 118 (screen, keys and power switch
+-- dead, RF up); the margin to the ~127 KB ceiling was too thin for that much garbage.
+-- 6 / 106 since 2026-11-20 evening: still "not enough memory" on the main page over mLRS with 8 / 112.
+local GC_KB, GC_MAX_KB, GC_MARGIN = OD_GC_KB or 92, OD_GC_MAX_KB or 106, OD_GC_MARGIN or 6
 local gcAt = GC_KB
+-- ctx.memPeak / ctx.memLive for the Link page: the highest heap seen at the end of an update
+-- (garbage included) and the live data after the last full collection
 local function gcGuard()
-  if collectgarbage("count") > gcAt then
+  local c = collectgarbage("count")
+  if c > (ctx.memPeak or 0) then ctx.memPeak = c end
+  if c > gcAt then
     collectgarbage()
-    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, collectgarbage("count") + 12))
+    local live = collectgarbage("count")
+    ctx.memLive = live
+    gcAt = math.max(GC_KB, math.min(GC_MAX_KB, live + GC_MARGIN))
   end
 end
 
 local function background()
+  if notStarted() then return end
   pump()
+  if startErr then return end   -- a model switch whose fresh start failed
   writeLog()
   gcGuard()
 end
 
 local function run(event)
-  pump()
+  if not notStarted() then pump() end
+  if startErr then
+    lcd.clear()
+    drawErr("OmniDeck: not started", startErr)
+    return 0
+  end
   writeLog()
   if ctx.wantSummary then
     ctx.wantSummary = false
     loadPage(4, true)
+    sumOpenedAt = E.os.clock()
   elseif ctx.wantStart then
     ctx.wantStart = false
     loadPage(startPage())
+  elseif onSummary and sumOpenedAt and E.os.clock() - sumOpenedAt >= SUM_SHOW_S then
+    loadPage(startPage())
   elseif event == EVT_VIRTUAL_ENTER then
     if onSummary then loadPage(startPage()) else loadPage(nextPage()) end
+    event = 0   -- the key that turned the page is not the new page's
   end
-  if page == nil and T then loadPage(pageN, onSummary) end   -- unloaded for the log
+  -- unloaded for the log: back at once; a page that failed to load: every 3 s at most
+  if page == nil and T and E.os.clock() >= retryAt then loadPage(pageN, onSummary) end
   lcd.clear()
   if page then
     page.draw(ctx, event)
   else
-    lcd.drawText(1, 1, "OmniDeck: page missing", 0)
+    drawErr("OmniDeck: page missing", loadErr)
   end
   gcGuard()
   return 0

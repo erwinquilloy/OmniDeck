@@ -563,78 +563,18 @@ local NATIVE = {
 }
 local srcCache, srcMissAt, srcQuery = {}, {}, {}
 
--- The model's discovered sensors (Model > Telemetry): lower-case name -> member, read again at
--- most every 5 s. Only used when a by-name lookup hands back a sensor of another name.
-local sensorList, sensorListAt = nil, -100
-local function sensorMember(name)
-  if CATEGORY_TELEMETRY_SENSOR == nil then return nil end
-  if not sensorList or now() - sensorListAt >= 5 then
-    sensorListAt = now()
-    sensorList = {}
-    for i = 0, 99 do
-      local ok, src = pcall(system.getSource, { category = CATEGORY_TELEMETRY_SENSOR, member = i })
-      if ok and src then
-        local okN, n = pcall(function() return src:name() end)
-        if okN and type(n) == "string" and sensorList[string.lower(n)] == nil then sensorList[string.lower(n)] = i end
-      end
-    end
-  end
-  return sensorList[string.lower(name)]
-end
-
--- One guard on top of the dashboard's plain lookup: a by-name hit must carry that name. On the
--- X18 tester's TBS model getSource("Flight mode") once returned the GPS (test6). A wrong hit is
--- looked up again in the model's sensor list by its exact name, else it is a miss (tried again
--- 2 s later). Queries by app ID / crsfId / GPS options are taken as the dashboard takes them.
+-- A by-name hit must carry that name (on Ethos getSource("Flight mode") once returned the GPS;
+-- the colour build then looks the name up in the sensor list, which EdgeTX doesn't have): a hit
+-- of another name is a miss here, tried again 2 s later.
 local function lookup(q)
   local src = system.getSource(q)
   if src and type(q) == "string" then
     local ok, n = pcall(function() return src:name() end)
-    if ok and type(n) == "string" and string.lower(n) ~= string.lower(q) then
-      local m = sensorMember(q)
-      return m and system.getSource({ category = CATEGORY_TELEMETRY_SENSOR, member = m }) or nil
-    end
+    if ok and type(n) == "string" and string.lower(n) ~= string.lower(q) then return nil end
   end
   return src
 end
 
--- INAV over S.Port (R9, ACCST/ACCESS): Ethos doesn't discover INAV's mode, attitude and
--- satellites sensors by itself, so they are created in the model, as the INAV dashboard does
--- (same names, units and IDs). Only on S.Port, once the receiver's voltage sensor (0x0210)
--- is there to copy physId and band from, one sensor per CREATE_GAP_S, after CREATE_AFTER_S.
-local CREATE = {
-  mode  = { name = "Flight Mode", appId = 0x0470, decimals = 0 },
-  roll  = { name = "Roll",        appId = 0x0440, decimals = 1, deg = true },
-  pitch = { name = "Pitch",       appId = 0x0430, decimals = 1, deg = true },
-  sats  = { name = "Satellites",  appId = 0x0480, decimals = 0 },
-}
-local CREATE_AFTER_S, CREATE_GAP_S = 5, 5
-local createTried, createdAt = {}, -100
-local function createSport(key)
-  local c = CREATE[key]
-  if not c or createTried[key] or not (model and model.createSensor) then return end
-  local t = now()
-  if t < CREATE_AFTER_S or t - createdAt < CREATE_GAP_S then return end
-  local okV, volt = pcall(system.getSource, { appId = 0x0210 })
-  if not okV or not volt then return end
-  local okP, physId = pcall(function() return volt:physId() end)
-  local okB, band = pcall(function() return volt:band() end)
-  if not (okP and physId and okB and band) then return end
-  createTried[key], createdAt = true, t
-  pcall(function()
-    local sn = model.createSensor({ type = SENSOR_TYPE_DIY })
-    sn:name(c.name)
-    sn:unit(c.deg and UNIT_DEGREE or UNIT_RAW)
-    sn:decimals(c.decimals)
-    sn:protocolDecimals(c.decimals)
-    sn:physId(physId)
-    sn:band(band)
-    sn:minimum(-1000000000)
-    sn:maximum(2147483647)
-    sn:appId(c.appId)
-    sn:subId(0)
-  end)
-end
 
 -- A hit is kept for SRC_REFRESH_S, then looked up again. The INAV dashboard keeps sources in a
 -- weak table, so Ethos's handles are dropped and fetched again now and then; a lookup made
@@ -659,7 +599,6 @@ local function findSource(key, kind)
     local ok, src = pcall(lookup, q)
     if ok and src then srcCache[ck], srcQuery[ck], srcAt[ck] = src, q, now() return src end
   end
-  if kind == "sport" then createSport(key) end
   srcMissAt[ck] = now()
   return nil
 end
@@ -794,63 +733,10 @@ local function resetFc()
   lostAt, backAt = nil, nil
   T.gen = T.gen + 1
 end
--- Ethos: every RF module of the model switched off means no link at all
-local moduleCheckAt, modulesOff = -100, false
--- Ethos's module API: model.getModule(i):enable(). EdgeTX has a model.getModule too, but it
--- returns a plain table (Type, protocol ...) without enable(): taken as Ethos, both modules read
--- as off and the link was never detected, so INAV/BF over TBS showed NO TELEM on a TX16S MK2
--- (EdgeTX 2.12, 2026-11-03). Only a module object with enable() counts.
-local ethosModules = nil
-local function hasEthosModules()
-  if ethosModules ~= nil then return ethosModules end
-  ethosModules = false
-  if not (model and model.getModule) then return false end
-  for i = 0, 1 do
-    local ok, m = pcall(model.getModule, i)
-    if ok and m ~= nil then
-      local ok2, f = pcall(function() return m.enable end)
-      if ok2 and f ~= nil then ethosModules = true end
-    end
-  end
-  return ethosModules
-end
-local function rfOff()
-  if not hasEthosModules() then return false end
-  if now() - moduleCheckAt < 1 then return modulesOff end
-  moduleCheckAt = now()
-  local found, on = false, false
-  for i = 0, 1 do
-    local ok, m = pcall(model.getModule, i)
-    if ok and m ~= nil then
-      local ok2, en = pcall(function() return m:enable() end)
-      if ok2 then found = true if en then on = true end end
-    end
-  end
-  modulesOff = found and not on
-  return modulesOff
-end
 
--- Ethos's own "telemetry active" flag, the one behind its "telemetry lost" call: true while the
--- receiver's telemetry arrives, false a second or two after it stops. Sensors cannot tell this:
--- Ethos keeps every value, link quality included (LQ / RSSI stayed at 100 with the receiver
--- powered down on the X18 tester's TBS and R9, 2026-11-03). Read as dashx does
--- (CATEGORY_SYSTEM_EVENT / TELEMETRY_ACTIVE, :state()). nil where the radio has no such flag
--- (EdgeTX, older Ethos): then only the link checks below and the frame timeout apply.
-local tlmSrc, tlmTriedAt = nil, -100
-local hasTlmFlag = CATEGORY_SYSTEM_EVENT ~= nil and TELEMETRY_ACTIVE ~= nil   -- Ethos only: decided once
-local function telemActive()
-  if not hasTlmFlag then return nil end
-  if tlmSrc == nil then
-    if now() - tlmTriedAt < 5 then return nil end
-    tlmTriedAt = now()
-    local ok, src = pcall(system.getSource, { category = CATEGORY_SYSTEM_EVENT, member = TELEMETRY_ACTIVE })
-    tlmSrc = ok and src or nil
-    if tlmSrc == nil then return nil end
-  end
-  local ok, st = pcall(function() return tlmSrc:state() end)
-  if ok and type(st) == "boolean" then return st end
-  return nil
-end
+-- Ethos's "telemetry active" flag (the colour build reads it); EdgeTX has none: nil, so only
+-- the link checks and the frame timeout apply
+local function telemActive() return nil end
 T.telemActive = telemActive
 
 local function readNative(kind)
@@ -879,7 +765,6 @@ local function readNative(kind)
     if s.fc == "ArduPilot" then lostAt, backAt = t, nil end
     return
   end
-  if rfOff() then return end
   if s.fc == "ArduPilot" and lostAt and lostAt > s.lastPt then
     backAt = backAt or t
     if t - backAt >= FC_GONE_S then resetFc() end
@@ -973,10 +858,6 @@ end
 -- decides, as in the INAV dashboard: internal = S.Port (ACCESS/ACCST), external = CRSF when
 -- it has CRSF sensors, else S.Port (R9M). Without module info, whichever sensor exists.
 local linkKind, linkCheckAt = nil, -100
-local function moduleOn(i)
-  local ok, on = pcall(function() local m = model.getModule(i) return m ~= nil and m:enable() end)
-  return ok and on == true
-end
 local function liveVal(src)
   if not src then return false end
   local ok, v = pcall(function() return src:value() end)
@@ -993,21 +874,6 @@ function T.detectLink()
   linkCheckAt = now()
   local okC, crsfSrc = pcall(system.getSource, { crsfId = 0x14, subIdStart = 0, subIdEnd = 1 })
   crsfSrc = okC and crsfSrc or nil
-  if hasEthosModules() then
-    if moduleOn(0) then linkKind = "sport"
-    elseif moduleOn(1) then
-      -- as the dashboard (CRSF if its link sensor exists), except a CRSF sensor left over from
-      -- another link (it reads 0) while FrSky RSSI is live: an R9M on a model that once flew
-      -- TBS. Neither live (link lost): the link stays as it was, so its own sensors show the loss.
-      local okS, sportSrc = pcall(system.getSource, { appId = 0xF101 })
-      sportSrc = okS and sportSrc or nil
-      if not crsfSrc then linkKind = "sport"
-      elseif liveVal(crsfSrc) then linkKind = "crsf"
-      elseif liveVal(sportSrc) then linkKind = "sport"
-      else linkKind = linkKind or "crsf" end
-    else linkKind = linkKind end         -- both off: keep the last, rfOff() shows the loss
-    return linkKind
-  end
   local okS, sportSrc = pcall(system.getSource, { appId = 0xF101 })
   sportSrc = okS and sportSrc or nil
   if liveVal(crsfSrc) then linkKind = "crsf"

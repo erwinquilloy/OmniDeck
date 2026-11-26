@@ -69,6 +69,7 @@ local function valueText(it)
   local r = it[3]
   if v == 0 and C.NOTE[it[1]] then return (it[1] == "cells") and "AUTO" or "OFF" end
   if r[5] ~= 1 then return string.format("%.2f%s", v / r[5], r[4]) end
+  if r[4] == "ALT" then return tostring(v) .. (vals.altUnit == 1 and "FT" or "M") end
   return tostring(v) .. r[4]
 end
 

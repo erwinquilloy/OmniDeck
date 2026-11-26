@@ -26,7 +26,8 @@ local function draw(ctx)
   row(37, "LQ / RSSI", lq .. " " .. rssi)
   local gps = (s.fix or 0) >= 3 and "3D" or ((s.fix or 0) == 2 and "2D" or "NO")
   row(46, "SATS", string.format("%d %s", s.sats or 0, gps))
-  row(55, "LUA MEM", string.format("%d/127K", floor(collectgarbage("count") + 0.5)))
+  -- live data after the last full collection, then the peak seen (garbage included); ~127K is the limit
+  row(55, "LUA MEM", string.format("%d PK%dK", floor((ctx.memLive or collectgarbage("count")) + 0.5), floor((ctx.memPeak or 0) + 0.5)))
 end
 
 return { draw = draw }

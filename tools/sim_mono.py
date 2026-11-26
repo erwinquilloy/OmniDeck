@@ -150,7 +150,7 @@ IMPERIAL = '--imperial' in sys.argv
 ALLPAGES = '--pages' in sys.argv
 if IMPERIAL or ALLPAGES:
     with open(os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg'), 'w') as f:
-        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\n')
+        f.write('altUnit=1\nspdUnit=3\neffUnit=3\nlowVolt=380\ncells=4\nlogFlight=1\n' if IMPERIAL else 'statsPage=1\ncheckPage=1\nlogFlight=1\nmapView=1\nlowAlt=100\nvoice=Aria\n')
 LOGON = IMPERIAL or ALLPAGES   # FLIGHT LOG defaults to OFF; these variants switch it on
 def sd_path(p, base):
     return os.path.join(base, *[x for x in str(p).split('/') if x])
@@ -235,15 +235,31 @@ L.execute('''
 _N = 0
 _PEAK = 0
 local pack, unpack = table.pack, table.unpack
+_PROF, _WORSTPROF, _WORSTN = nil, nil, 0
 function _CALL(f, ...)
   _N = 0
-  debug.sethook(function() _N = _N + 100 local m = collectgarbage("count") if m > _PEAK then _PEAK = m end end, "", 100)
+  local prof = _PROFON and {} or nil
+  debug.sethook(function()
+    _N = _N + 100 local m = collectgarbage("count") if m > _PEAK then _PEAK = m end
+    if prof then
+      local k = ""
+      for lv = 2, 6 do
+        local i = debug.getinfo(lv, "Sl")
+        if not i then break end
+        k = k .. string.match(i.short_src, "[^/]*$") .. ":" .. (i.currentline or 0) .. " < "
+      end
+      prof[k] = (prof[k] or 0) + 100
+    end
+  end, "", 100)
   local r = pack(pcall(f, ...))
   debug.sethook()
+  if prof and _N > _WORSTN then _WORSTN, _WORSTPROF = _N, prof end
   if not r[1] then error(r[2], 0) end
   return unpack(r, 2, r.n)
 end''')
 CALL = G._CALL
+G.getUsage = lambda: int(G._N * 100 / 20000)   # as EdgeTX: percent of the per-call limit used so far
+if '--prof' in sys.argv: L.execute('_PROFON = true')
 if '--notable' in sys.argv:   # as EdgeTX on the TX12 MK2: no table library
     L.execute('table = nil')
 
@@ -278,18 +294,20 @@ def feed():
             crsf_q.append((0x80, data))
 
 # ------------------------------------------------------------------ run
-# GC trigger for the 64-bit sim's bigger heap (the radio's 100 KB scaled: sim live data ~2.6x)
-G.OD_GC_KB, G.OD_GC_MAX_KB = MEM_BASE + 260, MEM_BASE + 310
+# GC trigger for the 64-bit sim's bigger heap (the radio's 92 / 106 / +6 KB scaled: sim live data ~2.6x)
+G.OD_GC_KB, G.OD_GC_MAX_KB, G.OD_GC_MARGIN = MEM_BASE + 239, MEM_BASE + 276, 16
 script = load_script('/SCRIPTS/TELEMETRY/omnid.lua')()
 worst = {'init': 0, 'run': 0, 'background': 0}
 CALL(script['init']); worst['init'] = G._N
 mem_init = L.eval('(collectgarbage("count"))')
 
+WORST_AT = [None]
 def run(evt=0, frames=1):
     for _ in range(frames):
         t_ms[0] += 50
         if t_ms[0] % 250 == 0: feed()
         CALL(script['run'], evt); evt = 0
+        if G._N > worst['run']: WORST_AT[0] = (G._N, t_ms[0], texts[0][0] if texts else '')
         worst['run'] = max(worst['run'], G._N)
 def bg(n):
     for _ in range(n):
@@ -305,9 +323,9 @@ s = G.OD_ENV  # adapter environment (not used directly)
 if NATIVE:
     assert 'ANGL' in words, words
 else:
-    assert 'FBWA' in words and ('ALT 394FT' if IMPERIAL else 'ALT 120M') in words and '3D14 ARM 7.9V' in words, words
+    assert 'FBWA' in words and ('ALT 394ft' if IMPERIAL else 'ALT 120m') in words and '3D14 ARM 7.9V' in words, words
     assert '15.8V' in words and 'A' in words and 'GS ' in words and '030' in words, words
-    assert any(w.endswith('MAH/MI' if IMPERIAL else 'WH/KM') and not w.startswith('--') for w in words.split()), words
+    assert any(w.endswith('MAH/mi' if IMPERIAL else 'WH/km') and not w.startswith('--') for w in words.split()), words
 print('main page OK:', words[:120])
 # roll the other way and pitch down
 st.update(roll=-35, pitch=-8)
@@ -316,7 +334,7 @@ run(frames=20); save('main_roll_%s.png' % tag)
 st.update(roll=10, pitch=3, lat=HOME[0] + 0.0095, lon=HOME[1] + 0.013, yaw=200)
 run(frames=40); save('main_away_%s.png' % tag)
 words = ' '.join(t for t, x, y in texts)
-assert 'H' in words.split() and ('0.9MI' if IMPERIAL else '1.5K') in words, words
+assert 'H' in words.split() and ('0.9mi' if IMPERIAL else '1.5k') in words, words
 # a short flight east of home, towards waypoint 3, with status texts
 from simtelem import text_chunks
 for m, sev in [('ArduPlane V4.7.2 (fb773567)', 6), ('PreArm: Throttle below failsafe', 2), ('Mission: 3 WP', 6),
@@ -333,6 +351,24 @@ words = ' '.join(t for t, x, y in texts)
 save('map_%s.png' % tag)
 if not NATIVE:
     assert 'WP3' in words and 'H' in words.split(), words
+# coordinates in the bottom strip: the aircraft's position, 5 decimals
+import re as _re
+_c = [m for m in _re.findall(r'(-?\d+\.\d{5}) (-?\d+\.\d{5})', words)]
+assert _c, ('coordinates', words)
+if not NATIVE:   # the native feed puts its GPS sensor 0.004 deg away on purpose
+    assert abs(float(_c[0][0]) - st['lat']) < 2e-4 and abs(float(_c[0][1]) - st['lon']) < 2e-4, ('coordinates', words)
+def scale_label():
+    return [t for t, x, y in texts if y == 49 and t[:1].isdigit()][0]
+if not ALLPAGES:
+    # aircraft-centred (Setup MAP VIEW default): the wheel zooms, right (NEXT) = closer
+    s0 = scale_label(); run(G.EVT_VIRTUAL_PREV, frames=1); run(G.EVT_VIRTUAL_PREV, frames=1)
+    s1 = scale_label(); run(G.EVT_VIRTUAL_NEXT, frames=1); run(G.EVT_VIRTUAL_NEXT, frames=1)
+    s2 = scale_label()
+    assert s1 != s0 and s2 == s0, ('wheel zoom', s0, s1, s2)
+    print('map zoom by wheel OK: %s -> %s -> %s' % (s0, s1, s2))
+else:
+    # home-centred (mapView=1 in this run's cfg): zoomed itself to keep the aircraft on the map
+    print('map home-centred, scale %s' % scale_label())
 print('map page OK:', words[:100])
 if not NATIVE:   # messages: ArduPilot only
     run(G.EVT_VIRTUAL_ENTER, frames=5)
@@ -371,6 +407,14 @@ if NATIVE:
 L.execute('collectgarbage() _PEAK = 0'); _m0 = L.eval('(collectgarbage("count"))'); run(frames=60)
 print('cruise: peak +%.1f KB over 3 s of normal flight' % (G._PEAK - _m0))
 L.execute('collectgarbage() _PEAK = 0'); mem_flying = L.eval('(collectgarbage("count"))')
+if ALLPAGES:
+    # Setup LOW ALT 100 m: armed and once above 102 m, then below 100 m -> "Terrain, pull up"
+    n0 = sum(1 for _, p in PLAYED if p.endswith('/pullup.wav'))
+    st.update(alt=80); run(frames=40)
+    n1 = sum(1 for _, p in PLAYED if p.endswith('/pullup.wav'))
+    assert n1 > n0, 'low-altitude alarm not spoken'
+    st.update(alt=120); run(frames=20)
+    print('low-altitude alarm OK (pullup.wav at 80 m, setting 100 m)')
 st.update(armed=False)
 run(frames=60)
 print('landing: Lua memory %.1f KB in flight, peak %.1f KB (+%.1f) while the flight ends (64-bit sim)'
@@ -387,8 +431,16 @@ if not NATIVE:
   else:
     assert not logs and 'LOG' not in words.split(), ('FLIGHT LOG is OFF by default', logs)
     print('no log written (FLIGHT LOG OFF)')
-  run(G.EVT_VIRTUAL_ENTER)
-  assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
+  if ALLPAGES or IMPERIAL:
+    run(G.EVT_VIRTUAL_ENTER)
+    assert any(t.startswith('ALT') for t, x, y in texts), 'ENTER leaves the summary for the start page'
+  else:
+    # left alone, the summary goes back to the start page after 15 s, as on the colour builds
+    run(frames=200)   # 10 s more
+    assert 'FLIGHT SUMMARY' in ' '.join(t for t, x, y in texts), 'summary still up at ~13 s'
+    run(frames=120)   # 6 s more
+    assert any(t.startswith('ALT') for t, x, y in texts), 'summary closed by itself after 15 s'
+    print('summary closed by itself after 15 s')
 # voice: with Aria picked on first run, the welcome plays at once and the call-outs follow,
 # every one a file that exists in the pack
 clips = [p for _, p in PLAYED]
@@ -442,9 +494,10 @@ if not NATIVE:
     run(frames=4)
     w = ' '.join(t for t, x, y in texts)
     assert sum(1 for _, p in PLAYED if p.endswith('omniready.wav')) == n_greet + 1, 'no fresh start'
-    assert any(x in w for x in ('T 00:00', 'T 00:01', 'T 00:02')), w   # restarted (the sim craft is armed)
+    assert any(x in w for x in ('TIM 00:00', 'TIM 00:01', 'TIM 00:02')), w   # restarted (the sim craft is armed)
     print('model switch OK:', w[:90])
     MODEL[0] = 'Sim Plane'
+
 print('Mono checks OK', tag)
 
 # SYS > Tools > OmniDeck Setup, on the same screen stubs
@@ -460,3 +513,7 @@ assert 'OMNIDECK SETUP' in words and ('SPEED KM/H' if IMPERIAL else 'SPEED M/S')
 cfgf = os.path.join(SIMSD, 'SCRIPTS', 'OMNID', 'Sim_Plane.cfg')
 assert ('spdUnit=0' if IMPERIAL else 'spdUnit=1') in open(cfgf).read()
 print('setup tool OK:', words[:120])
+if '--prof' in sys.argv and G._WORSTPROF:
+    pr = sorted(((v, k) for k, v in G._WORSTPROF.items()), reverse=True)[:12]
+    for v, k in pr: print(v, k)
+    print('heaviest call %d instructions:' % G._WORSTN, pr)

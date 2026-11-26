@@ -6,8 +6,8 @@
                  heading box at the top centre, home icon under it at the bearing to home,
                  speed box at the left edge (airspeed when a sensor reports it, with a GS box
                  under it; ground speed alone otherwise), altitude box at the right edge
-    right        ALT, SPD, home distance + arrow, voltage, current (normal font);
-                 efficiency and flight time (small font)
+    right        ALT, SPD, H (home distance + arrow), BAT, CUR (normal font); EF and TIM (small
+                 font); labels at the left of the column, values right-aligned (user 2026-11-20)
   Units follow OmniDeck Setup (ctx.u, from cfg.lua).
 ]]
 
@@ -190,21 +190,34 @@ local function draw(ctx)
   if s.alt then valBox(BX1 - 1, CY - 3, tostring(u.alt(s.alt)), true) end
   lcd.drawLine(BX1 + 1, BY0 - 1, BX1 + 1, BY1, SOLID, FORCE)
 
+  -- right column: label at the left edge, value right-aligned. The column is x 74-127 (54 px =
+  -- 9 normal or 11 small characters); a label is left out when it would not fit beside its
+  -- value with a space, so the number always shows.
   local x = 74
-  lcd.drawText(x, 10, "ALT " .. (s.alt and (u.alt(s.alt) .. u.altLbl) or "---"), 0)
-  lcd.drawText(x, 18, "SPD " .. (spd and (string.format("%3d", u.spd(spd)) .. u.spdLbl) or "---"), 0)
+  local function row(y, label, val, flags, small)
+    local f = small and SMLSIZE or 0
+    if (#label + 1 + #val) * (small and SW or 6) <= 55 then lcd.drawText(x, y, label, f) end
+    lcd.drawText(127, y, val, f + RIGHT + (flags or 0))
+  end
+  -- low-altitude alarm (Setup LOW ALT): the value inverted and blinking while low
+  row(10, "ALT", s.alt and u.altStr(s.alt) or "---", ctx.A.altLow and (BLINK + INVERS) or 0)
+  row(18, "SPD", spd and (u.spd(spd) .. u.spdLbl) or "---")
+  -- home row: "H", the arrow to home right after it (radius 4: x 82-90), the distance right-aligned
+  -- at the column edge like the other rows (5 characters at most: x 98-127)
   lcd.drawText(x, 26, "H", 0)
-  lcd.drawText(117, 26, u.dist(s.homeDist), RIGHT)
-  homeArrow(123, 29, s)
-  -- voltage alarm (OmniDeck Setup): inverted while low, blinking while critical
+  homeArrow(x + 12, 29, s)
+  lcd.drawText(127, 26, u.dist(s.homeDist), RIGHT)
+  -- voltage alarm (OmniDeck Setup): the value inverted while low, blinking while critical
   local st = ctx.A.stage or 0
   local vf = (st == 2 and BLINK + INVERS) or (st == 1 and INVERS) or 0
-  lcd.drawText(x, 34, s.volt and string.format("%.1fV", s.volt) or "--.-V", vf)
-  lcd.drawText(x, 42, s.curr and string.format("%.1fA", s.curr) or "--.-A", 0)
+  row(34, "BAT", s.volt and string.format("%.1fV", s.volt) or "--.-V", vf)
+  -- whole amps from 100 A so "CUR" still fits; floor() because Lua 5.3 (EdgeTX B&W) refuses
+  -- "%d" for a number with a fraction ("number has no integer representation")
+  row(42, "CUR", s.curr and (s.curr < 99.95 and string.format("%.1fA", s.curr) or (floor(s.curr + 0.5) .. "A")) or "--.-A")
   local e = efficiency(u, s, ctx.clock())
-  lcd.drawText(x, 51, (e and string.format(e < 100 and "%.1f" or "%d", e) or "--") .. u.effLbl, SMLSIZE)
+  row(51, "EF", (e and (e < 99.95 and string.format("%.1f", e) or tostring(floor(e + 0.5))) or "--") .. u.effLbl, 0, true)
   local t = floor(ctx.flightT or 0)
-  lcd.drawText(x, 58, string.format("T %02d:%02d", floor(t / 60), t % 60), SMLSIZE)
+  row(58, "TIM", string.format("%02d:%02d", floor(t / 60), t % 60), 0, true)
 end
 
 return { draw = draw }

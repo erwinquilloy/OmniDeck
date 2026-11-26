@@ -45,8 +45,8 @@ return function(s, f, u, version)
   local function t(sec) sec = math.floor(sec or 0) return string.format("%02d:%02d", math.floor(sec / 60), sec % 60) end
   local function pos(la, lo) return (la and lo) and string.format("%.6f, %.6f", la, lo) or "--" end
   -- full units in the file (the screen uses short ones)
-  local spdName = ({ K = "km/h", MS = "m/s", KT = "kt", MPH = "mph" })[u.spdLbl] or u.spdLbl
-  local effName = ({ ["WH/KM"] = "Wh/km", ["MAH/KM"] = "mAh/km", ["WH/MI"] = "Wh/mi", ["MAH/MI"] = "mAh/mi" })[u.effLbl]
+  local spdName = ({ k = "km/h", MS = "m/s", KT = "kt", MPH = "mph" })[u.spdLbl] or u.spdLbl
+  local effName = ({ ["WH/km"] = "Wh/km", ["MAH/km"] = "mAh/km", ["WH/mi"] = "Wh/mi", ["MAH/mi"] = "mAh/mi" })[u.effLbl]
   local function dist(m)
     if m == nil then return "--" end
     if u.imperial then
@@ -65,7 +65,7 @@ return function(s, f, u, version)
     else
       perKm = f.used / km
     end
-    eff = perKm and perKm * (string.find(u.effLbl, "MI", 1, true) and 1.609344 or 1)
+    eff = perKm and perKm * (string.find(u.effLbl, "mi", 1, true) and 1.609344 or 1)
   end
   local name = fileName(model, d)
   local fh = io.open(LOG_DIR .. name, "w") or io.open(DIR .. name, "w")   -- no logs/ folder: next to the scripts

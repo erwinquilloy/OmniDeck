@@ -22,40 +22,13 @@ local MODE_HOLD_S = 0.4    -- a mode must hold this long, so a mode switch sweep
 local GPS_HOLD_S = 2       -- same for a fix that flickers
 local BAT_STEPS = { 5, 10, 15, 20, 25, 30, 40, 50 }
 
--- mode names that don't match their file name once lowered and despaced; false stays silent.
--- The short names are the CRSF flight mode text from INAV's and Betaflight's telemetry/crsf.c.
-local MODE_FILES = {
-  FBWA = "flybywirea", FBWB = "flybywireb", INIT = "initializing",
-  -- states, not modes (failsafe has its own call-out)
-  OK = false, WAIT = false, ["!ERR"] = false, HRST = false, FAILSAFE = false,
-  READY = false, ["NOT READY"] = false, DISARMED = false,
-  -- INAV
-  MANU = "manual", RTH = "rtl", WRTH = "rtl", LOTR = "loiter", HOLD = "poshold", CRUZ = "cruise",
-  CRSH = "coursehold", ["CRS HOLD"] = "coursehold", WP = "waypoint", AH = "althold",
-  ANGL = "angle", HOR = "horizon", ANGH = "anglehold", TURT = "turtle", GEO = "geozone",
-  -- Betaflight
-  PASS = "passthrough", POSH = "poshold", PHFL = "posholdfail", ALTH = "althold",
-  CHIR = "chirp", AIR = "airmode",
-}
-
--- status text (start of the message, lower case) -> sound; first match wins
-local MESSAGES = {
-  { "gps glitch cleared", "8828501" }, { "gps glitch", "1061733" },
-  { "ekf variance", "9811007" }, { "parachute: released", "7210780" },
-  { "prearm: need 3d fix", "14472699" }, { "flight plan received", "14608272" },
-  { "mission complete", "6634944" }, { "geofence triggered", "1050361" },
-  { "flight mode change failed", "6908206" }, { "autotune: success", "9430632" },
-  { "autotune: failed", "2131412" }, { "transition vtol done", "16455510" },
-  { "transition done", "1541806" }, { "transition started", "7211373" },
-  { "land descend started", "13236108" }, { "land final started", "14444224" },
-  { "soaring: not climbing", "13366422" }, { "soaring: drifted too far", "13239693" },
-  { "soaring enabled", "1934808" }, { "soaring disabled", "2074081" },
-  { "soaring: reached upper", "2397669" }, { "soaring: reached lower", "2246114" },
-  { "soaring: thermal weak", "2860491" }, { "reached command", "2262475" },
-  { "reached waypoint", "3466823" }, { "passed waypoint", "4597275" },
-  { "takeoff complete", "3843641" }, { "smart rtl deactivated", "1865209" },
-  { "gps home acquired", "4170928" }, { "smart rtl unavailable", "13077757" },
-}
+-- the mode and message phrase tables live in aphr.lua, loaded only when needed (memory)
+local function phrases()
+  local f = loadScript(BASE .. "aphr.lua", "bt")
+  if not f then return nil end
+  local ok, t = pcall(f)
+  return ok and t or nil
+end
 
 local voice = nil
 local beepMode = 1         -- 1 every message, 2 warnings and worse, 0 off
@@ -96,14 +69,16 @@ end
 function A.alert(file) say(file, true) end
 
 local function modeFile(mode)
-  local f = MODE_FILES[mode]
+  local P = phrases()
+  local f = P and P.MODE_FILES[mode]
   if f ~= nil then return f end
   return (string.gsub(string.lower(mode), "[%s_]", ""))
 end
 
-local function messageFile(text)
+local function messageFile(P, text)
+  if not P then return nil end
   local t = string.lower(text)
-  for _, m in ipairs(MESSAGES) do
+  for _, m in ipairs(P.MESSAGES) do
     if string.find(t, m[1], 1, true) == 1 then return m[2] end
   end
   return nil
@@ -175,6 +150,24 @@ local function voltAlarm(s, alive, now)
   al.stage = stage
 end
 
+-- low altitude ("Terrain, pull up"), as the colour builds: armed, and only once the aircraft has
+-- been more than 2 m above the setting, so the take-off and a landing approach from below don't
+-- count; again every 15 s while low. A.altLim in metres (0 = off); A.altLow for the main page.
+local ALT_REPEAT_S = 15
+local alt = { armed = false, said = -100 }
+A.altLim, A.altLow = 0, false
+local function altAlarm(s, alive, now)
+  A.altLow = false
+  if not s.armed then alt.armed = false end
+  if alive and s.armed == true and A.altLim > 0 and s.alt then
+    if s.alt > A.altLim + 2 then alt.armed = true end
+    if alt.armed and s.alt < A.altLim then
+      A.altLow = true
+      if now - alt.said >= ALT_REPEAT_S then alt.said = now say("pullup", true) end
+    end
+  end
+end
+
 function A.update(s, alive, now)
   -- "Omni Deck telemetry ready" once when the widget starts (as Yaapu does), as soon as the
   -- saved voice is loaded; it does not wait for telemetry
@@ -231,6 +224,7 @@ function A.update(s, alive, now)
 
   if s.armed then battery(s) end
   voltAlarm(s, alive, now)
+  altAlarm(s, alive, now)
 
   -- ready to arm: spoken when it changes while disarmed, like the INAV dashboard's
   -- "ready to arm" / "arming prevented"; arming forgets it, so it is said again after landing
@@ -252,8 +246,9 @@ function A.update(s, alive, now)
     local first = math.max(1, #s.msgs - (total - st.msgs) + 1)
     for i = first, #s.msgs do worst = math.min(worst, s.msgs[i].sev or 6) end
     if first <= #s.msgs then beep(worst, now) end
+    local P = first <= #s.msgs and phrases() or nil   -- loaded once for the batch, dropped after
     for i = first, #s.msgs do
-      local file = messageFile(s.msgs[i].text)
+      local file = messageFile(P, s.msgs[i].text)
       if file then say(file) end
     end
     st.msgs = total
