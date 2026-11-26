@@ -799,13 +799,17 @@ local function logoPanel(x, y, w, h)
   lcd.drawFilledRectangle(I(x), I(y), I(w), I(h))
   local b = logo.bmp
   if not b or logo.w <= 0 or logo.h <= 0 then return end
-  local box = math.min(w, h) - 16
-  -- EdgeTX: drawn at its own size, centred (the logos are made to fit the TX16S panel)
-  local k = OD_LITE and 1 or math.min(1, box / logo.w, box / logo.h)
-  local dw, dh = I(logo.w * k), I(logo.h * k)
+  -- fitted to the panel's width and height (8 px margin), proportions kept. EdgeTX scales a
+  -- bitmap by one whole percentage for both sides (lcd.drawBitmap's scale), so the picture is
+  -- never stretched: a smaller logo is enlarged to fill the panel and a bigger one shrunk
+  local pct = math.floor(100 * math.min((w - 16) / logo.w, (h - 16) / logo.h))
+  if pct < 1 then return end
+  local dw, dh = I(logo.w * pct / 100), I(logo.h * pct / 100)
   local bx, by = I(x + (w - dw) / 2), I(y + (h - dh) / 2)
-  if k < 1 then
-    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh) then lcd.drawBitmap(bx, by, b) end
+  if pct ~= 100 then
+    if not pcall(lcd.drawBitmap, bx, by, b, dw, dh, pct) then
+      lcd.drawBitmap(I(x + (w - logo.w) / 2), I(y + (h - logo.h) / 2), b)
+    end
   else
     lcd.drawBitmap(bx, by, b)
   end

@@ -235,6 +235,8 @@ def bitmap_open(p):
     return L.table_from({'_id': id(img)})
 def draw_bitmap(bmp, x, y, scale=100):
     img = bitmaps[bmp['_id']]
+    if scale and scale != 100:   # EdgeTX: one whole-percent scale for both sides
+        img = img.resize((max(1, img.width * int(scale) // 100), max(1, img.height * int(scale) // 100)))
     # EdgeTX can't clip bitmaps: overhang is allowed here; a transparent PNG is drawn through its alpha
     cv.img.paste(img, (int(x), int(y)), img if img.mode == 'RGBA' else None)
 

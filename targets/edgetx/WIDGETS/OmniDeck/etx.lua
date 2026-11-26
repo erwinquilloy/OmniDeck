@@ -498,9 +498,10 @@ if OTX then
   end
 end
 -- bitmaps can't be clipped; the shared code draws the map first so later drawing covers any overhang
-function L.drawBitmap(x, y, bmp)
-  if bmp == nil or x >= cx2 or y >= cy2 or x + 100 <= cx1 or y + 100 <= cy1 then return end
-  rawlcd.drawBitmap(bmp, x, y)
+-- w, h: the drawn size (for the clip test); scale: EdgeTX's whole-percent scale for both sides
+function L.drawBitmap(x, y, bmp, w, h, scale)
+  if bmp == nil or x >= cx2 or y >= cy2 or x + (w or 100) <= cx1 or y + (h or 100) <= cy1 then return end
+  if scale and scale ~= 100 then rawlcd.drawBitmap(bmp, x, y, scale) else rawlcd.drawBitmap(bmp, x, y) end
 end
 
 E.lcd = L
