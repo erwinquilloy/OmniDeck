@@ -178,7 +178,7 @@ The same call-outs as the colour builds, from the packs in `SCRIPTS/OMNID/audio/
 
 ## Parameters
 
-OmniDeck Mono has no parameter editor of its own. To read and change flight controller settings from the radio, install the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor) (it was called AP Param Editor) and open it from **SYS › Tools › OmniDeck Param Editor**. It covers ArduPilot, INAV 9.1 or later and Betaflight 4.5 / 2025.12 / 2026.6, and runs on black-and-white and colour EdgeTX radios and on Ethos. Its own [README](https://github.com/erwinquilloy/param-editor#readme) lists what each flight controller needs.
+OmniDeck Mono has no parameter editor of its own. To read and change flight controller settings from the radio, install the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor) (it was called AP Param Editor) and open it from **SYS › Tools › OmniDeck Params**. It covers ArduPilot, INAV 9.1 or later and Betaflight 4.5 / 2025.12 / 2026.6, and runs on black-and-white and colour EdgeTX radios and on Ethos. Its own [README](https://github.com/erwinquilloy/param-editor#readme) lists what each flight controller needs.
 
 | Link | OmniDeck Param Editor needs (ArduPilot) |
 |---|---|
