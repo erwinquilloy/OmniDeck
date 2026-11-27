@@ -346,7 +346,13 @@ local function fileExists(path)
   return true
 end
 
-function L.loadBitmap(path) return Bitmap.open(path) end
+-- EdgeTX's Bitmap.open returns an empty bitmap (0x0) for a missing file, never nil, so the file
+-- is looked for first: otherwise tiles.lua takes the empty ethosmaps tile and never tries Yaapu's
+-- folder (TX15 tester, Yaapu GoogleSatelliteMap tiles, 1.0.0)
+function L.loadBitmap(path)
+  if not fileExists(path) then return nil end
+  return Bitmap.open(path)
+end
 
 if OTX then
   local floor, ceil, sqrt = math.floor, math.ceil, math.sqrt

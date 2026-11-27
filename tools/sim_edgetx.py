@@ -228,12 +228,13 @@ LCD_H_C = H
 bitmaps = {}
 def bitmap_open(p):
     fp = sd_path(p)
-    if not os.path.isfile(fp): return None
+    if not os.path.isfile(fp): return L.table_from({'_id': 0})   # EdgeTX: an empty bitmap, never nil
     img = Image.open(fp)
     img = img.convert('RGBA') if img.mode in ('RGBA', 'LA', 'P') else img.convert('RGB')   # keep transparency
     bitmaps[id(img)] = img
     return L.table_from({'_id': id(img)})
 def draw_bitmap(bmp, x, y, scale=100):
+    if not bmp['_id']: return                                    # empty bitmap: EdgeTX draws nothing
     img = bitmaps[bmp['_id']]
     if scale and scale != 100:   # EdgeTX: one whole-percent scale for both sides
         img = img.resize((max(1, img.width * int(scale) // 100), max(1, img.height * int(scale) // 100)))
@@ -248,6 +249,7 @@ G.lcd = L.table_from({'RGB': rgb, 'setColor': set_color, 'sizeText': size_text, 
     'drawLineWithClipping': line_clip, 'drawHudRectangle': hud_rect})
 G.getVersion = L.eval('function() return "%d.%d.%d", "tx16s", %d, %d, %d, "EdgeTX" end' % (ETXVER * 2))
 def bitmap_size(bmp):   # OpenTX / EdgeTX Bitmap.getSize(bitmap) -> width, height
+    if not bmp['_id']: return 0, 0
     img = bitmaps[bmp['_id']]
     return img.width, img.height
 G.Bitmap = L.table_from({'open': bitmap_open, 'getSize': bitmap_size})
@@ -1885,6 +1887,26 @@ if os.path.isfile(sd_path('/SCRIPTS/TOOLS/OmniDeck Setup.lua')):
     txt3 = open(cfgp).read()
     assert 'tileSet=GOOGLE Satellite' in txt3, 'tool lists and saves the tile set: %s' % txt3
     print('map tiles setting OK')
+    # Yaapu's Google folder only (no ethosmaps set): the tile must load from it (TX15 tester, 1.0.0:
+    # EdgeTX's empty bitmap for the missing ethosmaps file hid the Yaapu tile)
+    ydir = sd_path('/IMAGES/yaapu/maps/GoogleSatelliteMap/15/27470')
+    os.makedirs(ydir, exist_ok=True)
+    Image.new('RGB', (100, 100), (30, 90, 40)).save(os.path.join(ydir, 's_15200.jpg'))
+    import shutil; shutil.rmtree(sd_path('/IMAGES/ethosmaps'))
+    ysz = L.eval('''function()
+      local E = loadScript("/WIDGETS/OmniDeck/etx.lua", "bt")()
+      local TL = E.loadfile("tiles.lua")()
+      local sets = TL.scan()
+      if #sets ~= 1 or sets[1].label ~= "GOOGLE Satellite" then return -1, #sets end
+      TL.setSet(sets[1])
+      TL.get(15, 15200, 27470)
+      for _ = 1, 10 do TL.process(1) end
+      local b = TL.get(15, 15200, 27470)
+      if not b then return -2, tostring(b) end
+      return Bitmap.getSize(b)
+    end''')()
+    assert tuple(ysz) == (100, 100), 'Yaapu-only tile set loads its tile: %s' % (ysz,)
+    print('Yaapu tile folder OK')
     CALL('update', widget_def['update'], wd, options)
     assert wd.linkMode == 1 and wd.spdUnit == 2, 'widget reads the setup file: link %s spd %s' % (wd.linkMode, wd.spdUnit)
     print('setup tool OK:', txt.replace(chr(10), ' '))
