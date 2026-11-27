@@ -210,8 +210,8 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
 
 **Full screen or App mode:**
 
-- **One-zone (full screen) layout:** long-press the widget and choose **Full screen**. Then tap the screen or press the scroll wheel's centre button (ENTER) to change pages. Long-press RTN to leave full screen.
-- **App mode layout**: press and hold the widget screen. The EdgeTX button in the corner goes away, and a screen tap or the scroll wheel's centre button changes pages. To get back to the EdgeTX menus, hold RTN until the EdgeTX button appears again.
+- **One-zone (full screen) layout:** long-press the widget and choose **Full screen**. Then tap the screen or press the scroll wheel's centre button (ENTER) to change pages. Long-press RTN to leave full screen. [Video](https://youtu.be/EEuMdyWKpXo)
+- **App mode layout**: press and hold the widget screen. The EdgeTX button in the corner goes away, and a screen tap or the scroll wheel's centre button changes pages. To get back to the EdgeTX menus, hold RTN until the EdgeTX button appears again. [Video](https://youtu.be/JLlAgr9WBSo)
 - Not in front, a one-zone screen still shows the full display (a small zone only the minimap), and a [page switch](#changing-pages) still turns the pages.
 
 **Updating:** delete the `.luac` files in `WIDGETS/OmniDeck/` first, then copy the new folders. Your settings stay in `WIDGETS/OmniDeck/<model name>.cfg`; settings new in 1.0.0 start Off.
