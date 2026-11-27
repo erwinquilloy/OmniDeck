@@ -21,7 +21,10 @@
 
 local floor, sin, cos, rad, max, min, sqrt = math.floor, math.sin, math.cos, math.rad, math.max, math.min, math.sqrt
 
-local X0, Y0, X1, Y1 = 0, 10, 127, 55   -- map area; the strip below holds the coordinates
+-- 128x64, or 212x64 (Taranis X9D / X9D+ / X9E): the map runs the full width; the scale (R) is
+-- set by the height, so it is the same on both
+local W = (LCD_W or 128) >= 200 and 212 or 128
+local X0, Y0, X1, Y1 = 0, 10, W - 1, 55   -- map area; the strip below holds the coordinates
 local MX, MY = (X0 + X1) / 2, (Y0 + Y1) / 2
 local R = 22                             -- pixels from the centre to the nearest edge
 local M_PER_DEG = 111320
@@ -58,15 +61,15 @@ local function inside(x, y, pad)
 end
 
 local function topBar(s, alive, u)
-  lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
+  lcd.drawFilledRectangle(0, 0, W, 9, FORCE)
   local mode = alive and string.upper(s.mode or "---") or "NO TELEM"
   if alive and s.wpNum and s.wpNum > 0 then mode = mode .. " WP" .. s.wpNum end
   lcd.drawText(1, 1, mode, INVERS)
-  lcd.drawText(127, 1, s.homeDist and u.dist(s.homeDist) or "", INVERS + RIGHT)
+  lcd.drawText(X1, 1, s.homeDist and u.dist(s.homeDist) or "", INVERS + RIGHT)
 end
 
 local function coords(ctx, s)
-  lcd.drawLine(0, Y1 + 1, 127, Y1 + 1, DOTTED, FORCE)
+  lcd.drawLine(0, Y1 + 1, X1, Y1 + 1, DOTTED, FORCE)
   local la, lo, tag = s.lat, s.lon, ""
   if not la and ctx.lastLat then la, lo, tag = ctx.lastLat, ctx.lastLon, "LAST " end
   lcd.drawText(1, 58, la and (tag .. string.format("%.5f %.5f", la, lo)) or "NO POSITION", SMLSIZE)

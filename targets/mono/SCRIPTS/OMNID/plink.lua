@@ -3,18 +3,20 @@
   Link, flight controller, passthrough, link quality, GPS, and the Lua memory in use against the
   ~127 KB EdgeTX gives a telemetry script on a TX12 MK2.
 ]]
+local W = (LCD_W or 128) >= 200 and 212 or 128   -- 212x64: Taranis X9D / X9D+ / X9E
+local R = W - 1
 
 local floor = math.floor
 
 local function row(y, a, b)
   lcd.drawText(1, y, a, 0)
-  lcd.drawText(127, y, b, RIGHT)
+  lcd.drawText(R, y, b, RIGHT)
 end
 
 local function draw(ctx)
   local T = ctx.T
   local s = T.s
-  lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
+  lcd.drawFilledRectangle(0, 0, W, 9, FORCE)
   lcd.drawText(1, 1, "OmniDeck Mono v" .. ctx.version, INVERS)
   local now = ctx.clock()
   local pt = now - (s.lastPt or -100) <= 3

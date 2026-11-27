@@ -62,7 +62,7 @@ if rawget(_G, "table") == nil then
 end
 
 local ROOT = "/SCRIPTS/OMNID/"
-local VERSION = "0.1.1"
+local VERSION = "0.1.2"
 -- the page cycle; a page whose test fails is skipped
 local PAGES = { "pmain.lua", "pmap.lua", "pmsg.lua", "psum.lua", "plink.lua", "psens.lua" }
 local SHOW = {
@@ -288,7 +288,8 @@ end
 local function drawErr(title, t)
   lcd.drawText(1, 1, title, 0)
   t = t or "?"
-  for i = 0, 4 do lcd.drawText(1, 11 + i * 8, string.sub(t, i * 25 + 1, i * 25 + 25), SMLSIZE) end
+  local n = (LCD_W or 128) >= 200 and 41 or 25   -- characters a line (212x64: Taranis X9D / X9D+ / X9E)
+  for i = 0, 4 do lcd.drawText(1, 11 + i * 8, string.sub(t, i * n + 1, i * n + n), SMLSIZE) end
   lcd.drawText(1, 56, "LUA MEM " .. math.floor(collectgarbage("count")) .. "K", SMLSIZE)
 end
 

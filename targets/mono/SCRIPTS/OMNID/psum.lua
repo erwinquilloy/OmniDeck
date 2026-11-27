@@ -4,12 +4,14 @@
   page cycle, showing the flight in progress (or the last one). The same figures go into the
   flight log file.
 ]]
+local W = (LCD_W or 128) >= 200 and 212 or 128   -- 212x64: Taranis X9D / X9D+ / X9E
+local R = W - 1
 
 local floor = math.floor
 
 local function draw(ctx)
   local f, u = ctx.F.live(), ctx.u
-  lcd.drawFilledRectangle(0, 0, 128, 8, FORCE)   -- 8 px: seven rows fit below
+  lcd.drawFilledRectangle(0, 0, W, 8, FORCE)   -- 8 px: seven rows fit below
   lcd.drawText(1, 0, ctx.F.last() == f and "FLIGHT SUMMARY" or "FLIGHT STATS", INVERS)
   if not f then
     lcd.drawText(1, 30, "NO FLIGHT YET", 0)
@@ -45,9 +47,9 @@ local function draw(ctx)
   }
   for i, r in ipairs(rows) do
     lcd.drawText(1, 1 + i * 8, r[1], 0)
-    lcd.drawText(127, 1 + i * 8, r[2], RIGHT)
+    lcd.drawText(R, 1 + i * 8, r[2], RIGHT)
   end
-  if ctx.logName then lcd.drawText(127, 0, "LOG", INVERS + RIGHT) end
+  if ctx.logName then lcd.drawText(R, 0, "LOG", INVERS + RIGHT) end
 end
 
 return { draw = draw }

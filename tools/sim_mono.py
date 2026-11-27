@@ -25,7 +25,7 @@ OUT = os.path.abspath(args[0]) if args else os.path.join(HERE, 'out_mono')
 SPORT, NATIVE = '--sport' in sys.argv, '--native' in sys.argv
 SD = os.path.normpath(os.path.join(HERE, '..', 'targets', 'mono'))
 os.makedirs(OUT, exist_ok=True)
-tag = ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '') + ('_notable' if '--notable' in sys.argv else '')
+tag = ('w212_' if '212x64' in sys.argv else '') + ('native' if NATIVE else 'ap') + ('_sport' if SPORT else '_crsf') + ('_imp' if '--imperial' in sys.argv else '') + ('_pages' if '--pages' in sys.argv else '') + ('_notable' if '--notable' in sys.argv else '')
 
 L = lua52.LuaRuntime(unpack_returned_tuples=True)
 G = L.globals()
@@ -33,7 +33,10 @@ L.execute('collectgarbage()')
 MEM_BASE = L.eval('(collectgarbage("count"))')   # this Lua's own libraries, before any script
 
 # ------------------------------------------------------------------ screen: 128x64, one bit
+# (--res 212x64: Taranis X9D / X9D+ / X9E)
 W, H = 128, 64
+for _i, _a in enumerate(sys.argv):
+    if _a == '--res': W, H = map(int, sys.argv[_i + 1].split('x'))
 fb = bytearray(W * H)
 texts = []
 # flag values: arbitrary but distinct, as the scripts only pass the names

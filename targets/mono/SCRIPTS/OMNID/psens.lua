@@ -5,6 +5,9 @@
 ]]
 
 local ROWS = 7
+local W = (LCD_W or 128) >= 200 and 212 or 128   -- 212x64: Taranis X9D / X9D+ / X9E
+local R = W - 1
+local NAMEC, VALC = W == 212 and 12 or 6, W == 212 and 20 or 11   -- characters of sensor name / value
 local top, rows, at = 1, nil, -100
 
 local function scrollDir(e)
@@ -20,9 +23,9 @@ local function draw(ctx, event)
   local T = ctx.T
   local now = ctx.clock()
   if not rows or now - at >= 0.5 then rows, at = T.sensorCheck(), now end   -- twice a second
-  lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
+  lcd.drawFilledRectangle(0, 0, W, 9, FORCE)
   lcd.drawText(1, 1, "SENSORS", INVERS)
-  lcd.drawText(127, 1, rows.kind and string.upper(rows.kind) or "NO LINK", INVERS + RIGHT)
+  lcd.drawText(R, 1, rows.kind and string.upper(rows.kind) or "NO LINK", INVERS + RIGHT)
   if #rows == 0 then
     lcd.drawText(1, 30, "NO SENSORS FOUND", 0)
     return
@@ -35,13 +38,13 @@ local function draw(ctx, event)
     if not row then break end
     local y = 11 + r * 7
     lcd.drawText(0, y, string.upper(row.key), SMLSIZE)
-    lcd.drawText(31, y, string.sub(row.name, 1, 6), SMLSIZE)
-    lcd.drawText(124, y, string.sub(row.value, 1, 11), SMLSIZE + RIGHT)
+    lcd.drawText(31, y, string.sub(row.name, 1, NAMEC), SMLSIZE)
+    lcd.drawText(R - 3, y, string.sub(row.value, 1, VALC), SMLSIZE + RIGHT)
   end
   if maxTop > 1 then
-    lcd.drawLine(127, 10, 127, 63, DOTTED, FORCE)
+    lcd.drawLine(R, 10, R, 63, DOTTED, FORCE)
     local h = math.max(4, math.floor(54 * ROWS / #rows))
-    lcd.drawFilledRectangle(126, 10 + math.floor((54 - h) * (top - 1) / (maxTop - 1)), 2, h, FORCE)
+    lcd.drawFilledRectangle(R - 1, 10 + math.floor((54 - h) * (top - 1) / (maxTop - 1)), 2, h, FORCE)
   end
 end
 

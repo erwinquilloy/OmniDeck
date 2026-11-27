@@ -6,7 +6,9 @@
   and returns to the newest when scrolled to the bottom again.
 ]]
 
-local ROWS, COLS = 6, 21
+local W = (LCD_W or 128) >= 200 and 212 or 128   -- 212x64: Taranis X9D / X9D+ / X9E
+local R = W - 1
+local ROWS, COLS = 6, W == 212 and 34 or 21   -- characters a line (6 px each, the scroll bar at the right)
 
 local scroll = 0       -- lines above the newest
 local seenTotal = nil  -- s.msgTotal when last drawn, to hold a scrolled view in place
@@ -27,9 +29,9 @@ end
 local function draw(ctx, event)
   local s = ctx.T.s
   local msgs = s.msgs or {}
-  lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
+  lcd.drawFilledRectangle(0, 0, W, 9, FORCE)
   lcd.drawText(1, 1, "MESSAGES", INVERS)
-  lcd.drawText(127, 1, tostring(#msgs), INVERS + RIGHT)
+  lcd.drawText(R, 1, tostring(#msgs), INVERS + RIGHT)
   if #msgs == 0 then
     lcd.drawText(1, 30, "NO MESSAGES YET", 0)
     return
@@ -63,10 +65,10 @@ local function draw(ctx, event)
 
   -- scroll bar
   if maxScroll > 0 then
-    lcd.drawLine(127, 10, 127, 63, DOTTED, FORCE)
+    lcd.drawLine(R, 10, R, 63, DOTTED, FORCE)
     local h = math.max(4, math.floor(54 * ROWS / #lines))
     local y = 10 + math.floor((54 - h) * (maxScroll - scroll) / maxScroll)
-    lcd.drawFilledRectangle(126, y, 2, h, FORCE)
+    lcd.drawFilledRectangle(R - 1, y, 2, h, FORCE)
   end
 end
 

@@ -13,9 +13,15 @@
 
 local floor, sin, cos, rad, abs = math.floor, math.sin, math.cos, math.rad, math.abs
 
-local BX0, BY0, BX1, BY1 = 0, 10, 69, 63   -- horizon box, inclusive
+-- 128x64 (TX12, GX12 ...) or 212x64 (Taranis X9D / X9D+ / X9E): on the wide screen the horizon
+-- grows to x 0-129 and the data column moves to x 134-211; every 128x64 position is unchanged
+local W = (LCD_W or 128) >= 200 and 212 or 128
+local WIDE = W == 212
+local R = W - 1                             -- right edge
+local BX0, BY0, BX1, BY1 = 0, 10, WIDE and 129 or 69, 63   -- horizon box, inclusive
 local RY0 = BY0 + 9                         -- rungs and their numbers stay below the heading row
-local CX, CY = 34, 37                       -- aircraft symbol
+local CX, CY = WIDE and 64 or 34, 37        -- aircraft symbol
+local HDG_PX = WIDE and 0.8 or 0.45         -- home icon: pixels per degree off the nose
 local PPD = 1.6                             -- pixels per degree of pitch
 local SW = 5                                -- SMLSIZE character pitch
 
@@ -87,11 +93,11 @@ local function horizon(s, boxBottom)
     end
   end
   -- aircraft symbol on a white band, so it shows on sky and ground
-  lcd.drawFilledRectangle(22, CY - 1, 9, 3, ERASE)
-  lcd.drawFilledRectangle(38, CY - 1, 9, 3, ERASE)
+  lcd.drawFilledRectangle(CX - 12, CY - 1, 9, 3, ERASE)
+  lcd.drawFilledRectangle(CX + 4, CY - 1, 9, 3, ERASE)
   lcd.drawFilledRectangle(CX - 1, CY - 1, 3, 3, ERASE)
-  lcd.drawLine(22, CY, 30, CY, SOLID, FORCE)
-  lcd.drawLine(38, CY, 46, CY, SOLID, FORCE)
+  lcd.drawLine(CX - 12, CY, CX - 4, CY, SOLID, FORCE)
+  lcd.drawLine(CX + 4, CY, CX + 12, CY, SOLID, FORCE)
   lcd.drawPoint(CX, CY)
 end
 
@@ -107,7 +113,7 @@ local function heading(s)
   lcd.drawRectangle(x + w - 4, BY0 + 2, 3, 3, ERASE)
   if not s.homeBrg or (s.homeDist or 0) < 1 then return end
   local rel = (s.homeBrg - s.yaw + 540) % 360 - 180
-  local ix, arrow = floor(CX + rel * 0.45 + 0.5), nil
+  local ix, arrow = floor(CX + rel * HDG_PX + 0.5), nil
   if ix < BX0 + 4 then ix, arrow = BX0 + 4, "<" elseif ix > BX1 - 4 then ix, arrow = BX1 - 4, ">" end
   local iy = BY0 + 10
   lcd.drawFilledRectangle(ix - 3, iy, 7, 7, FORCE)
@@ -131,11 +137,11 @@ end
 -- top bar, right to left: GPS fix + satellites, arm state in a white block, transmitter voltage;
 -- the flight mode takes what is left, in the small font when the normal one does not fit
 local function topBar(s, alive)
-  lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
+  lcd.drawFilledRectangle(0, 0, W, 9, FORCE)
   local fix = s.fix or 0
   local gps = fix >= 3 and ("3D" .. (s.sats or 0)) or (fix == 2 and ("2D" .. (s.sats or 0)) or "NOFIX")
-  lcd.drawText(127, 1, gps, INVERS + RIGHT)
-  local x = 127 - #gps * 6 - 3
+  lcd.drawText(R, 1, gps, INVERS + RIGHT)
+  local x = R - #gps * 6 - 3
   local arm = s.armed and "ARM" or "DIS"
   local bw = #arm * 6 + 3
   x = x - bw
@@ -191,13 +197,14 @@ local function draw(ctx)
   lcd.drawLine(BX1 + 1, BY0 - 1, BX1 + 1, BY1, SOLID, FORCE)
 
   -- right column: label at the left edge, value right-aligned. The column is x 74-127 (54 px =
-  -- 9 normal or 11 small characters); a label is left out when it would not fit beside its
-  -- value with a space, so the number always shows.
-  local x = 74
+  -- 9 normal or 11 small characters; 212x64: x 134-211, 78 px); a label is left out when it
+  -- would not fit beside its value with a space, so the number always shows.
+  local x = BX1 + 5
+  local colW = R - x + 2
   local function row(y, label, val, flags, small)
     local f = small and SMLSIZE or 0
-    if (#label + 1 + #val) * (small and SW or 6) <= 55 then lcd.drawText(x, y, label, f) end
-    lcd.drawText(127, y, val, f + RIGHT + (flags or 0))
+    if (#label + 1 + #val) * (small and SW or 6) <= colW then lcd.drawText(x, y, label, f) end
+    lcd.drawText(R, y, val, f + RIGHT + (flags or 0))
   end
   -- low-altitude alarm (Setup LOW ALT): the value inverted and blinking while low
   row(10, "ALT", s.alt and u.altStr(s.alt) or "---", ctx.A.altLow and (BLINK + INVERS) or 0)
@@ -206,7 +213,7 @@ local function draw(ctx)
   -- at the column edge like the other rows (5 characters at most: x 98-127)
   lcd.drawText(x, 26, "H", 0)
   homeArrow(x + 12, 29, s)
-  lcd.drawText(127, 26, u.dist(s.homeDist), RIGHT)
+  lcd.drawText(R, 26, u.dist(s.homeDist), RIGHT)
   -- voltage alarm (OmniDeck Setup): the value inverted while low, blinking while critical
   local st = ctx.A.stage or 0
   local vf = (st == 2 and BLINK + INVERS) or (st == 1 and INVERS) or 0

@@ -45,6 +45,8 @@ if rawget(_G, "table") == nil then
   table = T
 end
 
+local W = (LCD_W or 128) >= 200 and 212 or 128   -- 212x64: Taranis X9D / X9D+ / X9E
+local R = W - 1
 local C, vals, items = nil, nil, {}
 local sel, top, editing, msg = 1, 1, false, ""
 local ROWS = 5
@@ -97,7 +99,7 @@ end
 
 local function run(event)
   lcd.clear()
-  lcd.drawFilledRectangle(0, 0, 128, 9, FORCE)
+  lcd.drawFilledRectangle(0, 0, W, 9, FORCE)
   lcd.drawText(1, 1, "OMNIDECK SETUP", INVERS)
   if not C then
     lcd.drawText(1, 20, msg, 0)
@@ -120,18 +122,18 @@ local function run(event)
     local y = 10 + r * 9
     local v = valueText(it)
     if i == sel and not editing then
-      lcd.drawFilledRectangle(0, y - 1, 128, 9, FORCE)
+      lcd.drawFilledRectangle(0, y - 1, W, 9, FORCE)
       lcd.drawText(1, y, it[2], INVERS)
-      lcd.drawText(127, y, v, INVERS + RIGHT)
+      lcd.drawText(R, y, v, INVERS + RIGHT)
     else
       lcd.drawText(1, y, it[2], 0)
-      lcd.drawText(127, y, v, RIGHT + ((i == sel) and (INVERS + BLINK) or 0))
+      lcd.drawText(R, y, v, RIGHT + ((i == sel) and (INVERS + BLINK) or 0))
     end
   end
   -- bottom line: what the setting means, or what to press
   local note = C.NOTE[items[sel][1]]
   local hint = editing and "WHEEL CHANGE, ENT KEEP" or (note or "ENT EDIT, RTN EXIT")
-  lcd.drawLine(0, 55, 127, 55, DOTTED, FORCE)
+  lcd.drawLine(0, 55, R, 55, DOTTED, FORCE)
   lcd.drawText(1, 57, hint, SMLSIZE)
   return 0
 end
