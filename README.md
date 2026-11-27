@@ -127,7 +127,7 @@ The PARAMS page talks MSP to INAV and Betaflight, over the same telemetry link:
 
 | Flight controller | Versions | Links |
 |---|---|---|
-| INAV | 9.1.0 or later | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz, S.Port / F.Port. mLRS only with a test mLRS Tx firmware ("MSP over cbridge"): stock mLRS drops the radio's MSP |
+| INAV | 9.1.0 or later | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz, S.Port / F.Port. mLRS (Tx Ser Port = cbridge, Rx Ser Link Mode = mspX) needs MSP over the CRSF bridge, merged for the next mLRS release ([mLRS#560](https://github.com/olliw42/mLRS/pull/560)). Until it is out, a custom mLRS Tx build is available on request |
 | Betaflight | 4.5, 2025.12 and 2026.6 | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz, S.Port / F.Port. 2026.6 checked on a quad over ExpressLRS |
 
 - **INAV 7 and 8** can't carry the setting commands over the radio link, and **INAV 9.0.x** answers them without the values (fixed in 9.1.0): the page says "Parameters need INAV 9.1 or later".
