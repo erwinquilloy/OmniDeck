@@ -39,7 +39,7 @@ C.ITEMS = {
   -- pages
   -- EdgeTX gives a widget touch and keys only in full screen; a switch changes pages anywhere
   { "pageSwitch", "Page switch", "switches" },
-  { "pageSwMode", "Page switch action", { { 0, "Next page (flip up / press)" }, { 1, "Position picks page" } } },
+  { "pageSwMode", "Page switch action", { { 0, "Next page (flip up / press)" }, { 1, "Position picks page" }, { 2, "Up previous, down next" } } },
   -- the pages a tap cycles through (test42); the flight summary still opens on disarm
   { "msgPage", "Messages page", { { 0, "Auto (ArduPilot only)" }, { 1, "On" }, { 2, "Off" } } },
   { "statsPage", "Flight stats page", { { 0, "Off" }, { 1, "On" } } },

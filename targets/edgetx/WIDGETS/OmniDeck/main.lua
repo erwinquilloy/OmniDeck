@@ -89,21 +89,49 @@ local function background(w)
 end
 
 -- EdgeTX events -> the Ethos-style events ui.lua expects
+-- TX16S MK3 (2026-11-27): one short press on PARAMS - / + stepped twice and BACK went back twice.
+-- A tap can arrive as FIRST, BREAK and then TAP; the TAP after the BREAK was taken as a second
+-- press. A TAP within TAP_AFTER_BREAK ticks of a BREAK is now that same touch: it acts only when
+-- nothing in that touch acted yet. The MK3's BREAK can look like a drag, so on the main and map
+-- pages (which act on the lift) the TAP is the tap; on PARAMS (acts on the press) it is dropped.
+-- A press within PRESS_GAP ticks of the previous one is a bounce: that whole touch is left out.
+local TAP_AFTER_BREAK, PRESS_GAP = 50, 8   -- 10 ms ticks: a second press within 80 ms is a bounce
+local function pressOk(w)
+  local now = getTime()
+  if w.pressAt and now - w.pressAt < PRESS_GAP then w.touchSkip = true return false end
+  w.pressAt, w.touchSkip = now, false
+  return true
+end
 local function event(w, evt, touch)
   if evt == nil or evt == 0 then return end
   if touch and EVT_TOUCH_FIRST and evt == EVT_TOUCH_FIRST then
-    w.touchOpen = true
-    UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y)
+    w.touchOpen, w.breakAt, w.tapN0 = true, nil, w.tapN or 0
+    if pressOk(w) then UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y) end
   elseif touch and EVT_TOUCH_SLIDE and evt == EVT_TOUCH_SLIDE then
-    UI.event(w, E.EVT_TOUCH, E.TOUCH_MOVE, touch.x, touch.y)
+    if not w.touchSkip then UI.event(w, E.EVT_TOUCH, E.TOUCH_MOVE, touch.x, touch.y) end
   elseif touch and EVT_TOUCH_BREAK and evt == EVT_TOUCH_BREAK then
-    w.touchOpen = false
-    UI.event(w, E.EVT_TOUCH, E.TOUCH_END, touch.x, touch.y)
+    -- only the lift of a touch whose FIRST was seen. EdgeTX hands a widget one event per update,
+    -- so on the heavy main and map pages the FIRST can be lost: that BREAK is left out and the
+    -- TAP after it is the whole tap (MK3 2026-11-27: taps on the map page did nothing)
+    if not w.touchOpen then return end
+    w.touchOpen, w.breakAt = false, getTime()
+    if not w.touchSkip then UI.event(w, E.EVT_TOUCH, E.TOUCH_END, touch.x, touch.y) end
   elseif touch and EVT_TOUCH_TAP and evt == EVT_TOUCH_TAP then
     -- a quick tap ends with TAP, not BREAK, on the radio (TX16S MK2 tester: pages did not change).
-    -- After a FIRST already seen it is only the lift (pages that act on the press would act twice).
-    if not w.touchOpen then UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y) end
-    w.touchOpen = false
+    -- After a FIRST already seen it is only the lift (pages that act on the press would act twice);
+    -- right after a BREAK it is the same touch again (TX16S MK3): it acts only if nothing did yet
+    if w.breakAt and getTime() - w.breakAt < TAP_AFTER_BREAK then
+      w.breakAt = nil
+      if w.touchSkip or (w.tapN or 0) ~= w.tapN0 then return end   -- this touch acted already
+      UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y)
+      UI.event(w, E.EVT_TOUCH, E.TOUCH_END, touch.x, touch.y)
+      return
+    end
+    local open = w.touchOpen
+    w.touchOpen, w.breakAt = false, nil
+    if not open and not pressOk(w) then return end
+    if w.touchSkip then return end
+    if not open then UI.event(w, E.EVT_TOUCH, E.TOUCH_START, touch.x, touch.y) end
     UI.event(w, E.EVT_TOUCH, E.TOUCH_END, touch.x, touch.y)
   elseif evt == EVT_VIRTUAL_ENTER then
     UI.event(w, E.EVT_KEY, E.KEY_ENTER_BREAK)
@@ -120,12 +148,20 @@ end
 -- Page switch (OmniDeck Setup): works outside full screen too, where EdgeTX sends no touch or
 -- keys. "Next page": each move to the up position (or press of a momentary switch).
 -- "Position picks page": up Main, middle Map, down Messages.
+-- "Up previous, down next" (user 2026-11-27, 3-position switch): each flip to up goes one page
+-- back, each flip to down one page on; the middle does nothing and the page stays where it is.
 local function pageSwitch(w)
   local sw = w.pageSwitch
   if sw == nil or sw == "" then return end
   local v = getValue(sw)
   if type(v) ~= "number" then return end
-  if w.pageSwMode == 1 then
+  if w.pageSwMode == 2 then
+    local pos = (v < -300 and 1) or (v > 300 and 3) or 2
+    if w.swLast3 ~= nil and pos ~= w.swLast3 then
+      if pos == 1 then UI.prevPage(w) elseif pos == 3 then UI.nextPage(w) end
+    end
+    w.swLast3 = pos
+  elseif w.pageSwMode == 1 then
     local pos = (v < -300 and 1) or (v > 300 and 3) or 2
     if pos ~= w.swLastPos then w.swLastPos = pos w.page = pos end
   else

@@ -1,10 +1,24 @@
-OmniDeck 1.0.0f for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
+OmniDeck 1.0.0 for EdgeTX colour radios (RadioMaster TX16S MK2 480x272; MK3 800x480)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0 (after the 1.0.0f test build)
+- PARAMS page on the TX16S MK3: one tap on - / + changed the value by two steps and one tap on
+  < BACK went back twice (out of the tab and off the page). A tap now counts once. Holding - / +
+  still repeats until you lift your finger.
+- PARAMS page: a value changed but not saved is dropped when you leave the page. Coming back
+  shows the flight controller's value. A Save you already pressed still goes through.
+- Page switch action (OmniDeck Setup): new "Up previous, down next" for a 3-position switch.
+  Flip up = one page back, flip down = one page on, middle = nothing (the page stays).
+- PARAMS editor: the range and previous value under the big number are in a bigger font. When
+  they don't fit on one line they go on two.
+- INAV PARAMS: the NAV THR tab is now called NAV, and Loiter radius moved there from RTH.
+- Top bar: when the model name and the TX battery would overlap, the model name is left out so
+  the TX battery always shows.
 
 WHAT'S NEW IN 1.0.0f (after 1.0.0e)
 - Main page, top-right panel: the logo (OmniDeck, Stratos or your own PNG in logos/) now fills

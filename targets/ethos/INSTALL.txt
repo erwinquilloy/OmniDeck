@@ -1,10 +1,28 @@
-OmniDeck 1.0.0f for FrSky Ethos radios (X20 family 800x480, X18 480x320)
+OmniDeck 1.0.0 for FrSky Ethos radios (X20 family 800x480, X18 480x320)
 One telemetry display for ArduPilot, INAV and Betaflight.
 Avionics + moving map telemetry widget for ArduPilot, INAV and Betaflight.
 
 
 
 
+
+WHAT'S NEW IN 1.0.0 (after the 1.0.0f test build)
+- Page switch (widget settings, new): pick a switch to turn the pages, also when OmniDeck is
+  not full screen. "Page switch action": "Up previous, down next" (default, for a 3-position
+  switch: up = one page back, down = one page on, middle = nothing), "Next page (flip up /
+  press)" (each move to down, or each press of a momentary switch), or "Position picks page"
+  (up Main, middle Map, down Messages).
+- PARAMS page: a value changed but not saved is dropped when you leave the page. Coming back
+  shows the flight controller's value. A Save you already pressed still goes through.
+- PARAMS editor: the range and previous value under the big number are in a bigger font. When
+  they don't fit on one line they go on two.
+- INAV PARAMS: the NAV THR tab is now called NAV, and Loiter radius moved there from RTH.
+- Top bar: when the model name and the TX battery would overlap, the model name is left out so
+  the TX battery always shows.
+- Setup: the low and critical voltage alarms step 0.05 V per wheel/stick tick (was a big jump
+  on the TWIN X-Lite RII).
+- Ethos Suite package: now has ethos_lua_manifest.json at the zip root, so newer Ethos Suite
+  versions install it (they said "No ethos_lua_manifest.json found at zip root").
 
 WHAT'S NEW IN 1.0.0f (after 1.0.0e)
 - Main page, top-right panel: the logo (OmniDeck, Stratos or your own PNG in logos/) now fills

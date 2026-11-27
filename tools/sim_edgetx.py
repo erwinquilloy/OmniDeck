@@ -505,9 +505,16 @@ S = None
 worst = {}
 heavy = []
 
+_TAPGAP = [False]
 def frame(evt=0, touch=None, zone=None):
     """one refresh: evt 0 = full screen without an event, None = in a layout zone"""
     global cv
+    # a finger needs time between two presses (main.lua drops a press within 80 ms of the last):
+    # 0.1 s of ordinary refreshes first, as the radio would run them
+    if evt in (G.EVT_TOUCH_FIRST, G.EVT_TOUCH_TAP) and not _TAPGAP[0]:
+        _TAPGAP[0] = True
+        try: step(0.1)
+        finally: _TAPGAP[0] = False
     cv = Canvas(W, H) if zone is None else Canvas(zone[0], zone[1])
     if zone is not None:
         wd.zone = L.table_from({'x': 0, 'y': 0, 'w': zone[0], 'h': zone[1]})
@@ -842,6 +849,21 @@ def _goto(name, qon):
     for _ in range(t): frame(G.EVT_VIRTUAL_NEXT)
     frame(G.EVT_VIRTUAL_ENTER)
     for _ in range(r): frame(G.EVT_VIRTUAL_NEXT)
+# the PARAMS module from ui.lua's upvalues (test harness)
+_findPRg = L.eval('''function(fs)
+  local seen = {}
+  local function find(f, d)
+    if type(f) ~= "function" or seen[f] or d > 5 then return nil end
+    seen[f] = true
+    for i = 1, 300 do
+      local n, v = debug.getupvalue(f, i)
+      if n == nil then break end
+      if n == "PR" and type(v) == "table" then return v end
+      local r = find(v, d + 1) if r then return r end
+    end
+  end
+  for _, f in pairs(fs) do local r = find(f, 0) if r then return r end end
+end''')
 _ap = FakeAP({'Q_ENABLE': 0.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
               'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
               'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'RLL_RATE_P': 0.08}, dup=True)
@@ -1183,6 +1205,52 @@ else:
         assert abs(_ap.p['ARMING_SKIPCHK'] - -1.0) < 1e-6, ('All off saves -1', _ap.p['ARMING_SKIPCHK'])
         print('ARMING_SKIPCHK All off: -1 saved and verified')
         frame(G.EVT_VIRTUAL_EXIT); frame(G.EVT_VIRTUAL_EXIT)
+        # TX16S MK3 2026-11-27: one tap = FIRST, BREAK, TAP; it stepped twice and BACK went back twice
+        PRa = _findPRg(UIm) or _findPRg(widget_def)
+        def _pbox(k, i=None):
+            for b in PRa._boxes().values():
+                if b.k == k and (i is None or b.i == i): return b
+            raise AssertionError('no %s box %s' % (k, i))
+        def _mk3tap(b):
+            x, y = int(b.x + b.w / 2), int(b.y + b.h / 2)
+            frame(G.EVT_TOUCH_FIRST, {'x': x, 'y': y}); frame(G.EVT_TOUCH_BREAK, {'x': x, 'y': y})
+            frame(G.EVT_TOUCH_TAP, {'x': x, 'y': y})
+        _goto('AIRSPEED_CRUISE', False)
+        for _ in range(30): _ap_pump(); step(0.05)
+        frame(G.EVT_VIRTUAL_ENTER)
+        for _ in range(20): _ap_pump(); step(0.05)
+        _ap_pump(); frame()
+        d0 = PRa._draft()[0]
+        _mk3tap(_pbox('btn', '+')); step(0.3)
+        assert abs(PRa._draft()[0] - d0 - 0.5) < 1e-6, ('one + tap = one step', d0, PRa._draft()[0])
+        _mk3tap(_pbox('btn', '-')); _mk3tap(_pbox('btn', '-')); step(0.3)
+        assert abs(PRa._draft()[0] - d0 + 0.5) < 1e-6, ('two - taps = two steps', d0, PRa._draft()[0])
+        # holding + still repeats until the lift; the lift (BREAK, then TAP) adds nothing
+        _b = _pbox('btn', '+'); _x, _y = int(_b.x + _b.w / 2), int(_b.y + _b.h / 2)
+        h0 = PRa._draft()[0]
+        frame(G.EVT_TOUCH_FIRST, {'x': _x, 'y': _y})
+        for _ in range(30): _ap_pump(); step(0.05)          # 1.5 s held
+        h1 = PRa._draft()[0]
+        assert h1 - h0 >= 0.5 * 8, ('hold repeats', h0, h1)
+        frame(G.EVT_TOUCH_BREAK, {'x': _x, 'y': _y}); frame(G.EVT_TOUCH_TAP, {'x': _x, 'y': _y})
+        h2 = PRa._draft()[0]
+        for _ in range(20): _ap_pump(); step(0.05)
+        assert PRa._draft()[0] == h2 and h2 - h1 <= 0.5 + 1e-6, ('repeat stops at the lift', h1, h2, PRa._draft()[0])
+        print('PARAMS hold +: %.1f -> %.1f in 1.5 s, stops at the lift OK' % (h0, h2))
+        # leaving the page with the change not saved drops it (user 2026-11-27)
+        wd.page = 1
+        for _ in range(5): _ap_pump(); step(0.05)
+        wd.page = 6
+        for _ in range(5): _ap_pump(); step(0.05)
+        _ap_pump(); frame()
+        assert not PRa.editing(), 'editor closed after the page was left'
+        assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('nothing saved', _ap.p['AIRSPEED_CRUISE'])
+        # BACK in a tab: one tap goes to the tab column only, the page stays
+        assert PRa._focus() == 'rows', PRa._focus()
+        _mk3tap(_pbox('back')); step(0.3)
+        assert wd.page == 6 and PRa._focus() == 'tabs', ('one BACK tap = one step back', wd.page, PRa._focus())
+        print('MK3 FIRST+BREAK+TAP: one step per tap, BACK once; unsaved edit dropped on leaving OK')
+        PRa = _b = None   # let the PARAMS module be freed (checked below)
         print('params page S.Port: read, edit, save verified OK')
     frame(G.EVT_VIRTUAL_EXIT)
     assert wd.page == 1, 'RTN in the tab column leaves the params page, page %s' % wd.page
@@ -1432,6 +1500,27 @@ frame(G.EVT_TOUCH_FIRST, {'x': 100, 'y': 100})
 frame(G.EVT_TOUCH_SLIDE, {'x': 100, 'y': 160})
 frame(G.EVT_TOUCH_BREAK, {'x': 100, 'y': 160})
 assert wd.page == 2, 'a drag is not a tap'
+# every order a tap may arrive in turns the page once, on the main and the map page: EdgeTX hands
+# one event per update, so a FIRST or a BREAK can be missing (MK3 2026-11-27: map taps did nothing)
+for _seq in (('FIRST', 'BREAK'), ('FIRST', 'TAP'), ('FIRST', 'BREAK', 'TAP'), ('BREAK', 'TAP'), ('TAP',)):
+    for _p0 in (1, 2):
+        wd.page = _p0
+        step(0.6)
+        for _e in _seq: frame(getattr(G, 'EVT_TOUCH_' + _e), {'x': 100, 'y': 100})
+        step(0.3)
+        _want = 1 if (NATIVE and _p0 == 2) else _p0 + 1   # INAV / Betaflight: no messages page
+        assert wd.page == _want, ('one page per tap', _seq, _p0, wd.page)
+# MK3: the BREAK can look like a drag (moved); the TAP after it is the tap
+for _p0 in (1, 2):
+    wd.page = _p0
+    step(0.6)
+    frame(G.EVT_TOUCH_FIRST, {'x': 100, 'y': 100}); frame(G.EVT_TOUCH_BREAK, {'x': 100, 'y': 160})
+    frame(G.EVT_TOUCH_TAP, {'x': 100, 'y': 100})
+    step(0.3)
+    _want = 1 if (NATIVE and _p0 == 2) else _p0 + 1
+    assert wd.page == _want, ('drag-like BREAK then TAP: one page', _p0, wd.page)
+print('tap orders FIRST/BREAK/TAP: one page each on main + map OK')
+step(0.4)   # 12.6 s above + 0.4 = whole telemetry feeds (0.25 s): later checks keep their timing
 
 # in a layout zone: minimap only, inside the zone
 wd.page = 1
@@ -1748,6 +1837,19 @@ if os.path.isfile(sd_path('/SCRIPTS/TOOLS/OmniDeck Setup.lua')):
     SW['sc'] = 0; frame(None, zone=(W, H)); assert wd.page == 2, 'SC middle = Map, got %s' % wd.page
     SW['sc'] = 1024; frame(None, zone=(W, H)); assert wd.page == 3, 'SC down = Messages, got %s' % wd.page
     SW['sc'] = -1024; frame(None, zone=(W, H)); assert wd.page == 1, 'SC up = Main, got %s' % wd.page
+    # Up previous, down next (user 2026-11-27): middle does nothing, up one page back, down one on
+    open(cfgp, 'a').write('pageSwitch=sc\npageSwMode=2\n')
+    CALL('update', widget_def['update'], wd, options)
+    SW['sc'] = 0; wd.page = 2; frame(None, zone=(W, H)); frame(None, zone=(W, H))
+    assert wd.page == 2, 'mode 2 middle: stays, got %s' % wd.page
+    SW['sc'] = 1024; frame(None, zone=(W, H)); frame(None, zone=(W, H))
+    _nx = 1 if NATIVE else 3
+    assert wd.page == _nx, 'mode 2 down: next page once, got %s' % wd.page
+    SW['sc'] = 0; frame(None, zone=(W, H)); assert wd.page == _nx, 'mode 2 back to middle: stays'
+    SW['sc'] = -1024; frame(None, zone=(W, H)); frame(None, zone=(W, H))
+    assert wd.page == 2, 'mode 2 up: previous page once, got %s' % wd.page
+    SW['sc'] = 0; frame(None, zone=(W, H)); SW['sc'] = -1024; frame(None, zone=(W, H))
+    assert wd.page == 1, 'mode 2 up again: previous page, got %s' % wd.page
     print('page switch OK')
     # Map zoom control: knob S1 picks the range step, all steps across its travel
     open(cfgp, 'a').write('pageSwitch=\nzoomSrc=s1\n')

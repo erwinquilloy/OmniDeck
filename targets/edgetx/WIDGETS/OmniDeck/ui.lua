@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0f"
+local VERSION = "1.0.0"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
@@ -315,7 +315,7 @@ local function topBar(w, x, y, W, h, s, u, H)
   end
 
   -- middle: the model name, then the transmitter battery. Centred and shifted to fit between
-  -- both sides; short of room the name is shortened, then left out: the TX battery stays. Measured
+  -- both sides; short of room the model name is left out: the TX battery stays. Measured
   -- and placed only when its inputs change: EdgeTX's mission page has no Lua budget to spare.
   local tv = txVolts()
   local val = tv and string.format("TX %.1fV", tv) or nil
@@ -331,17 +331,8 @@ local function topBar(w, x, y, W, h, s, u, H)
     if v then lcd.font(fBig) tw = lcd.getTextSize(v) end
     if v and tw > room then v, tw = nil, 0 end   -- not even the TX battery fits
     local gap = (n and v) and 14 or 0
-    local nroom = room - tw - gap                -- the name gets what the TX battery leaves
-    if n and nw > nroom then
-      local full, keep = n, math.floor(#n * nroom / nw) - 1
-      lcd.font(fMid)
-      repeat   -- a proportional font: shortened until it really fits (measured only on a change)
-        keep = keep - 1
-        n = keep >= 3 and (string.sub(full, 1, keep) .. "..") or nil
-        if n then nw, nh = lcd.getTextSize(n) end
-      until n == nil or nw <= nroom
-      if n == nil then nw, gap = 0, 0 end
-    end
+    -- overlap: the TX battery wins, the model name is left out of the top bar
+    if n and nw + gap + tw > room then n, nw, gap = nil, 0, 0 end
     local gw = nw + gap + tw
     m.n, m.v = nil, nil
     if gw > 0 and gw <= room then
@@ -1562,6 +1553,9 @@ local function wakeup(w)
     w.linkUpAt = nil
   end
   local inavDirty = PR and PR.inav and PR.inav.dirty and s.fc == "INAV/BF"
+  -- left the PARAMS page (any way: tap, RTN, page switch): unsaved changes are dropped
+  if w.prmOpen and w.page ~= PAGE_PARAMS and PR and PR.leave then PR.leave() end
+  w.prmOpen = w.page == PAGE_PARAMS
   if w.page == PAGE_PARAMS then
     -- ArduPilot or INAV (INAV 9+, over MSP): any other flight controller leaves the page
     if s.fc and s.fc ~= "ArduPilot" and s.fc ~= "INAV/BF" then w.page = 1 lcd.invalidate()
@@ -1637,6 +1631,15 @@ local function nextPage(w)
   local p = w.page
   for _ = 1, PAGE_PARAMS do
     p = p % PAGE_PARAMS + 1
+    if pageOn(w, p) then break end
+  end
+  w.page = p
+  lcd.invalidate()
+end
+local function prevPage(w)
+  local p = w.page
+  for _ = 1, PAGE_PARAMS do
+    p = (p - 2) % PAGE_PARAMS + 1
     if pageOn(w, p) then break end
   end
   w.page = p
@@ -1743,6 +1746,7 @@ local function event(w, category, value, x, y)
 end
 
 tapAt = function(w, sx, sy, x, y)
+  w.tapN = (w.tapN or 0) + 1   -- main.lua: did this touch already act (MK3 FIRST, BREAK, TAP)
   if w.page == 2 and ED and ED.active and ED.onButton(x, y) then
     ED.tap(T.s, x, y, (lcd.getWindowSize()))   -- the editor's buttons first (Done sits near zoom -)
     lcd.invalidate()
@@ -1816,7 +1820,7 @@ end
 
 -- ---------------------------------------------------------------- exports
 return {
-  VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage,
+  VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage, prevPage = prevPage,
   exportPanel = exportPanel, exportHud = exportHud,
   T = T, MAP = MAP, TL = TL, MI = MI, MSPC = MSPC, AU = AU, FS = FS, logoFiles = logoFiles,
   editor = function() return ED end,   -- test harness: the mission editor, once opened
