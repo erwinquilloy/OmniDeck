@@ -1,10 +1,12 @@
 # OmniDeck Mono
 
-OmniDeck for EdgeTX radios with a 128 × 64 black-and-white screen. A free telemetry script for ArduPilot, INAV and Betaflight: horizon, map, messages, flight summary, flight log and voice call-outs, on six small pages.
+OmniDeck for EdgeTX radios with a black-and-white screen: 128 × 64, and from 0.1.2 also 212 × 64 (FrSky Taranis X9D, X9D+, X9E). A free telemetry script for ArduPilot, INAV and Betaflight: horizon, map, messages, flight summary, flight log and voice call-outs, on six small pages.
 
 ![Main page in FBWA, 1.5 km out, on its way home](img/main.png)
 
-**Status:** 0.1.1, beta. Bench-tested on a RadioMaster TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04, and tested by a tester on a RadioMaster GX12. Not yet tried on the Pocket or Boxer.
+**Status:** 0.1.2, beta. Bench-tested on a RadioMaster TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04, and tested by a tester on a RadioMaster GX12. Not yet tried on the Pocket or Boxer.
+
+**0.1.2** uses the whole width of 212 × 64 screens: the horizon and a wider data column side by side, a full-width map, 34-character message lines and wider sensor names and values. On 128 × 64 every page looks the same as in 0.1.1. Checked in the simulator at both sizes; not yet on a Taranis.
 
 Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
 
@@ -19,7 +21,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 - [Flight summary and log](#flight-summary-and-log)
 - [Voice and alarms](#voice-and-alarms)
 - [Settings](#settings)
-- [ArduPilot parameters](#ardupilot-parameters)
+- [Parameters](#parameters)
 - [Memory](#memory)
 - [Problems](#problems)
 - [Test status](#test-status)
@@ -33,6 +35,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 | RadioMaster TX12 MK2 | 128 × 64 | Tested (bench) |
 | RadioMaster GX12 | 128 × 64 | Tested (tester) |
 | RadioMaster Pocket, Boxer | 128 × 64 | Not tested |
+| FrSky Taranis X9D, X9D+, X9E | 212 × 64 | 0.1.2, simulator only |
 
 | Flight controller | Links |
 |---|---|
@@ -41,7 +44,7 @@ Questions, ideas and flight reports: chat with us on the [Arduplane Stratos Disc
 
 ## Install
 
-1. Download `OmniDeck_Mono_0.1.1.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.1).
+1. Download `OmniDeck_Mono_0.1.2.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.2).
 2. Connect the radio by USB and pick **USB Storage (SD)**, or put the card in a card reader.
 3. Copy the `SCRIPTS` folder from the zip to the **root** of the card, merging with the folder already there:
 
@@ -173,11 +176,11 @@ The same call-outs as the colour builds, from the packs in `SCRIPTS/OMNID/audio/
 | SENSOR PAGE | Hide, Show | Hide |
 | LINK | Auto, CRSF, S.Port | Auto |
 
-## ArduPilot parameters
+## Parameters
 
-OmniDeck Mono has no parameter editor of its own. To read and change ArduPilot parameters from the radio, install the [AP Param Editor](https://github.com/erwinquilloy/ap-param-editor) and open it from **SYS › Tools › APParam**. It runs on black-and-white and colour EdgeTX radios and on Ethos.
+OmniDeck Mono has no parameter editor of its own. To read and change flight controller settings from the radio, install the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor) (it was called AP Param Editor) and open it from **SYS › Tools › OmniDeck Params**. It covers ArduPilot, INAV 9.1 or later and Betaflight 4.5 / 2025.12 / 2026.6, and runs on black-and-white and colour EdgeTX radios and on Ethos. Its own [README](https://github.com/erwinquilloy/param-editor#readme) lists what each flight controller needs.
 
-| Link | AP Param Editor needs |
+| Link | OmniDeck Param Editor needs (ArduPilot) |
 |---|---|
 | S.Port, F.Port | ArduPilot with FrSky passthrough telemetry |
 | ExpressLRS, TBS Crossfire | ArduPlane Stratos v2.2.1 or later on the flight controller |
@@ -228,12 +231,13 @@ Report anything else on the [Arduplane Stratos Discord](https://discord.gg/NrfaP
 | Freeze and "not enough memory" on the TX12 MK2 | Fixed in 0.1.1 (memory use cut): bench pass, armed over 30 min, ELRS |
 | RadioMaster GX12 (tester) | Tested |
 | Pocket and Boxer | Not yet |
+| 212 × 64 layout (0.1.2) | Simulator, every page; not yet on a Taranis |
 
 ## Compared with colour OmniDeck
 
 - No map tiles. The map shows only the active waypoint, because ArduPilot's passthrough sends only that one. No mission files or INAV mission download.
-- No touch, speed tapes or side panel: the screen is 128 × 64.
-- No built-in parameter editor; use the AP Param Editor.
+- No touch, speed tapes or side panel on these small screens.
+- No built-in parameter editor; use the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor).
 
 Screens on this page are rendered by the OmniDeck Mono simulator from the release code; memory figures come from a RadioMaster TX12 MK2 on EdgeTX 2.12.
 

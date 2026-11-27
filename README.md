@@ -11,7 +11,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 ![Main page in flight](docs/screens/main.png)
 
-**Status:** 0.4.1. New in 0.4.1 for ArduPilot: the [PARAMS page](#params-page-parameter-editor) to read and change ArduPlane parameters from the radio, the aircraft's [mission on the map](#missions), and a [mission editor](#mission-editor) that sends a new mission to the aircraft. See [what you need](#parameters-and-missions-what-you-need) for the links and firmware they work with. The same guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
+**Status:** 1.0.0, from the [releases page](https://github.com/erwinquilloy/OmniDeck/releases). New since 0.4.1: the [PARAMS page](#params-page-parameter-editor) for **INAV 9.1+** and **Betaflight 4.5, 2025.12 and 2026.6** (it was ArduPilot only), hold - / + to repeat in its editor, a [page switch](#changing-pages) on Ethos and an up / down mode for a 3-position switch, an average-cell battery display, the mLRS bridge on mLRS's own frames, and a layout and touch pass for the TX16S MK3. Every change is in the [changelog](CHANGELOG.md). Companions: [OmniDeck Mono](#omnideck-mono-black-and-white-radios) 0.1.2 for black-and-white radios, and the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor) 0.2.1, a parameter tool that also runs on black-and-white radios. The guide with a side outline is at [erwinquilloy.github.io/ardupilot-tools/omnideck.html](https://erwinquilloy.github.io/ardupilot-tools/omnideck.html).
 
 **Chat:** questions, ideas and flight reports on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp).
 
@@ -44,11 +44,11 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 
 - **Avionics:** artificial horizon with pitch ladder and roll scale, speed and altitude tapes, heading tape with a home marker, vertical speed bar.
 - **Map:** vector map with range rings, flight trail, home and waypoints, or satellite and street tiles from the SD card. Aircraft-centred or home-centred, north up or heading up.
-- **Data blocks:** distance to home and total distance, flight time, altitude, airspeed and ground speed, battery gauge, mAh used, current, throttle and live efficiency.
+- **Data blocks:** distance to home and total distance, flight time, altitude, airspeed and ground speed, battery gauge (pack or average cell voltage), mAh used, current, throttle and live efficiency.
 - **Status messages** from ArduPilot with severity colours and a beep. A repeated message shows once with a count.
 - **Ready to arm** while disarmed, and voice call-outs for flight modes, arming, battery, failsafes and GPS.
 - **Flight summary** on disarm, an optional live **Flight stats** page, and a **flight log** file per flight on the SD card.
-- **PARAMS page (ArduPilot):** read and change 77 ArduPlane parameters from the radio, in groups such as FLIGHT, TECS, PID and VTOL, plus rows of your own. Every save is read back to check it.
+- **PARAMS page:** read and change flight controller settings from the radio, in groups: 77 ArduPlane parameters plus rows of your own, 62 INAV settings (INAV 9.1 or later) or 58 Betaflight settings (4.5, 2025.12, 2026.6). Every save is read back to check it.
 - **Missions:** the ArduPilot mission downloaded from the aircraft onto the map, a mission editor that makes or changes one and sends it to the aircraft, ArduPilot `.waypoints` files (Ethos) or waypoints learned from telemetry; INAV missions downloaded over the telemetry link.
 
 ## Radios and links
@@ -63,6 +63,7 @@ A full-screen widget with a horizon and tapes, a moving map with optional satell
 | RadioMaster TX12 MK2 | EdgeTX ([OmniDeck Mono](#omnideck-mono-black-and-white-radios)) | 128 x 64 | Tested (bench) |
 | RadioMaster GX12 | EdgeTX (OmniDeck Mono) | 128 x 64 | Tested (tester) |
 | RadioMaster Pocket, Boxer | EdgeTX (OmniDeck Mono) | 128 x 64 | Not tested |
+| FrSky Taranis X9D, X9D+, X9E | EdgeTX (OmniDeck Mono 0.1.2) | 212 x 64 | Simulator only |
 | OpenTX colour radios | OpenTX 2.3 | 480 x 272 | (in progress) |
 
 ArduPilot sends FrSky passthrough telemetry (the same data Yaapu uses) over every link. INAV and Betaflight are read from the radio's own telemetry sensors.
@@ -118,7 +119,19 @@ The [PARAMS page](#params-page-parameter-editor), the [ArduPilot mission downloa
 
 - **ExpressLRS in MAVLink mode** (ELRS Lua "Link Mode" = MAVLink), with any firmware: the receiver passes only MAVLink to the flight controller, so OmniDeck's requests never arrive, and the module turns only telemetry back into CRSF. Switch Link Mode to Normal, or use S.Port / F.Port or mLRS. The telemetry screens still work in MAVLink mode, as fast as ArduPilot sends MAVLink on that port (1 Hz by default: raise `MAVn_EXTRA1`, `MAVn_EXTRA2` and `MAVn_EXT_STAT`).
 - **TBS Crossfire at 50 Hz:** too slow for now. Force 150 Hz.
-- **INAV and Betaflight:** the PARAMS page and the mission editor are ArduPilot only. INAV missions still [download onto the map](#missions).
+- **INAV and Betaflight:** the mission editor is ArduPilot only. INAV missions still [download onto the map](#missions). Their PARAMS page has its own needs, below.
+
+**INAV and Betaflight**
+
+The PARAMS page talks MSP to INAV and Betaflight, over the same telemetry link:
+
+| Flight controller | Versions | Links |
+|---|---|---|
+| INAV | 9.1.0 or later | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz, S.Port / F.Port. mLRS only with a test mLRS Tx firmware ("MSP over cbridge"): stock mLRS drops the radio's MSP |
+| Betaflight | 4.5, 2025.12 and 2026.6 | ExpressLRS (Link Mode Normal), TBS Crossfire at 150 Hz, S.Port / F.Port. 2026.6 checked on a quad over ExpressLRS |
+
+- **INAV 7 and 8** can't carry the setting commands over the radio link, and **INAV 9.0.x** answers them without the values (fixed in 9.1.0): the page says "Parameters need INAV 9.1 or later".
+- **Betaflight** has no settings by name over MSP, only fixed blocks of bytes whose layout can change between versions. OmniDeck knows the layouts of 4.5, 2025.12 and 2026.6; any other version gets "Parameters need Betaflight 4.5, 2025.12 or 2026.6" with the version it found, and nothing is written. For those, use Betaflight Configurator.
 
 When requests go out and no answer comes back, the PARAMS page says **"The flight controller doesn't answer"**, with a hint for the link in use.
 
@@ -128,9 +141,10 @@ Download the package for your radio from the [releases page](https://github.com/
 
 | Package | For |
 |---|---|
-| `OmniDeck_Ethos_Suite_0.4.1.zip` | Any Ethos colour radio, installed with **Ethos Suite**. Holds both screen sizes; the radio picks the right one. |
-| `OmniDeck_Ethos_0.4.1.zip` | The same Ethos files, to copy onto the radio by hand. |
-| `OmniDeck_EdgeTX_0.4.1.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
+| `OmniDeck_Ethos_Suite_1.0.0.zip` | Any Ethos colour radio, installed with **Ethos Suite**. Holds both screen sizes; the radio picks the right one. |
+| `OmniDeck_Ethos_1.0.0.zip` | The same Ethos files, to copy onto the radio by hand. |
+| `OmniDeck_Ethos_1.0.0_X18_update.zip` | X18 owners updating who already have the voice packs: the X18 code only, no X20 code and no audio. |
+| `OmniDeck_EdgeTX_1.0.0.zip` | EdgeTX colour radios: TX16S MK2 (480 x 272), MK3 and MK3 Max (800 x 480). |
 
 **No SD card?** On radios that keep everything on built-in storage, the same folders go on the radio's internal drive: the one that already holds `scripts` (Ethos) or `WIDGETS` (EdgeTX). Wherever this guide says "card", read that drive. Put map tiles on the same drive as OmniDeck, and check the free space first: a satellite tile set can run to hundreds of MB.
 
@@ -138,15 +152,17 @@ Download the package for your radio from the [releases page](https://github.com/
 
 Two ways in: Ethos Suite, or copying the files yourself. Both end with the same `scripts/omnideck/` folder.
 
-**With Ethos Suite** (`OmniDeck_Ethos_Suite_0.4.1.zip`)
+**With Ethos Suite** (`OmniDeck_Ethos_Suite_1.0.0.zip`)
 
 1. Connect the radio by USB and start **Ethos Suite**.
-2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_0.4.1.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses.
+2. Open **Lua Library › Install from local .zip** and pick `OmniDeck_Ethos_Suite_1.0.0.zip`. The Suite installs OmniDeck to `scripts/omnideck/` on the radio's SD card or internal storage, whichever the radio uses.
 3. Disconnect and restart the radio, then carry on from step 4 below.
+
+The Suite zip carries the `ethos_lua_manifest.json` that current Ethos Suite versions ask for ("No ethos_lua_manifest.json found at zip root" with older OmniDeck Suite zips); older Suites install it too.
 
 If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPilot `.waypoints` files; the `logs` folder appears with the first flight log. Map tiles are never in a package; copy them as in [Map tiles](#map-tiles).
 
-**By hand** (`OmniDeck_Ethos_0.4.1.zip`)
+**By hand** (`OmniDeck_Ethos_1.0.0.zip`)
 
 1. Connect the radio by USB and choose the SD card, or use a card reader.
 2. Copy the `scripts` folder from the package to the **root** of the card. You should end up with:
@@ -192,7 +208,7 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
 5. Long-press the widget and choose **Full screen** to change pages and zoom. EdgeTX passes touch and keys to a widget only in full screen. Long-press RTN to leave.
 6. Settings: **SYS › Tools › OmniDeck Setup**.
 
-**Updating:** delete the `.luac` files in `WIDGETS/OmniDeck/` first, then copy the new folders. Your settings stay in `WIDGETS/OmniDeck/<model name>.cfg`; settings new in 0.4.1 start Off.
+**Updating:** delete the `.luac` files in `WIDGETS/OmniDeck/` first, then copy the new folders. Your settings stay in `WIDGETS/OmniDeck/<model name>.cfg`; settings new in 1.0.0 start Off.
 
 **Not in the widget list?** Run **SYS › Tools › OmniDeck Check**: it loads the widget the way EdgeTX does and shows the exact error.
 
@@ -305,7 +321,13 @@ INAV in ANGL mode with no pitot: the speed box is green because the tape shows g
 
 ## Changing pages
 
-Tap the screen or press ENTER for the next page. The wheel zooms the map and scrolls the messages. On EdgeTX this works in full screen; a **Page switch** in OmniDeck Setup changes pages outside full screen too.
+Tap the screen or press ENTER for the next page. The wheel zooms the map and scrolls the messages. On EdgeTX this works in full screen.
+
+A **Page switch** turns the pages with a switch on the radio, also when OmniDeck is not full screen: on Ethos in the widget settings, on EdgeTX in OmniDeck Setup. **Page switch action** picks how:
+
+- **Up previous, down next:** for a 3-position switch. Flip up = one page back, flip down = one page on, the middle does nothing and the page stays. The default on Ethos.
+- **Next page (flip up / press):** one page on with each flip, or each press of a momentary switch such as SH. The default on EdgeTX.
+- **Position picks page:** a 3-position switch, up = Main, middle = Map, down = Messages.
 
 | Page | In the cycle |
 |---|---|
@@ -314,7 +336,7 @@ Tap the screen or press ENTER for the next page. The wheel zooms the map and scr
 | Messages | Setting **Messages page**: Auto (ArduPilot only, the default), On or Off. |
 | Flight stats | Setting **Flight stats page**, Off by default. On: always in the cycle, live during the flight. |
 | Sensor check | Setting **Sensor check page**, Off by default. Turn it on when you report a problem. |
-| PARAMS | Setting **ArduPilot params page**, Off by default. ArduPilot only. ENTER and the wheel work inside the page; RTN leaves it (see [keys](#keys-and-touch)). |
+| PARAMS | Setting **Params page (ArduPilot, INAV)**, Off by default. ArduPilot, INAV 9.1+ and Betaflight 4.5 / 2025.12 / 2026.6. ENTER and the wheel work inside the page; RTN leaves it (see [keys](#keys-and-touch)). |
 
 The **flight summary** opens by itself on disarm (if **Flight summary on disarm** is On and the aircraft was armed for at least 10 s) and goes back to the main page after 15 s. Tap or turn to another page to leave sooner.
 
@@ -366,11 +388,11 @@ With ArduPilot and the PARAMS page or mission download On, the header also has a
 
 ![PARAMS page, FLIGHT group](docs/screens/params.png)
 
-Read and change ArduPlane parameters from the radio at the field, without a laptop. Turn it on with **ArduPilot params page** (Off by default); the page then joins the page cycle whenever the flight controller is ArduPilot. It works on every colour radio: Ethos X20 family, X18, and EdgeTX. Check [what you need](#parameters-and-missions-what-you-need) first: over S.Port and F.Port any ArduPilot answers; over ELRS and Crossfire it needs ArduPlane Stratos v2.2.1 or later; over mLRS, the cbridge setting.
+Read and change flight controller settings from the radio at the field, without a laptop: ArduPilot (ArduPlane parameters), [INAV](#inav-settings) 9.1 or later and [Betaflight](#betaflight-settings) 4.5, 2025.12 or 2026.6. Turn it on with **Params page (ArduPilot, INAV)** (Off by default); the page then joins the page cycle whenever the flight controller is one of them. It works on every colour radio: Ethos X20 family, X18, and EdgeTX. Check [what you need](#parameters-and-missions-what-you-need) first: over S.Port and F.Port any ArduPilot answers; over ELRS and Crossfire it needs ArduPlane Stratos v2.2.1 or later; over mLRS, the cbridge setting. On black-and-white radios use the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor).
 
 ### Groups
 
-The left column holds the groups, the right column the open group's rows: name, value and unit.
+The left column holds the groups, the right column the open group's rows: name, value and unit. The ArduPilot groups:
 
 | Group | Parameters |
 |---|---|
@@ -400,11 +422,13 @@ VTOL and Q PID show only on a quadplane (`Q_ENABLE` 1). Choice parameters such a
 |---|---|---|---|---|
 | Group column (left) | Moves the highlight. Nothing is opened or read | Opens the group, cursor on its first row | Next page | Tap a group to open it |
 | Rows (right) | Moves the cursor, inside the open group | Opens the editor for that row | Back to the group column | Tap a row to edit it |
-| Editor | Changes the value by its step | Saves | Back, without saving | **-**, **+**, **Back**, **Save** (X18: also **-10**, **+10**) |
+| Editor | Changes the value by its step | Saves | Back, without saving | **-**, **+** (hold to repeat), **Back**, **Save** (X18: also **-10**, **+10**) |
 
 - **< BACK** in the lower right does the same as RTN. When a group has more rows than fit, up and down arrows appear left of it; groups that fit show none.
 - A tap that hits no button does nothing, so the page is never left by a missed tap. Leave it with RTN or BACK: once from the group column, twice from a group's rows. Only the "doesn't answer" screen, which has no buttons, turns the page on a tap.
 - The bottom line shows the keys for where you are.
+- **Leaving the page drops a change you didn't save:** turn the page (RTN, a page switch, the summary at disarm) with the editor open and the value is thrown away; coming back shows the flight controller's value. A Save already pressed still goes through.
+- **Hold - or +** (and -10 / +10 on the X18) and the value keeps stepping: after half a second, 10 steps a second, faster after 2.5 s, until you lift the finger or slide it off the button. A tap is still one step, and nothing is sent before Save.
 - **X18 (480 x 320):** larger groups and rows for touch; drag either column to scroll.
 
 | | |
@@ -427,7 +451,7 @@ VTOL and Q PID show only on a quadplane (`Q_ENABLE` 1). Choice parameters such a
 ### Armed and in flight
 
 - **While armed the page is view only:** the editor opens but says **Armed: view only**, and nothing is written.
-- Setting **ArduPilot params: edit in flight** = **Gains and trim** lets the PID and Q PID rows, `PTCH_TRIM_DEG` and `KFF_THRAT2ELEV` be changed while armed. Change one wheel click at a time, with height to spare, as when tuning from a GCS.
+- Setting **Params: edit in flight** = **Gains and trim** lets the PID and Q PID rows, `PTCH_TRIM_DEG` and `KFF_THRAT2ELEV` be changed while armed (INAV and Betaflight: see their sections). Change one wheel click at a time, with height to spare, as when tuning from a GCS.
 
 ### ARMING_SKIPCHK
 
@@ -452,6 +476,52 @@ WP_RADIUS | WP radius | 5
 - Each row is `NAME`, optionally `| label | step` (the editor text and the wheel step). Without a step the wheel moves 1 for whole numbers, otherwise about 1 % of the value. Rows have no range of their own; ArduPilot keeps its limits.
 - Rows before any `[GROUP]` go to OTHER. `Q_` rows show only when `Q_ENABLE` is 1. A name already in the list is skipped.
 - At most 100 rows and 14 groups. Restart the radio, or select the model again, after editing. The Sensor check page's **Params:** line shows how many rows were read and the first line that couldn't be.
+
+### INAV settings
+
+| | |
+|---|---|
+| ![INAV PARAMS page, FLIGHT group](docs/screens/params_inav.png) | ![INAV choice setting in the editor](docs/screens/params_inav_choice.png) |
+| INAV 9.1, FLIGHT group: CLI names, plain units. | A choice setting (`nav_rth_alt_mode`) by name, with the value before. |
+
+With INAV 9.1 or later the page reads and changes INAV settings by their CLI names, shown in plain units (degrees, m, m/s) where INAV stores decidegrees, cm and cm/s. Ranges and choice names (for example RTH alt mode AT_LEAST / MAX) come from the flight controller; a setting it doesn't have shows n/a.
+
+| Group | Settings |
+|---|---|
+| FLIGHT | `max_angle_inclination_rll`, `max_angle_inclination_pit`, `fw_level_pitch_trim`, `roll_rate`, `pitch_rate`, `yaw_rate`, `fw_turn_assist_pitch_gain` |
+| LAUNCH | `nav_fw_launch_thr`, `nav_fw_launch_idle_thr`, `nav_fw_launch_accel`, `nav_fw_launch_climb_angle`, `nav_fw_launch_motor_delay`, `nav_fw_launch_max_altitude`, `nav_fw_launch_max_angle` |
+| NAV | `nav_fw_cruise_thr`, `nav_fw_min_thr`, `nav_fw_max_thr`, `nav_fw_pitch2thr`, `nav_fw_climb_angle`, `nav_fw_dive_angle`, `nav_fw_bank_angle`, `nav_fw_cruise_speed`, `nav_fw_allow_manual_thr_increase`, `nav_fw_loiter_radius` |
+| RTH | `nav_rth_altitude`, `nav_rth_alt_mode`, `nav_rth_home_altitude`, `nav_rth_climb_first` |
+| LANDING | `nav_fw_land_approach_length`, `nav_fw_land_glide_alt`, `nav_fw_land_flare_alt`, `nav_fw_land_glide_pitch`, `nav_fw_land_flare_pitch` |
+| MISSION | `nav_wp_radius`, `nav_auto_speed`, `nav_max_auto_speed`, `nav_extra_arming_safety` |
+| FW PID | `fw_p_roll`, `_i`, `_d`, `_ff`, `fw_p_pitch`, `_i`, `_d`, `_ff`, `fw_p_yaw`, `_i`, `_ff`, `tpa_rate`, `tpa_breakpoint`, `fw_tpa_time_constant` |
+| MC PID | `mc_p_roll`, `_i`, `_d`, `mc_p_pitch`, `_i`, `_d`, `mc_p_yaw`, `_i`, `nav_mc_hover_thr`, `nav_land_maxalt_vspd`, `nav_land_minalt_vspd` |
+
+- **Save:** INAV sets the value, OmniDeck reads it back, then stores it in EEPROM while disarmed: **Saved, verified and stored**.
+- **In flight:** OmniDeck asks INAV itself whether it is armed. With **Params: edit in flight** = **Gains and trim**, the PID groups, level trim and hover throttle can be changed; they work at once and are stored after the disarm, on any page. The hint line shows **NOT STORED** until then. Keep the radio linked a few seconds after the disarm before unplugging the battery.
+- **VTOL** (`mixer_control_profile_linking` ON): INAV reads and writes the active profile only, shown on the hint line (for example "profile 2 MULTIROTOR"). Hover PIDs (MC PID) can be changed only in multirotor mode and plane PIDs (FW PID) only in fixed-wing mode; flip the VTOL switch on the bench, disarmed, to edit the other set.
+- The INAV mission download pauses while the page talks to INAV.
+
+### Betaflight settings
+
+![Betaflight PARAMS page, TUNE group](docs/screens/params_betaflight.png)
+
+Betaflight 2026.6, the TUNE group; the hint line shows the version, the PID and rate profile and the rates type.
+
+With Betaflight 4.5, 2025.12 or 2026.6 the page reads and changes 58 settings of the **active** PID and rate profile, named as in the Betaflight CLI. Choice settings show by name (TPA mode PD / D, throttle limit OFF / SCALE / CLIP).
+
+| Group | Settings |
+|---|---|
+| PID | `p_`, `i_`, `d_` for roll, pitch and yaw |
+| FF D | `f_roll`, `f_pitch`, `f_yaw`; `d_max_roll`, `_pitch`, `_yaw`, `d_max_gain` (4.5: `d_min_...`); `feedforward_transition`, `_averaging`, `_smooth_factor`, `_jitter_factor`, `_boost`, `_max_rate_limit` |
+| TUNE | `anti_gravity_gain`, `iterm_relax_cutoff`, `tpa_mode`, `tpa_rate`, `tpa_breakpoint`, `throttle_boost`, `dyn_idle_min_rpm` (in rpm), `motor_output_limit`, `vbat_sag_compensation`, `thrust_linear`, `angle_limit` |
+| RATES | RC rate, super rate and expo per axis (labels follow the rates type: Actual shows center / max rate in deg/s), `thr_mid`, `thr_expo`, `throttle_limit_type`, `throttle_limit_percent` |
+| FILTERS | gyro and D-term lowpass, dynamic notch (count, Q, min, max), RPM filter (harmonics, min) |
+
+- **Save:** the block is read fresh, only that setting changed, sent back up to the end of its group, read back, then stored in EEPROM while disarmed: **Saved, verified and stored**. Everything else in the block is left as it was.
+- The hint line shows the version, the PID and rate profile and the rates type. Switch profiles in Betaflight; the page follows.
+- A build without the dynamic notch or RPM filter shows those rows as n/a.
+- **In flight:** the same rules as INAV. With **Gains and trim** these can be changed while armed: PID, FF D (FF averaging aside) and the TUNE gains: anti gravity, I-term relax cutoff, TPA rate and breakpoint, throttle boost. Rates, filters, TPA mode and the motor, idle and angle settings are view only while armed.
 
 ## On EdgeTX
 
@@ -490,9 +560,9 @@ On Ethos: long-press the widget › **Configure widget**. On EdgeTX: **SYS › T
 | | | |
 |---|---|---|
 | ![OmniDeck Setup, first rows](docs/screens/edgetx_setup_1.png) | ![OmniDeck Setup, missions, pages and ArduPilot parameters](docs/screens/edgetx_setup_2.png) | ![OmniDeck Setup, last rows](docs/screens/edgetx_setup_3.png) |
-| Link, units, main page and map. | Missions, pages and the ArduPilot parameter settings. | ArduPilot parameters, voice and alarms. |
+| Link, units, main page and map. | Missions, pages (with the page switch) and the parameter settings. | Parameters, voice, battery and alarms. |
 
-The list is grouped the same way on both systems: link, units, main page, map, missions, pages, ArduPilot parameters, then voice and alarms. Settings new in 0.4.1 start Off.
+The list is grouped the same way on both systems: link, units, main page, map, missions, pages, parameters, then voice and alarms. Settings new in 1.0.0 start Off, apart from the page switch action on Ethos (Up previous, down next).
 
 | Setting | Choices | Notes |
 |---|---|---|
@@ -505,7 +575,8 @@ The list is grouped the same way on both systems: link, units, main page, map, m
 | **Main page** | | |
 | Start page | Main · Map | |
 | Main page top-right panel (Ethos) · Top-right panel (EdgeTX) | Minimap · Home arrow · Radar · OmniDeck logo · Logo file / Stratos logo | See [Top-right panel choices](#top-right-panel-choices). |
-| Logo file (Ethos) | None · PNGs in `logos/` | For the Logo file panel. |
+| Logo file (Ethos) | None · PNGs in `logos/` | For the Logo file panel. It fills the panel, proportions kept. |
+| Battery block shows | Battery voltage · Average cell | Average cell: the gauge shows the cell voltage and a small line the pack (BATT 15.8V); otherwise the other way round (AVE CELL 3.95V). The cell count comes from **Battery cells**, or from the voltage. |
 | **Map** | | |
 | Map orientation | North up · Heading up | A tiled map is always north up. |
 | Map view | Aircraft centred · Home centred | Home centred zooms out to keep the aircraft on the map. |
@@ -517,14 +588,14 @@ The list is grouped the same way on both systems: link, units, main page, map, m
 | ArduPilot mission download | Off · On | Off by default. The aircraft's mission on the map, and the map page's EDIT button for the [mission editor](#mission-editor). Needs [one of these paths](#parameters-and-missions-what-you-need). Off takes the mission off the map again. |
 | INAV mission download | Off · On | Off by default. Ethos also has a Re-download button. |
 | **Pages** | | |
-| Page switch, Page switch action (EdgeTX) | A switch · next page or position picks the page | Changes page outside full screen too. |
+| Page switch, Page switch action | A switch · Up previous, down next · Next page (flip up / press) · Position picks page | Changes page outside full screen too; see [Changing pages](#changing-pages). On Ethos new in 1.0.0, Up previous, down next by default. |
 | Messages page | Auto (ArduPilot only) · On · Off | |
 | Flight stats page | Off · On | On: in the cycle, live in flight. |
 | Flight summary on disarm | On · Off | |
 | Sensor check page | Off · On | |
-| **ArduPilot parameters** | | |
-| ArduPilot params page | Off · On | Off by default. Puts the [PARAMS page](#params-page-parameter-editor) in the cycle (ArduPilot only). |
-| ArduPilot params: edit in flight | Off · Gains and trim | Off: view only while armed. Gains and trim: the PID, Q PID and pitch trim rows can be changed in flight. |
+| **Parameters** | | |
+| Params page (ArduPilot, INAV) | Off · On | Off by default. Puts the [PARAMS page](#params-page-parameter-editor) in the cycle for ArduPilot, INAV and Betaflight. (Was "ArduPilot params page".) |
+| Params: edit in flight | Off · Gains and trim | Off: view only while armed. Gains and trim: the PID and trim rows can be changed in flight. (Was "ArduPilot params: edit in flight".) |
 | **Voice and alarms** | | |
 | Voice | Off · voice packs on the card | Picking one plays a test clip. |
 | Message beep | Every message · Warnings and errors · Off | Works with the voice off. |
@@ -663,19 +734,19 @@ Over mLRS, Send uses ArduPilot's standard mission upload, the same as Mission Pl
 
 ## OmniDeck Mono (black-and-white radios)
 
-OmniDeck Mono is OmniDeck for EdgeTX radios with a 128 x 64 black-and-white screen. It decodes telemetry the same way as the colour builds, for ArduPilot, INAV and Betaflight over CRSF (ExpressLRS, TBS Crossfire, mLRS), S.Port and F.Port, and fits it on six small pages. It runs as an EdgeTX **telemetry screen script**, not a widget.
+OmniDeck Mono is OmniDeck for EdgeTX radios with a black-and-white screen: 128 x 64, and from 0.1.2 also 212 x 64 (Taranis X9D, X9D+, X9E). It decodes telemetry the same way as the colour builds, for ArduPilot, INAV and Betaflight over CRSF (ExpressLRS, TBS Crossfire, mLRS), S.Port and F.Port, and fits it on six small pages. It runs as an EdgeTX **telemetry screen script**, not a widget.
 
 ![OmniDeck Mono main page](docs/mono/img/main.png)
 
-**Status:** 0.1.1, beta. Bench-tested on a TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04, and tested by a tester on a RadioMaster GX12. Not yet tried on the Pocket or Boxer.
+**Status:** 0.1.2, beta. Bench-tested on a TX12 MK2 (EdgeTX 2.12) with ArduPilot and INAV over ExpressLRS, and over mLRS 1.4.04, and tested by a tester on a RadioMaster GX12. Not yet tried on the Pocket or Boxer. 0.1.2 uses the whole width of 212 x 64 screens (Taranis X9D, X9D+, X9E), checked in the simulator but not yet on a Taranis; on 128 x 64 it looks the same as 0.1.1.
 
 **Full guide: [OmniDeck Mono](docs/mono/README.md)** (install, keys, every page, settings, memory, problems).
 
-- **Download:** `OmniDeck_Mono_0.1.1.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.1). Copy its `SCRIPTS` folder to the root of the SD card, then **MODEL › DISPLAY**, a screen, **Script**, **omnid**. Keep the `.luac` files: the radio runs out of memory compiling the telemetry code itself.
+- **Download:** `OmniDeck_Mono_0.1.2.zip` from the [OmniDeck Mono release](https://github.com/erwinquilloy/OmniDeck/releases/tag/mono-v0.1.2). Copy its `SCRIPTS` folder to the root of the SD card, then **MODEL › DISPLAY**, a screen, **Script**, **omnid**. Keep the `.luac` files: the radio runs out of memory compiling the telemetry code itself.
 - **Pages:** Main (horizon, heading and home marker, and a labelled column: ALT, SPD, H, BAT, CUR, EF, TIM), Map (aircraft- or home-centred, wheel zoom, coordinates), Messages (ArduPilot), Flight stats (optional), Link check, Sensor check (optional). ENTER moves to the next page. The flight summary opens by itself at disarm and goes back to the start page after 15 s, and a flight log can be written to the SD card.
 - **Settings:** SYS › Tools › OmniDeck Setup, per model: voice, message beeps, units, summary, flight log, voltage and low-altitude alarms, pack capacity, start page, map view, optional pages and link.
 - **Units:** `m`, `km` above 999 m, `k` for km and km/h, `ft`, `mi`, `WH/km` and the rest as set in Setup.
-- **ArduPilot parameters:** use the [AP Param Editor](https://github.com/erwinquilloy/ap-param-editor); OmniDeck Mono has no editor of its own.
+- **Parameters:** use the [OmniDeck Param Editor](https://github.com/erwinquilloy/param-editor) (ArduPilot, INAV 9.1+, Betaflight 4.5 / 2025.12 / 2026.6; SYS › Tools › OmniDeck Params); OmniDeck Mono has no editor of its own.
 - **Memory:** about 127 KB of Lua memory on a TX12 MK2; OmniDeck Mono 0.1.0 used about 97 to 107 KB, and 0.1.1 about 15 KB less; the Link check page shows it. Pages load one at a time.
 - **Compared with the colour builds:** no map tiles, only the active waypoint on the map, no mission files or INAV mission download, no touch or tapes.
 
@@ -691,6 +762,7 @@ Post it on the [Arduplane Stratos Discord](https://discord.gg/NrfaPSpEFp) with t
 - **Display steps every few seconds on TBS Crossfire with ArduPilot:** Crossfire is in its 50 Hz mode; see [ArduPilot over TBS Crossfire at 50 Hz](#ardupilot-over-tbs-crossfire-at-50-hz). Force 150 Hz on the transmitter for a smooth horizon.
 - **EdgeTX "CPU limit" or widget missing:** run OmniDeck Check; update to EdgeTX 2.11 or later.
 - **PARAMS page says "The flight controller doesn't answer":** check [what you need](#parameters-and-missions-what-you-need). Over ELRS or Crossfire it needs ArduPlane Stratos v2.2.1 or later; over mLRS, Tx Ser Port = cbridge; ELRS in MAVLink mode and Crossfire at 50 Hz can't carry it. Over S.Port / F.Port check the passthrough setting on the receiver's port.
+- **PARAMS page says "Parameters need INAV 9.1 or later" or "Parameters need Betaflight 4.5, 2025.12 or 2026.6":** the flight controller's version is one the page can't work with (it names the version it found). Update it, or use INAV or Betaflight Configurator.
 - **Rows stay "..." or turn "n/a" over a weak link:** ENTER on an n/a row asks again. "n/a" on a strong link means the flight controller has no such parameter.
 - **No mission on the map with ArduPilot mission download On:** the same requirements as the PARAMS page, but the download needs Stratos v2.2.1 or later on every link except mLRS.
 
