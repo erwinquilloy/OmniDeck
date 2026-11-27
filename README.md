@@ -204,9 +204,15 @@ If `scripts/omnideck/missions/` isn't there afterwards, make it for your ArduPil
    └── OmniDeck Check.lua    load test that shows any error
    ```
 3. Eject the card and restart the radio.
-4. Add a screen with a **one-zone layout** (no top bar, no sliders, no trims) and pick OmniDeck for the zone.
-5. Long-press the widget and choose **Full screen** to change pages and zoom. EdgeTX passes touch and keys to a widget only in full screen. Long-press RTN to leave.
+4. Add a screen with a **one-zone layout** (no top bar, no sliders, no trims) and pick OmniDeck for the zone, or an **App mode** layout with OmniDeck as its widget.
+5. Bring OmniDeck to the front to change pages and zoom (see below): EdgeTX passes touch and keys to a widget only then.
 6. Settings: **SYS › Tools › OmniDeck Setup**.
+
+**Full screen or App mode:**
+
+- **One-zone (full screen) layout:** long-press the widget and choose **Full screen**. Then tap the screen or press the scroll wheel's centre button (ENTER) to change pages. Long-press RTN to leave full screen.
+- **App mode layout** (TX16S MK3): press and hold the widget screen. The EdgeTX button in the corner goes away, and a screen tap or the scroll wheel's centre button changes pages. To get back to the EdgeTX menus, hold RTN until the EdgeTX button appears again.
+- Not in front, a one-zone screen still shows the full display (a small zone only the minimap), and a [page switch](#changing-pages) still turns the pages.
 
 **Updating:** delete the `.luac` files in `WIDGETS/OmniDeck/` first, then copy the new folders. Your settings stay in `WIDGETS/OmniDeck/<model name>.cfg`; settings new in 1.0.0 start Off.
 
