@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0f"
+local VERSION = "1.0.0"
 
 local function need(name) return assert(loadfile((OD_DIR or "") .. name))() end
 local T = need("telem.lua")
@@ -329,7 +329,7 @@ local function topBar(w, x, y, W, h, s, u, H)
   end
 
   -- middle: the model name, then the transmitter battery. Centred and shifted to fit between
-  -- both sides; short of room the TX battery goes first, then the name is shortened. Measured
+  -- both sides; short of room the model name is left out: the TX battery stays. Measured
   -- and placed only when its inputs change: EdgeTX's mission page has no Lua budget to spare.
   local tv = txVolts()
   local val = tv and string.format("TX %.1fV", tv) or nil
@@ -344,13 +344,10 @@ local function topBar(w, x, y, W, h, s, u, H)
     if n then lcd.font(fMid) nw, nh = lcd.getTextSize(n) end
     local v, tw = val, 0
     if v then lcd.font(fBig) tw = lcd.getTextSize(v) end
+    if v and tw > room then v, tw = nil, 0 end   -- not even the TX battery fits
     local gap = (n and v) and 14 or 0
-    if v and nw + gap + tw > room then v, tw, gap = nil, 0, 0 end
-    if n and nw > room then
-      local keep = math.floor(#n * room / nw) - 2
-      if keep < 3 then n, nw = nil, 0
-      else n = string.sub(n, 1, keep) .. ".." lcd.font(fMid) nw, nh = lcd.getTextSize(n) end
-    end
+    -- overlap: the TX battery wins, the model name is left out of the top bar
+    if n and nw + gap + tw > room then n, nw, gap = nil, 0, 0 end
     local gw = nw + gap + tw
     m.n, m.v = nil, nil
     if gw > 0 and gw <= room then
@@ -1396,6 +1393,7 @@ local function zoomFromSource(w)
   end
 end
 
+local pageFromSource   -- below nextPage: the page switch
 local function wakeup(w)
   local t0 = os.clock()
   -- Ethos: another model is noticed within a second, as Yaapu does. create() alone was not
@@ -1453,6 +1451,7 @@ local function wakeup(w)
     lcd.invalidate()
   end
   zoomFromSource(w)
+  pageFromSource(w)
   local ts = activeTileSet(w)
   if ts then
     TL.setSet(ts)
@@ -1509,6 +1508,9 @@ local function wakeup(w)
     w.linkUpAt = nil
   end
   local inavDirty = PR and PR.inav and PR.inav.dirty and s.fc == "INAV/BF"
+  -- left the PARAMS page (any way: tap, key, page switch): unsaved changes are dropped
+  if w.prmOpen and w.page ~= PAGE_PARAMS and PR and PR.leave then PR.leave() end
+  w.prmOpen = w.page == PAGE_PARAMS
   if w.page == PAGE_PARAMS then
     -- ArduPilot or INAV (INAV 9+, over MSP): any other flight controller leaves the page
     if s.fc and s.fc ~= "ArduPilot" and s.fc ~= "INAV/BF" then w.page = 1 lcd.invalidate()
@@ -1584,6 +1586,43 @@ local function nextPage(w)
   end
   w.page = p
   lcd.invalidate()
+end
+local function prevPage(w)
+  local p = w.page
+  for _ = 1, PAGE_PARAMS do
+    p = (p - 2) % PAGE_PARAMS + 1
+    if pageOn(w, p) then break end
+  end
+  w.page = p
+  lcd.invalidate()
+end
+
+-- Page switch (user 2026-11-27), as on EdgeTX. "Up previous, down next" (3-position switch): each
+-- flip to up goes one page back, each flip to down one page on; the middle does nothing.
+-- "Next page": each move to down (or press of a momentary switch). "Position picks page": up Main,
+-- middle Map, down Messages.
+pageFromSource = function(w)
+  local src = srcOrNil(w.pageSource)
+  if not src then return end
+  local ok, v = pcall(function() return src:value() end)
+  if not ok or type(v) ~= "number" then return end
+  -- the scale is not assumed (X20S 2026-11-27: SC did nothing with a fixed +-300): a third of the
+  -- largest value seen, so -100..100 and -1024..1024 both read up / middle / down
+  w.swScale = math.max(w.swScale or 100, math.abs(v))
+  local lim = w.swScale * 0.3
+  local pos = (v < -lim and 1) or (v > lim and 3) or 2
+  if w.pageSwMode == 1 then
+    if pos ~= w.swLastPos then w.swLastPos = pos w.page = pos lcd.invalidate() end
+  elseif w.pageSwMode == 2 then
+    if w.swLast3 ~= nil and pos ~= w.swLast3 then
+      if pos == 1 then prevPage(w) elseif pos == 3 then nextPage(w) end
+    end
+    w.swLast3 = pos
+  else
+    local on = pos == 3
+    if w.swLastUp ~= nil and on and not w.swLastUp then nextPage(w) end
+    w.swLastUp = on
+  end
 end
 
 local function inBox(b, x, y) return b and x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h end
@@ -1741,7 +1780,7 @@ end
 
 -- ---------------------------------------------------------------- exports
 return {
-  VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage,
+  VERSION = VERSION, create = create, paint = paint, wakeup = wakeup, event = event, nextPage = nextPage, prevPage = prevPage,
   exportPanel = exportPanel, exportHud = exportHud,
   T = T, MAP = MAP, TL = TL, MI = MI, MSPC = MSPC, AU = AU, FS = FS, logoFiles = logoFiles,
   editor = function() return ED end,   -- test harness: the mission editor, once opened

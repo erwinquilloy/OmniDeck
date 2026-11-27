@@ -1752,6 +1752,34 @@ assert older.orient == 0 and older.spdUnit == 0 and older.batCap == 0, 'old layo
 for k, v in keep_w.items(): widget[k] = v
 do_write()
 print('settings survive a restart OK')
+# page switch (user 2026-11-27): default "Up previous, down next"; middle does nothing
+assert fresh.pageSwMode == 2, ('page switch action default', fresh.pageSwMode)
+PSW = [0]
+G._PSW = lambda: PSW[0]
+widget.pageSource = L.eval('{ name = function() return "SC" end, value = function() return _PSW() end }')
+_sa = widget.sumAuto; widget.sumAuto = 0   # the summary opening on disarm is not the switch
+widget.pageSwMode, widget.page = 2, 2
+step(0.2); step(0.2)
+assert widget.page == 2, ('page switch middle: page stays', widget.page)
+PSW[0] = 1024; step(0.2); step(0.2)
+_nx = widget.page
+assert _nx != 2, 'page switch down: next page'
+PSW[0] = 0; step(0.2); assert widget.page == _nx, 'back to middle: page stays'
+PSW[0] = -1024; step(0.2); step(0.2)
+assert widget.page == 2, ('page switch up: previous page', widget.page)
+PSW[0] = 0; step(0.2); PSW[0] = -1024; step(0.2)
+assert widget.page == 1, ('page switch up again: previous page', widget.page)
+PSW[0] = 0; step(0.2)
+# a switch that reads -100 / 0 / 100 (X20S 2026-11-27: nothing happened with a fixed +-300)
+widget.swScale, widget.swLast3, widget.page = None, None, 2
+step(0.2)
+PSW[0] = 100; step(0.2); step(0.2)
+assert widget.page != 2, ('-100..100 switch down: next page', widget.page)
+PSW[0] = 0; step(0.2); PSW[0] = -100; step(0.2); step(0.2)
+assert widget.page == 2, ('-100..100 switch up: previous page', widget.page)
+PSW[0] = 0; step(0.2)
+widget.pageSource, widget.sumAuto = None, _sa
+print('page switch (up previous, down next) OK')
 widget.batCap = 5000 if NATIVE else 0
 st.update(keep)
 step(0.2); step(0.2)
@@ -2094,6 +2122,22 @@ def _goto(name, qon):
     for _ in range(t): KEY('KEY_ROTARY_RIGHT')
     KEY('KEY_ENTER_BREAK')
     for _ in range(r): KEY('KEY_ROTARY_RIGHT')
+# the PARAMS module from ui.lua's upvalues (test harness)
+_PRx = L.eval('''function(wt)
+  local seen = {}
+  local function find(f, d)
+    if type(f) ~= "function" or seen[f] or d > 4 then return nil end
+    seen[f] = true
+    for i = 1, 300 do
+      local n, v = debug.getupvalue(f, i)
+      if n == nil then break end
+      if n == "PR" and type(v) == "table" then return v end
+      local r = find(v, d + 1) if r then return r end
+    end
+  end
+  -- OD_COUNT wraps wakeup / paint / event in Python: the Lua originals are kept as wakeup0 ...
+  for _, k in ipairs({ "wakeup0", "paint0", "event0", "wakeup", "paint", "event" }) do local r = find(wt[k], 0) if r then return r end end
+end''')
 _ap = FakeAP({'Q_ENABLE': 1.0, 'AIRSPEED_CRUISE': 18.0, 'AIRSPEED_MIN': 12.0, 'TRIM_THROTTLE': 45.0,
               'THR_MAX': 100.0, 'ROLL_LIMIT_DEG': 45.0, 'PTCH_LIM_MAX_DEG': 20.0, 'STAB_PITCH_DOWN': 2.0,
               'ARSPD_USE': 1.0, 'ARMING_SKIPCHK': 512.0, 'Q_A_RAT_RLL_P': 0.135}, dup=True)
@@ -2460,7 +2504,21 @@ else:
         for _ in range(10): step(0.2)
         assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('saved', _ap.p['AIRSPEED_CRUISE'])
         render('params_saved_%s.png' % tag, 6)
-        KEY('KEY_RTN_BREAK'); KEY('KEY_RTN_BREAK')
+        # leaving the page with a change not saved drops it (user 2026-11-27)
+        if _PRx(wt).editing(): KEY('KEY_RTN_BREAK')
+        for _ in range(3): step(0.2)
+        wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)   # editor again
+        for _ in range(5): step(0.2)
+        for _ in range(2): KEY('KEY_ROTARY_RIGHT')
+        assert _PRx(wt).editing() and abs(_PRx(wt)._draft()[0] - 21.0) < 1e-6, ('draft 21', _PRx(wt)._draft()[0])
+        widget.page = 1
+        for _ in range(3): step(0.2)
+        widget.page = 6
+        for _ in range(3): step(0.2)
+        assert not _PRx(wt).editing(), 'editor closed after the page was left'
+        assert abs(_ap.p['AIRSPEED_CRUISE'] - 20.0) < 1e-6, ('nothing saved', _ap.p['AIRSPEED_CRUISE'])
+        print('Ethos PARAMS: unsaved edit dropped on leaving the page OK')
+        KEY('KEY_RTN_BREAK')                          # editor already closed: rows -> tab column
         _goto('ARMING_SKIPCHK', True)
         for _ in range(10): step(0.2)
         wt['event'](widget, consts['EVT_KEY'], consts['KEY_ENTER_BREAK'], 0, 0)

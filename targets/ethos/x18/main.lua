@@ -33,6 +33,13 @@ local function configure(w)
   form.addChoiceField(line, nil, { { "Main", 1 }, { "Map", 2 } },
     function() return w.startPage end, function(v) w.startPage = v end)
   -- the panel at the top right of the main page, above the data blocks (test42)
+  -- page switch (user 2026-11-27): a switch turns the pages, also when the widget is not full screen
+  line = form.addLine("Page switch")
+  form.addSourceField(line, nil, function() return w.pageSource end, function(v) w.pageSource = v end)
+  line = form.addLine("Page switch action")
+  form.addChoiceField(line, nil, { { "Up previous, down next", 2 }, { "Next page (flip up / press)", 0 },
+    { "Position picks page", 1 } },
+    function() return w.pageSwMode end, function(v) w.pageSwMode = v w.swLast3, w.swLastUp, w.swLastPos = nil, nil, nil end)
   line = form.addLine("Main page top-right panel")
   form.addChoiceField(line, nil, { { "Minimap", 0 }, { "Home arrow", 1 }, { "Radar", 2 }, { "OmniDeck logo", 3 },
     { "Logo file (below)", 4 } },
@@ -157,10 +164,12 @@ local function configure(w)
   line = form.addLine("Low voltage alarm (V per cell, 0 = off)")
   local fv = form.addNumberField(line, nil, 0, 450, function() return w.lowVolt end, function(v) w.lowVolt = v end)
   pcall(function() fv:decimals(2) end)
+  pcall(function() fv:step(5) end)   -- 0.05 V per wheel tick
   pcall(function() fv:suffix("V") end)
   line = form.addLine("Critical voltage alarm (V per cell, 0 = off)")
   local fc = form.addNumberField(line, nil, 0, 450, function() return w.critVolt end, function(v) w.critVolt = v end)
   pcall(function() fc:decimals(2) end)
+  pcall(function() fc:step(5) end)
   pcall(function() fc:suffix("V") end)
   line = form.addLine("Low altitude alarm: Terrain, pull up (0 = off)")
   local fa = form.addNumberField(line, nil, 0, 3000, function() return w.lowAlt end, function(v) w.lowAlt = v end)
@@ -193,6 +202,8 @@ local SETTINGS = {
   { "apMission", "n", 0 },
   -- added for the battery block's average cell (1.0.0d), at the end for the same reason
   { "battMain", "n", 0 },
+  -- added for the page switch (1.0.0), at the end for the same reason
+  { "pageSource", "src" }, { "pageSwMode", "n", 2 },
 }
 
 local function isSource(v) return type(v) == "userdata" end

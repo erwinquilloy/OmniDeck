@@ -1823,21 +1823,31 @@ local function drawEditor(W, H, y0, y1, s, ctx)
     lcd.font(fMid)
   else
     -- the value large, in the middle of the free space; range and the value before under it
-    lcd.font(fSmall)
+    lcd.font(fMid)
     local _, sh = lcd.getTextSize("A")
     lcd.font(H >= 400 and FONT_XXL or FONT_XL)
     local _, vh = lcd.getTextSize("0")
     local top0 = by + th + 8
-    local vy = top0 + math.max(0, floor((stY - top0 - vh - sh - 4) / 2))
-    lcd.color(draft == editBase and C.txt or C.home)
-    lcd.drawText(bx + bw / 2, vy, fmtNum(r, draft), CENTERED)
-    lcd.font(fSmall)
-    lcd.color(C.dim)
+    -- range + previous value in the mid font: one line when it fits, else two
     local range = r.free and ("step " .. tostring(r[7]) .. ", range checked by ArduPilot")
       or r[9] and ("option " .. floor(draft + 0.5) .. " of 0-" .. floor(r[6]))
       or string.format("%s to %s, step %s", fmtNum(r, r[5]), fmtNum(r, r[6]), tostring(r[7]))
-    lcd.drawText(bx + bw / 2, vy + vh + 4, range .. "   was " .. fmtNum(r, editBase), CENTERED)
+    local was = "was " .. fmtNum(r, editBase)
     lcd.font(fMid)
+    local one = lcd.getTextSize(range .. "   " .. was) <= bw - 12
+    local nl = one and 1 or 2
+    lcd.font(H >= 400 and FONT_XXL or FONT_XL)
+    local vy = top0 + math.max(0, floor((stY - top0 - vh - sh * nl - 4) / 2))
+    lcd.color(draft == editBase and C.txt or C.home)
+    lcd.drawText(bx + bw / 2, vy, fmtNum(r, draft), CENTERED)
+    lcd.font(fMid)
+    lcd.color(C.dim)
+    if one then
+      lcd.drawText(bx + bw / 2, vy + vh + 4, range .. "   " .. was, CENTERED)
+    else
+      lcd.drawText(bx + bw / 2, vy + vh + 4, range, CENTERED)
+      lcd.drawText(bx + bw / 2, vy + vh + 4 + sh, was, CENTERED)
+    end
   end
   lcd.color(col)
   lcd.drawText(bx + bw / 2, stY, phase, CENTERED)
@@ -2179,10 +2189,20 @@ function P.wakeup(s)
   if lcd and lcd.invalidate then pcall(lcd.invalidate) end
 end
 
+-- the PARAMS page was left (user 2026-11-27): a value changed but not saved is dropped, and the
+-- editor is closed, so coming back shows the flight controller's value. A Save already pressed
+-- (queued, or sent and waiting for its answer) still goes through.
+function P.leave()
+  HOLD.cur = nil
+  if saveReq or (pend and pend.set) then return end
+  if edit then edit, draft, editBase, phase = nil, nil, nil, "" end
+end
+
 function P.editing() return edit ~= nil end
 function P.phase() return phase end
 function P.valueOf(name) return vals[name] end   -- test harness
 function P._draft() return draft, editBase, edit and edit[2] end
+function P._boxes() return boxes end   -- test harness
 function P._tab() return curGroup() end   -- test harness
 function P._list() return LIST end   -- test harness
 function P._focus() return focus end   -- test harness
