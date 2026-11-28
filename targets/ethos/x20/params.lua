@@ -1785,7 +1785,22 @@ local function drawEditor(W, H, y0, y1, s, ctx)
   lcd.drawText(bx + bw - 8, by + 4, r[3], RIGHT)
   local bh2 = th + 8
   local btnY = by + bh - bh2 - 6
-  local stY = btnY - th - 4
+  -- a number gets a second row above (Marcin 2026-11-28, as the X18): ten steps, labelled with
+  -- that jump in the row's units (+500 on a 50 ms step, +5 on 0.5 m); only when the large value,
+  -- the range line and the status still fit, else just - / + (and the hold) as before
+  local big
+  if r[10] ~= "bits" and not r[9] and r[7] then
+    lcd.font(H >= 400 and FONT_XXL or FONT_XL)
+    local _, vh = lcd.getTextSize("0")
+    lcd.font(fMid)
+    if bh - (th + 8) - (bh2 + 6) - (th + 4) - (bh2 + 6) >= vh + 2 * th + 8 then
+      local v, dec = 10 * r[7], 0
+      while dec < 6 and math.abs(v * 10 ^ dec - floor(v * 10 ^ dec + 0.5)) > 1e-6 do dec = dec + 1 end
+      big = string.format("%." .. dec .. "f", v)
+    end
+  end
+  local btn1Y = big and (btnY - bh2 - 6) or btnY
+  local stY = btn1Y - th - 4
   local col = phaseCol == "ok" and C.ok or phaseCol == "bad" and C.bad or C.warn
   if r[10] == "bits" then
     local cur = draft
@@ -1854,6 +1869,12 @@ local function drawEditor(W, H, y0, y1, s, ctx)
     button(x, btnY, w1, bh2, l, (l == "Save" and C.ok) or (hot and C.home) or C.dim, C)
     if hot then lcd.color(C.home) lcd.drawRectangle(x - 1, btnY - 1, w1 + 2, bh2 + 2) end
     box("btn", l, x, btnY, w1, bh2)
+    -- the ten-step buttons over - and +
+    if big and i <= 2 then
+      local id = i == 1 and "-10" or "+10"
+      button(x, btn1Y, w1, bh2, (i == 1 and "-" or "+") .. big, C.dim, C)
+      box("btn", id, x, btn1Y, w1, bh2)
+    end
   end
 end
 
@@ -2124,6 +2145,7 @@ function P.tap(s, x, y)
     if b.k == "bit" then bitCur = b.i toggleBit(b.i)
     elseif b.k == "btn" then
       if b.i == "-" then nudge(-1) elseif b.i == "+" then nudge(1)
+      elseif b.i == "-10" then nudge(-10) elseif b.i == "+10" then nudge(10)
       elseif b.i == "All on" then draft, phase = 0, ""
       elseif b.i == "All off" then draft, phase = -1, ""
       elseif b.i == "Back" then edit = nil

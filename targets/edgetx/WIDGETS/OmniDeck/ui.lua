@@ -16,7 +16,7 @@ local _ENV = OD_ENV or _ENV
     6 PARAMS - ArduPlane parameters over S.Port / F.Port (params.lua); only with "Params page" On
 ]]
 
-local VERSION = "1.0.0"
+local VERSION = "1.0.1a"
 
 local function need(name) return assert(loadfile(name))() end
 local T = need("telem.lua")
