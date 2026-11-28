@@ -31,13 +31,15 @@ VOICES = {
     # /WIDGETS/OmniDeck/audio/ and the longest clip (initializing.wav) a pack name can have
     # at most 4 letters. Christopher and Michelle are Ethos-only for that reason.
     'Guy': 'en-US-GuyNeural',
+    # Italian (Elsa; there is no Italian Aria). 4 letters for EdgeTX.
+    'ArIt': ('it-IT-ElsaNeural', 'phrases_it.psv'),
 }
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 PARALLEL = 4
 
 
-def phrases():
-    with open(os.path.join(HERE, 'phrases.psv'), encoding='utf8') as f:
+def phrases(fname='phrases.psv'):
+    with open(os.path.join(HERE, fname), encoding='utf8') as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith('#'):
@@ -68,12 +70,13 @@ async def make(voice, name, text, out, gate):
 async def main():
     root = sys.argv[1]
     names = sys.argv[2:] or list(VOICES)
-    items = list(phrases())
     gate = asyncio.Semaphore(PARALLEL)
     for pack in names:
+        voice, fname = VOICES[pack] if isinstance(VOICES[pack], tuple) else (VOICES[pack], 'phrases.psv')
+        items = list(phrases(fname))
         out = os.path.join(root, pack)
         os.makedirs(out, exist_ok=True)
-        await asyncio.gather(*(make(VOICES[pack], n, t, out, gate) for n, t in items))
+        await asyncio.gather(*(make(voice, n, t, out, gate) for n, t in items))
         print(pack, len(os.listdir(out)), 'files')
 
 

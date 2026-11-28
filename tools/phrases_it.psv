@@ -1,0 +1,115 @@
+# Italian phrases for the ArIt pack (it-IT-ElsaNeural). Same file names as phrases.psv.
+
+# flight modes
+manual|Modalità manuale
+circle|Modalità cerchio
+stabilize|Modalità stabilizzata
+training|Modalità addestramento
+acro|Modalità acro
+flybywirea|Modalità fly by wire A
+flybywireb|Modalità fly by wire B
+cruise|Modalità crociera
+autotune|Autotune attivato
+auto|Modalità automatica
+rtl|Ritorno a casa
+loiter|Modalità loiter
+takeoff|Modalità decollo
+avoidadsb|Modalità evita A D S B
+guided|Modalità guidata
+initializing|Inizializzazione
+qstabilize|Modalità Q stabilizzata
+qhover|Modalità Q hover
+qloiter|Modalità Q loiter
+qland|Modalità Q atterraggio
+qrtl|Modalità Q ritorno a casa
+qautotune|Modalità Q autotune
+qacro|Modalità Q acro
+thermal|Modalità termica
+loiterqland|Modalità loiter e Q atterraggio
+coursehold|Modalità mantenimento rotta
+autotrim|Modalità auto trim
+althold|Modalità mantenimento quota
+land|Modalità atterraggio
+drift|Modalità drift
+sport|Modalità sport
+flip|Modalità flip
+poshold|Modalità mantenimento posizione
+brake|Modalità frenata
+throw|Modalità lancio
+guidednogps|Modalità guidata senza GPS
+smartrtl|Modalità ritorno a casa intelligente
+flowhold|Modalità mantenimento posizione con flusso ottico
+follow|Modalità inseguimento
+zigzag|Modalità zigzag
+systemid|Modalità identificazione sistema
+autorotate|Modalità autorotazione
+autortl|Modalità ritorno a casa automatico
+turtle|Modalità turtle
+angle|Modalità angolo
+horizon|Modalità orizzonte
+anglehold|Modalità mantenimento angolo
+waypoint|Modalità waypoint
+geozone|Modalità geozona
+passthrough|Modalità pass through
+posholdfail|Mantenimento posizione fallito
+chirp|Modalità chirp
+airmode|Air mode
+
+# aircraft state
+armed|Motori armati
+disarmed|Motori disarmati
+failsafe|Failsafe
+ekf|Failsafe E K F
+gpsfix|GPS, fix 3D acquisito
+gpsnofix|Nessun GPS
+lowbat|Batteria scarica
+telemlost|Telemetria persa
+telemok|Telemetria ripristinata
+omniready|Telemetria Omni Deck pronta
+readytoarm|Pronto per armare
+lowvoltage|Tensione bassa
+critvolt|Tensione critica
+pullup|Terreno, cabrare
+notready|Non pronto per armare
+
+# battery
+bat50|Batteria al 50 percento
+bat40|Batteria al 40 percento
+bat30|Batteria al 30 percento
+bat25|Batteria al 25 percento
+bat20|Batteria al 20 percento
+bat15|Batteria al 15 percento
+bat10|Batteria al 10 percento
+bat5|Batteria al 5 percento
+
+# status messages
+14472699|Pre armamento, serve fix 3D
+13077757|Ritorno a casa intelligente non disponibile
+9811007|Varianza E K F
+8828501|Glitch GPS risolto
+1061733|Glitch GPS
+7210780|Paracadute rilasciato
+14608272|Piano di volo ricevuto
+6634944|Missione completata
+1050361|Geofence attivato
+6908206|Cambio modalità di volo fallito
+9430632|Autotune riuscito
+2131412|Autotune fallito
+1541806|Transizione completata
+7211373|Transizione avviata
+16455510|Transizione a VTOL completata
+13236108|Discesa di atterraggio avviata
+14444224|Atterraggio finale avviato
+13366422|Veleggiamento, nessuna salita
+13239693|Veleggiamento, deriva eccessiva
+1934808|Veleggiamento attivato
+2074081|Veleggiamento disattivato
+2397669|Veleggiamento, quota massima raggiunta
+2246114|Veleggiamento, quota minima raggiunta
+2860491|Veleggiamento, termica debole
+2262475|Comando raggiunto
+3466823|Waypoint raggiunto
+4597275|Waypoint superato
+3843641|Decollo completato
+1865209|Ritorno a casa intelligente disattivato
+4170928|Posizione home GPS acquisita
