@@ -2352,8 +2352,9 @@ if NATIVE:
             KEY('KEY_ENTER_BREAK')
             for _ in range(ri): KEY('KEY_ROTARY_RIGHT')
         # NAV THR: cruise throttle 1400 + 2 wheel steps, saved, read back, stored. Steps: 10 us on
-        # the X20, 1 us on the X18 (its "+10" button is 10 steps = 10 us, 2026-11-25)
-        _want = 1402 if W <= 480 else 1420
+        # every radio (2026-11-28: the X18's 1 us of 2026-11-25 dropped, its big buttons now show
+        # the real ten-step jump, +100)
+        _want = 1420
         _igoto('nav_fw_cruise_thr')
         for _ in range(60): step(0.2)
         assert _v('nav_fw_cruise_thr') == 1400, ('cruise thr read', _v('nav_fw_cruise_thr'))

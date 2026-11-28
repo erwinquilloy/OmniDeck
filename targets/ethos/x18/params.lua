@@ -1872,20 +1872,31 @@ local function drawEditor(W, H, y0, y1, s, ctx)
   lcd.color(col)
   lcd.drawText(bx + bw / 2, stY, phase, CENTERED)
   -- buttons: wheel + ENTER walk them on the check list (cursor past the 18 checks)
-  local function btnRow(labels, y)
+  -- show: the text drawn on a button when it differs from its id (the -10 / +10 ids)
+  local function btnRow(labels, y, show)
     local n = #labels
     local gap = 8
     local w1 = floor((bw - 16 - gap * (n - 1)) / n)
     for i, l in ipairs(labels) do
       local x = bx + 8 + (i - 1) * (w1 + gap)
       local hot = r[10] == "bits" and bitCur == #BITS + i
-      button(x, y, w1, bh2, l, (l == "Save" and C.ok) or (hot and C.home) or C.dim, C)
+      button(x, y, w1, bh2, show and show[l] or l, (l == "Save" and C.ok) or (hot and C.home) or C.dim, C)
       if hot then lcd.color(C.home) lcd.drawRectangle(x - 1, y - 1, w1 + 2, bh2 + 2) end
       box("btn", l, x, y, w1, bh2)
     end
   end
   if twoRows then
-    btnRow(r[9] and { "-", "+" } or { "-10", "-", "+", "+10" }, btn1Y)
+    -- the big buttons move ten steps (Marcin 2026-11-28): labelled with that jump in the row's
+    -- units (+500 on a 50 ms step, +5 on 0.5 m), so "+10" only shows where the step is 1
+    -- (inline, not a helper: the file is at Lua's 200-local limit)
+    local big
+    if r[7] then
+      local v, dec = 10 * r[7], 0
+      while dec < 6 and math.abs(v * 10 ^ dec - floor(v * 10 ^ dec + 0.5)) > 1e-6 do dec = dec + 1 end
+      big = string.format("%." .. dec .. "f", v)
+    end
+    btnRow(r[9] and { "-", "+" } or { "-10", "-", "+", "+10" }, btn1Y,
+      big and { ["-10"] = "-" .. big, ["+10"] = "+" .. big } or nil)
     btnRow({ "Back", "Save" }, btnY)
   else
     btnRow({ "All on", "All off", "Back", "Save" }, btnY)
